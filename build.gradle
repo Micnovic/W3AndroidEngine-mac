@@ -34,6 +34,8 @@ allprojects {
         google()
         gradlePluginPortal()
         maven { url = "https://jitpack.io" }
+        // LWJGL 2 rebuild with macOS arm64 natives (the 2015 original only ships x86_64).
+        maven { url = "https://maven.legacyfabric.net/" }
     }
 }
 
@@ -56,6 +58,10 @@ project(":desktop") {
         implementation project(":lua")
         runtimeOnly project(path: ":lua", configuration: "desktopNatives")
         api "com.badlogicgames.gdx:gdx-backend-lwjgl:$gdxVersion"
+        // Replace the stock LWJGL 2.9.3, whose macOS natives are x86_64-only, with the
+        // Legacy Fabric rebuild that also ships arm64 ("2.9.4" beats "2.9.3" in Gradle resolution).
+        api "org.lwjgl.lwjgl:lwjgl:2.9.4+legacyfabric.18"
+        api "org.lwjgl.lwjgl:lwjgl-platform:2.9.4+legacyfabric.18:natives-osx"
         api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
         api "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
         api "com.google.guava:guava:$guavaVersion"
