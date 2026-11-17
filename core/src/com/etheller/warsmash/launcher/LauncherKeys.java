@@ -4,6 +4,8 @@ package com.etheller.warsmash.launcher;
 public final class LauncherKeys {
 	public static final String PREFERENCES = "launcher";
 	public static final String KEY_EDITION = "edition";
+	public static final String EDITION_ROC = "roc";
+	public static final String EDITION_TFT = "tft";
 	public static final String KEY_MUSIC = "music";
 	public static final String KEY_SKIN = "skin";
 	public static final String KEY_ANIMATED = "animatedBackground";
@@ -40,5 +42,16 @@ public final class LauncherKeys {
 		{ LaunchRequest.CAMPAIGN_MAPS_CLASSIC, "CAMPAIGN_VERSION_CLASSIC", "CLASSIC" } };
 
 	private LauncherKeys() {
+	}
+
+	/**
+	 * The game version an edition plays as, which picks the skin's versioned fields such as the campaign list: 0 for
+	 * Reign of Chaos, 1 for The Frozen Throne; the fallback when the edition is not told.
+	 */
+	public static int editionGameVersion(final String edition, final int fallback) {
+		if (EDITION_ROC.equals(edition)) {
+			return 0;
+		}
+		return EDITION_TFT.equals(edition) ? 1 : fallback;
 	}
 }

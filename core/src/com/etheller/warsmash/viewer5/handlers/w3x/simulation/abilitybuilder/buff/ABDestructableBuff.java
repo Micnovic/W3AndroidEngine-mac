@@ -102,10 +102,6 @@ public class ABDestructableBuff implements CDestructableBuff {
 		this.level = level;
 	}
 	
-	public void setTimedLife(boolean timedLife) {
-		this.flags = timedLife ? this.flags | TIMEDLIFE : this.flags & ~TIMEDLIFE;
-	}
-
 	@Override
 	public boolean isTimedLife() {
 		return ((this.flags & TIMEDLIFE) != 0);

@@ -2,7 +2,10 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -31,6 +34,8 @@ public class MeleeUIMinimap {
 	private Function<String, Texture> altIconLoader;
 	private String loadedAltIconPath;
 	private Texture loadedAltIcon;
+	private Supplier<List<ScriptMinimapIcon>> scriptIcons;
+	private final Map<String, Texture> scriptIconTextures = new HashMap<>();
 	private static final float HERO_STEP = 0.01f;
 	private final Rectangle minimap;
 	private final Rectangle minimapFilledArea;
@@ -45,6 +50,7 @@ public class MeleeUIMinimap {
 	private int iconCount;
 	private byte polarity = -1;
 	private boolean visible = true;
+	private boolean scriptVisible = true;
 	private boolean terrainVisible = true;
 	private boolean maskedAreasPartiallyVisible;
 	private final float[] cameraFootprint = new float[8];
@@ -67,15 +73,37 @@ public class MeleeUIMinimap {
 		this.teamColors = teamColors;
 		this.minimap = displayArea;
 		this.specialIcons = specialIcons;
-		final float worldWidth = playableMapArea.getWidth();
-		final float worldHeight = playableMapArea.getHeight();
+		this.minimapFilledArea = new Rectangle();
+		layoutFilledArea();
+	}
+
+	private void layoutFilledArea() {
+		final float worldWidth = this.playableMapArea.getWidth();
+		final float worldHeight = this.playableMapArea.getHeight();
 		final float worldSize = Math.max(worldWidth, worldHeight);
 		final float minimapFilledWidth = (worldWidth / worldSize) * this.minimap.width;
 		final float minimapFilledHeight = (worldHeight / worldSize) * this.minimap.height;
-
-		this.minimapFilledArea = new Rectangle(this.minimap.x + ((this.minimap.width - minimapFilledWidth) / 2),
+		this.minimapFilledArea.set(this.minimap.x + ((this.minimap.width - minimapFilledWidth) / 2),
 				this.minimap.y + ((this.minimap.height - minimapFilledHeight) / 2), minimapFilledWidth,
 				minimapFilledHeight);
+	}
+
+	/** Where the minimap sits in the interface: a map script moves and resizes the minimap frame. */
+	public void setDisplayArea(final float x, final float y, final float width, final float height) {
+		if ((x != this.minimap.x) || (y != this.minimap.y) || (width != this.minimap.width)
+				|| (height != this.minimap.height)) {
+			this.minimap.set(x, y, width, height);
+			layoutFilledArea();
+		}
+	}
+
+	public Rectangle getDisplayArea(final Rectangle out) {
+		return out.set(this.minimap);
+	}
+
+	/** A map script's hiding of the minimap frame, apart from the interface's own showing and hiding. */
+	public void setScriptVisible(final boolean scriptVisible) {
+		this.scriptVisible = scriptVisible;
 	}
 
 	public void setObserverView(final boolean observerView) {
@@ -95,6 +123,35 @@ public class MeleeUIMinimap {
 	public void setAltIconSource(final Supplier<String> altIconPath, final Function<String, Texture> loader) {
 		this.altIconPath = altIconPath;
 		this.altIconLoader = loader;
+	}
+
+	/** The icons map scripts created (CreateMinimapIcon*); their textures come from the alternate icon's loader. */
+	public void setScriptIconSource(final Supplier<List<ScriptMinimapIcon>> scriptIcons) {
+		this.scriptIcons = scriptIcons;
+	}
+
+	private Texture scriptIconTexture(final String path) {
+		if ((path == null) || path.isEmpty() || (this.altIconLoader == null)) {
+			return null;
+		}
+		if (!this.scriptIconTextures.containsKey(path)) {
+			Texture texture = loadScriptIconTexture(path);
+			if ((texture == null) && (path.toLowerCase(Locale.ROOT).endsWith(".mdx") || path.toLowerCase(Locale.ROOT).endsWith(".mdl"))) {
+				// The Reforged data names the icon's model; the sprite batch can only draw the texture of the same name.
+				texture = loadScriptIconTexture(path.substring(0, path.length() - 4) + ".blp");
+			}
+			this.scriptIconTextures.put(path, texture);
+		}
+		return this.scriptIconTextures.get(path);
+	}
+
+	private Texture loadScriptIconTexture(final String path) {
+		try {
+			return this.altIconLoader.apply(path);
+		}
+		catch (final RuntimeException e) {
+			return null;
+		}
 	}
 
 	private Texture altIcon() {
@@ -118,7 +175,7 @@ public class MeleeUIMinimap {
 	public void render(final CSimulation game, final SpriteBatch batch, final Iterable<RenderUnit> units,
 			final List<RenderFogGhost> fogGhosts, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar,
 			final CPlayer player) {
-		if (!this.visible) {
+		if (!this.visible || !this.scriptVisible) {
 			return;
 		}
 		if (this.terrainVisible) {
@@ -224,7 +281,46 @@ public class MeleeUIMinimap {
 						ghost.getFakePlayerIndex(), ghost.getX(), ghost.getY(), player, FOGGED_ICON_SHADE);
 			}
 		}
+		addScriptIcons(game, pathingGrid, fogOfWar);
 		drawIcons(batch);
+	}
+
+	private void addScriptIcons(final CSimulation game, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar) {
+		final List<ScriptMinimapIcon> icons = this.scriptIcons == null ? null : this.scriptIcons.get();
+		if (icons == null) {
+			return;
+		}
+		for (int i = icons.size() - 1; i >= 0; i--) {
+			if (icons.get(i).isOrphaned()) {
+				icons.remove(i);
+			}
+		}
+		for (int i = 0, n = icons.size(); i < n; i++) {
+			final ScriptMinimapIcon icon = icons.get(i);
+			if (!icon.isVisible()) {
+				continue;
+			}
+			final float x = icon.getX();
+			final float y = icon.getY();
+			final CFogState fogState = fogOfWar.getFogState(game, pathingGrid.getFogOfWarIndexX(x),
+					pathingGrid.getFogOfWarIndexY(y));
+			if (!this.observerView && ((icon.getFogMask() & fogState.getId()) == 0)) {
+				continue;
+			}
+			Texture texture = scriptIconTexture(icon.getPath());
+			int dimensions = 16;
+			if (texture == null) {
+				texture = whiteTexture();
+				dimensions = 6;
+			}
+			final int offset = dimensions / 2;
+			addIcon(texture, 3,
+					(this.minimapFilledArea.x + (((x - this.playableMapArea.getX()) / this.playableMapArea.getWidth())
+							* this.minimapFilledArea.width)) - offset,
+					(this.minimapFilledArea.y + (((y - this.playableMapArea.getY()) / this.playableMapArea.getHeight())
+							* this.minimapFilledArea.height)) - offset,
+					dimensions, icon.getRed(), icon.getGreen(), icon.getBlue(), 1f);
+		}
 	}
 
 	private void addUnitIcon(final CSimulation game, final CUnit simUnit, final int landmarkKind,
@@ -335,7 +431,7 @@ public class MeleeUIMinimap {
 		final Texture[] textures = this.iconTextures;
 		final float[] values = this.iconValues;
 		final int count = this.iconCount;
-		for (int layer = 0; layer <= 2; layer++) {
+		for (int layer = 0; layer <= 3; layer++) {
 			for (int i = 0; i < count; i++) {
 				final Texture texture = textures[i];
 				if ((texture == null) || (values[i * ICON_VALUES] != layer)) {
@@ -421,7 +517,7 @@ public class MeleeUIMinimap {
 	}
 
 	public boolean containsMouse(final float x, final float y) {
-		return this.minimapFilledArea.contains(x, y);
+		return this.scriptVisible && this.minimapFilledArea.contains(x, y);
 	}
 
 	public void setVisible(final boolean visible) {

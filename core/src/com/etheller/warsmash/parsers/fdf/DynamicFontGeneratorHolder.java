@@ -1,6 +1,7 @@
 package com.etheller.warsmash.parsers.fdf;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import com.etheller.warsmash.datasources.DataSource;
@@ -31,6 +32,18 @@ public class DynamicFontGeneratorHolder {
 			fontGenerator = new FontGeneratorHolder(
 					new UnroundedAdvanceFontGenerator(new DataSourceFileHandle(this.dataSource, fontName)));
 			this.fontNameToGenerator.put(font, fontGenerator);
+		}
+		return fontGenerator;
+	}
+
+	/** The generator of a font file of the data (a map script's font), or null when there is no such file. */
+	public FontGeneratorHolder getFontGeneratorForFile(final String fileName) {
+		final String key = "file:" + fileName.toLowerCase(Locale.ROOT);
+		FontGeneratorHolder fontGenerator = this.fontNameToGenerator.get(key);
+		if ((fontGenerator == null) && this.dataSource.has(fileName)) {
+			fontGenerator = new FontGeneratorHolder(
+					new UnroundedAdvanceFontGenerator(new DataSourceFileHandle(this.dataSource, fileName)));
+			this.fontNameToGenerator.put(key, fontGenerator);
 		}
 		return fontGenerator;
 	}

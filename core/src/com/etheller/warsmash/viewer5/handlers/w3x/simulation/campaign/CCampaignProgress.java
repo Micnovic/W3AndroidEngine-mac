@@ -87,6 +87,12 @@ public final class CCampaignProgress {
 	private static final String STORE_FILE = "Campaigns.w3v";
 	private static final int STORE_VERSION = 6;
 	private static boolean loaded;
+	/** Test builds open every mission and campaign in the menus; the saved progress stays as it is. */
+	private static volatile boolean allMissionsOpen;
+
+	public static void setAllMissionsOpen(final boolean open) {
+		allMissionsOpen = open;
+	}
 
 	private CCampaignProgress() {
 	}
@@ -176,11 +182,11 @@ public final class CCampaignProgress {
 		}
 
 		public boolean isMissionAvailable(final int campaign, final int mission) {
-			return this.progress.missions.contains(missionKey(campaign, mission));
+			return allMissionsOpen || this.progress.missions.contains(missionKey(campaign, mission));
 		}
 
 		public boolean isCampaignAvailable(final int campaign) {
-			return this.progress.campaigns.contains(campaign);
+			return allMissionsOpen || this.progress.campaigns.contains(campaign);
 		}
 
 		public int getMenuCampaignIndex() {
@@ -265,7 +271,7 @@ public final class CCampaignProgress {
 	}
 
 	public static boolean isMissionAvailable(final int campaign, final int mission) {
-		return current().missions.contains(missionKey(campaign, mission));
+		return allMissionsOpen || current().missions.contains(missionKey(campaign, mission));
 	}
 
 	/** The player won a campaign's mission, as the campaign screens mark it. */
@@ -288,7 +294,7 @@ public final class CCampaignProgress {
 	}
 
 	public static boolean isCampaignAvailable(final int campaign) {
-		return current().campaigns.contains(campaign);
+		return allMissionsOpen || current().campaigns.contains(campaign);
 	}
 
 	public static void setOpeningCinematicAvailable(final int campaign, final boolean available) {
@@ -313,10 +319,6 @@ public final class CCampaignProgress {
 	public static void setTutorialCleared(final boolean cleared) {
 		current().tutorialCleared = cleared;
 		save();
-	}
-
-	public static boolean isTutorialCleared() {
-		return current().tutorialCleared;
 	}
 
 	public static void setMenuCampaignIndex(final int campaignIndex) {

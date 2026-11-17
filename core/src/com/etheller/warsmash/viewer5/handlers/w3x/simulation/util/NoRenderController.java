@@ -32,10 +32,6 @@ public class NoRenderController implements SimulationRenderController {
 		this.presenting = presenting;
 	}
 
-	public boolean isPresenting() {
-		return this.presenting;
-	}
-
 	@Override
 	public void spawnProjectileArt(final CProjectile projectile, final CUnit source,
 			final CUnitAttackSettings settings, final int bounceIndex) {

@@ -864,11 +864,29 @@ public class CPlayer extends CBasePlayer {
 	}
 
 	public void firePickUpItemEvents(final CUnit unit, final CItem item, final CSimulation game) {
+		firePickUpItemEvents(unit, item, game, null);
+	}
+
+	public void firePickUpItemEvents(final CUnit unit, final CItem item, final CSimulation game,
+			final CItem absorbingItem) {
 		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_PICKUP_ITEM);
 		if (eventList != null) {
 			for (final CPlayerEvent event : eventList) {
 				event.fire(unit, CommonTriggerExecutionScope.unitPickupItemScope(
-						JassGameEventsWar3.EVENT_PLAYER_UNIT_PICKUP_ITEM, event.getTrigger(), unit, item));
+						JassGameEventsWar3.EVENT_PLAYER_UNIT_PICKUP_ITEM, event.getTrigger(), unit, item,
+						absorbingItem));
+			}
+		}
+	}
+
+	public void fireStackItemEvents(final CUnit unit, final CItem source, final CItem target,
+			final int targetPreviousCharges) {
+		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_STACK_ITEM);
+		if (eventList != null) {
+			for (final CPlayerEvent event : eventList) {
+				event.fire(unit, CommonTriggerExecutionScope.unitStackItemScope(
+						JassGameEventsWar3.EVENT_PLAYER_UNIT_STACK_ITEM, event.getTrigger(), unit, source, target,
+						targetPreviousCharges));
 			}
 		}
 	}

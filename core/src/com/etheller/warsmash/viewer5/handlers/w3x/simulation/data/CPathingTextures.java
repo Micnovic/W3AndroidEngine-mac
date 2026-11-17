@@ -32,11 +32,13 @@ public final class CPathingTextures {
 		ArgbImage texture = this.textures.get(key);
 		if (texture == null) {
 			try {
+				// Footprints are simulation data: no graphics package may change them.
+				final DataSource data = this.dataSource.graphicsIndependent();
 				if (key.endsWith(".tga")) {
-					texture = TgaFile.readTGAPixels(path, this.dataSource.getResourceAsStream(path));
+					texture = TgaFile.readTGAPixels(path, data.getResourceAsStream(path));
 				}
 				else {
-					try (InputStream stream = this.dataSource.getResourceAsStream(path)) {
+					try (InputStream stream = data.getResourceAsStream(path)) {
 						texture = ImageUtils.getArgbImage(stream, path);
 					}
 				}

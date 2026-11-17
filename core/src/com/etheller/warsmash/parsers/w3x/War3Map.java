@@ -1,7 +1,6 @@
 package com.etheller.warsmash.parsers.w3x;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -10,7 +9,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.zip.Checksum;
 
-import org.apache.commons.io.IOUtils;
+import com.etheller.warsmash.util.FileReadChannel;
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
 
 import com.etheller.warsmash.datasources.CompoundDataSource;
@@ -70,15 +69,14 @@ public class War3Map implements DataSource {
 				this.internalMpqContentsDataSource = new FolderDataSource(mapFileName.toPath());
 			}
 			else {
-				// Slightly complex. Here's the theory:
-				// 1.) Copy map into RAM
-				// 2.) Setup a Data Source that will read assets
-				// from either the map or the game, giving the map priority.
-				SeekableByteChannel sbc;
-				try (InputStream mapStream = new FileInputStream(mapFileName)) {
-					final byte[] mapData = IOUtils.toByteArray(mapStream);
-					sbc = new SeekableInMemoryByteChannel(mapData);
+				// Read the archive straight from the file: a big map held in the heap is too much on Android.
+				final FileReadChannel sbc = new FileReadChannel(mapFileName);
+				try {
 					this.internalMpqContentsDataSource = new MpqDataSource(new MPQArchive(sbc), sbc);
+				}
+				catch (final IOException | MPQException | RuntimeException e) {
+					sbc.close();
+					throw e;
 				}
 			}
 			this.baseDataSource = new CompoundDataSource(Arrays.asList(dataSource, this.internalMpqContentsDataSource));
@@ -113,6 +111,10 @@ public class War3Map implements DataSource {
 	 */
 	public boolean hasJassScript() {
 		return has("Scripts\\war3map.j") || has("war3map.j");
+	}
+
+	public boolean hasLuaScript() {
+		return has("Scripts\\war3map.lua") || has("war3map.lua");
 	}
 
 	public War3MapW3e readEnvironment() throws IOException {
@@ -171,6 +173,13 @@ public class War3Map implements DataSource {
 		return changes;
 	}
 
+	/** The steps of {@link #readModifications(WTS)}, which the caller runs one after the other. */
+	public Warcraft3MapRuntimeObjectData.Loading readModificationsInSteps(final WTS preloadedWTS) throws IOException {
+		return Warcraft3MapRuntimeObjectData.loadInSteps(this.dataSource, true,
+				preloadedWTS != null ? preloadedWTS : Warcraft3MapRuntimeObjectData.loadWTS(this.dataSource),
+				Warcraft3MapRuntimeObjectData.loadCampaignWTS(this.dataSource), this.graphics);
+	}
+
 	@Override
 	public InputStream getResourceAsStream(final String filepath) throws IOException {
 		return this.dataSource.getResourceAsStream(filepath);
@@ -213,6 +222,16 @@ public class War3Map implements DataSource {
 	@Override
 	public void close() throws IOException {
 		this.internalMpqContentsDataSource.close();
+	}
+
+	@Override
+	public DataSource graphicsIndependent() {
+		return this.dataSource.graphicsIndependent();
+	}
+
+	/** Only the files of the map itself, which hold more than the game's of the same name. */
+	public DataSource getMapContentsDataSource() {
+		return this.internalMpqContentsDataSource;
 	}
 
 	public DataSource getCompoundDataSource() {

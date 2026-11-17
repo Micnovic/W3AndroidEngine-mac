@@ -4,7 +4,9 @@ import com.badlogic.gdx.math.Rectangle;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.HandleJassValue;
+import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.RealJassValue;
+import com.etheller.interpreter.ast.value.StringJassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.IntegerJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.ObjectJassValueVisitor;
@@ -199,6 +201,30 @@ final class CameraNatives extends CommonNatives {
 					meleeUI.getCameraManager().resetToGameCamera(forceDuration);
 					return null;
 				});
+		jassProgramVisitor.getJassNativeManager().createNative("SetCameraFieldControlledByInput",
+				(arguments, globalScope, triggerScope) -> {
+					final CCameraField field = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+					final boolean controlled = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
+					if (field != null) {
+						meleeUI.getCameraManager().setFieldControlledByInput(field, controlled);
+					}
+					return null;
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("GetCameraFieldControlledByInput",
+				(arguments, globalScope, triggerScope) -> {
+					final CCameraField field = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+					return BooleanJassValue
+							.of((field == null) || meleeUI.getCameraManager().isFieldControlledByInput(field));
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetCameraType",
+				(arguments, globalScope, triggerScope) -> {
+					meleeUI.getCameraManager()
+							.setCameraType(arguments.get(0).visit(IntegerJassValueVisitor.getInstance()));
+					return null;
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraGetCameraType",
+				(arguments, globalScope, triggerScope) -> IntegerJassValue
+						.of(meleeUI.getCameraManager().getCameraType()));
 		jassProgramVisitor.getJassNativeManager().createNative("BlzSetCameraAllowsHotkeyTargetLock",
 				(arguments, globalScope, triggerScope) -> {
 					this.cameraAllowsHotkeyTargetLock = arguments.get(0)
@@ -244,6 +270,38 @@ final class CameraNatives extends CommonNatives {
 						cameraSetup.setField(cameraField, fieldValue);
 					}
 					return null;
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetupSetLabel",
+				(arguments, globalScope, triggerScope) -> {
+					final CustomCameraSetup cameraSetup = nullable(arguments, 0,
+							ObjectJassValueVisitor.getInstance());
+					final String label = arguments.get(1).visit(StringJassValueVisitor.getInstance());
+					if (cameraSetup != null) {
+						cameraSetup.setLabel(label == null ? "" : label);
+					}
+					return null;
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetupGetLabel",
+				(arguments, globalScope, triggerScope) -> {
+					final CustomCameraSetup cameraSetup = nullable(arguments, 0,
+							ObjectJassValueVisitor.getInstance());
+					return new StringJassValue(cameraSetup == null ? "" : cameraSetup.getLabel());
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetupSetCameraType",
+				(arguments, globalScope, triggerScope) -> {
+					final CustomCameraSetup cameraSetup = nullable(arguments, 0,
+							ObjectJassValueVisitor.getInstance());
+					final int cameraType = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+					if (cameraSetup != null) {
+						cameraSetup.setCameraType(cameraType);
+					}
+					return null;
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetupGetCameraType",
+				(arguments, globalScope, triggerScope) -> {
+					final CustomCameraSetup cameraSetup = nullable(arguments, 0,
+							ObjectJassValueVisitor.getInstance());
+					return IntegerJassValue.of(cameraSetup == null ? 0 : cameraSetup.getCameraType());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CameraSetupSetDestPosition",
 				(arguments, globalScope, triggerScope) -> {

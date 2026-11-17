@@ -47,6 +47,25 @@ public class CompoundDataSource implements DataSource {
 	public void sourcesChanged() {
 		this.cache.clear();
 		this.sourceIndexCache.clear();
+		this.graphicsIndependent = null;
+	}
+
+	/** The sources without graphics packages, kept until the sources change; this when none has one. */
+	@Override
+	public DataSource graphicsIndependent() {
+		DataSource view = this.graphicsIndependent;
+		if (view == null) {
+			final List<DataSource> sources = new ArrayList<>(this.mpqList.size());
+			boolean changed = false;
+			for (final DataSource source : this.mpqList) {
+				final DataSource independent = source.graphicsIndependent();
+				changed |= independent != source;
+				sources.add(independent);
+			}
+			view = changed ? new CompoundDataSource(sources) : this;
+			this.graphicsIndependent = view;
+		}
+		return view;
 	}
 
 	/** The sources in their order of priority. */
@@ -54,6 +73,7 @@ public class CompoundDataSource implements DataSource {
 		return Collections.unmodifiableList(this.mpqList);
 	}
 
+	private volatile DataSource graphicsIndependent;
 	Map<String, File> cache = new HashMap<>();
 	// Index of the source that has each path, or MISSING. The sources do not change while this instance lives,
 	// and the same paths are asked for many times (prefixes, extensions, aliases).

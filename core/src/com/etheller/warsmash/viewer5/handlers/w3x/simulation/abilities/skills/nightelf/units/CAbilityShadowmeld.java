@@ -160,7 +160,4 @@ public class CAbilityShadowmeld extends CAbilityNoTargetSpellBase {
 		this.lastBlockedByDay = true;
 	}
 
-	public boolean isMelded() {
-		return this.melded;
-	}
 }

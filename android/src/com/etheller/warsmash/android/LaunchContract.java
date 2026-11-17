@@ -54,6 +54,8 @@ final class LaunchContract {
 	static final String EXTRA_PORTRAIT = "portrait";
 	/** The player profile the game is played with, by its name. */
 	static final String EXTRA_PROFILE = "profile";
+	/** The launcher's edition, whose campaign list the campaign number belongs to. */
+	static final String EXTRA_EDITION = "edition";
 	/** The game is the one of the process's LAN session. */
 	static final String EXTRA_LAN = "lan";
 	static final String EXTRA_TOKEN = "launchToken";
@@ -88,6 +90,7 @@ final class LaunchContract {
 			intent.putExtra(EXTRA_PORTRAIT, request.portrait);
 		}
 		putString(intent, EXTRA_PROFILE, request.profile);
+		putString(intent, EXTRA_EDITION, request.edition);
 		if (request.lan) {
 			intent.putExtra(EXTRA_LAN, true);
 		}
@@ -116,6 +119,7 @@ final class LaunchContract {
 		request.skin = intent.getStringExtra(EXTRA_SKIN);
 		request.portrait = intent.getIntExtra(EXTRA_PORTRAIT, 0);
 		request.profile = intent.getStringExtra(EXTRA_PROFILE);
+		request.edition = intent.getStringExtra(EXTRA_EDITION);
 		request.lan = intent.getBooleanExtra(EXTRA_LAN, false);
 		if (request.lan) {
 			request.lanSession = com.etheller.warsmash.lan.LanSessions.current();

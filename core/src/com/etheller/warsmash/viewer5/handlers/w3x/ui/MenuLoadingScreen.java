@@ -101,6 +101,7 @@ final class MenuLoadingScreen {
 	private String previewedBackground;
 	/** The part of the loading bar the menu build filled before the map itself loads. */
 	private float loadingBarStart;
+	private float loadingBarShown;
 	private boolean loadingMapDone;
 	private boolean continueTapped;
 	private float tapPulse;
@@ -303,7 +304,10 @@ final class MenuLoadingScreen {
 
 	/** The bar while the map loads: the part the preview filled, then the map loader's own progress. */
 	void setLoadingProgress(final float completionRatio) {
-		setLoadingRatio(this.loadingBarStart + ((1 - this.loadingBarStart) * completionRatio));
+		// The loader queues prewarm and preload tasks while it runs, which lowers its ratio; the bar never goes back.
+		this.loadingBarShown = Math.max(this.loadingBarShown,
+				this.loadingBarStart + ((1 - this.loadingBarStart) * completionRatio));
+		setLoadingRatio(this.loadingBarShown);
 	}
 
 	void clearReforgedLoading() {
@@ -369,6 +373,7 @@ final class MenuLoadingScreen {
 	/** Fills the screen for the map being loaded; a previewed screen goes on with its bar. */
 	void showMap(final War3Map map, final War3MapW3i mapInfo, final DataTable worldEditData, final WTS wts,
 			final int localPlayerIndex) {
+		this.loadingBarShown = 0;
 		final int campaignBackground = mapInfo.getCampaignBackground();
 		final String mapModel = mapLoadingModel(mapInfo);
 		if (mapModel != null) {
@@ -518,7 +523,7 @@ final class MenuLoadingScreen {
 	private void fillCampaignLoadingScreen(final DataTable worldEditData, final int campaignBackground,
 			final War3MapW3i mapInfo, final WTS wts) {
 		final Element loadingScreens = worldEditData.get("LoadingScreens");
-		final String key = String.format("%2s", Integer.toString(campaignBackground)).replace(' ', '0');
+		final String key = String.format(Locale.ROOT, "%2s", Integer.toString(campaignBackground)).replace(' ', '0');
 		fillLoadingScreen(loadingScreens.getField(key, 3), loadingScreens.getFieldValue(key, 2), mapInfo, wts);
 		if (this.reforgedLoadingScreens) {
 			this.reforgedLoading = ReforgedLoadingScreen.create(this.menu.dataSource,

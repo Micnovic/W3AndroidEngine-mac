@@ -32,12 +32,14 @@ import com.etheller.warsmash.WarsmashGdxMapScreen;
 import com.etheller.warsmash.WarsmashGdxMenuScreen;
 import com.etheller.warsmash.WarsmashGdxMultiScreenGame;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.datasources.GpuMemory;
 import com.etheller.warsmash.datasources.GraphicsSet;
 import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.launcher.CampaignChoice;
 import com.etheller.warsmash.launcher.CampaignResult;
 import com.etheller.warsmash.launcher.CustomContent;
+import com.etheller.warsmash.launcher.DataContentCheck;
 import com.etheller.warsmash.launcher.CustomGame;
 import com.etheller.warsmash.launcher.CustomKeys;
 import com.etheller.warsmash.launcher.DataFolderCheck;
@@ -49,6 +51,7 @@ import com.etheller.warsmash.input.touch.TouchStyle;
 import com.etheller.warsmash.launcher.EngineSettings;
 import com.etheller.warsmash.launcher.GameCatalog;
 import com.etheller.warsmash.launcher.GameResult;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.MapListCache;
 import com.etheller.warsmash.launcher.MapSections;
 import com.etheller.warsmash.lan.LanSessions;
@@ -64,6 +67,7 @@ import com.etheller.warsmash.launcher.LauncherOptions;
 import com.etheller.warsmash.launcher.LauncherStore;
 import com.etheller.warsmash.launcher.LauncherStrings;
 import com.etheller.warsmash.launcher.Profiles;
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.launcher.SharedDataSource;
 import com.etheller.warsmash.launcher.ResultMotion;
 import com.etheller.warsmash.launcher.SkinArt;
@@ -165,6 +169,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	Profiles profiles;
 	GameCatalog catalog;
 	private GameCatalog.Campaigns campaigns;
+	/** What the game data lacks of scripts and maps; null until read or when it cannot be. */
+	private List<DataContentCheck.Problem> dataContent;
 	List<GameCatalog.MapEntry> maps;
 	GameCatalog.MapDetails mapDetails;
 	TextureRegion minimap;
@@ -282,6 +288,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		this.catalog = new GameCatalog(this.ini, GameCatalog.dataKey(this.ini), this.saves,
 				() -> GameCatalog.currentProfile(this.engineStore), new File(com.etheller.warsmash.desktop.DesktopLauncher.MAP_LIST_FILE),
 				Gdx.app::postRunnable, this.data);
+		this.catalog.setEdition(roc() ? LauncherKeys.EDITION_ROC : LauncherKeys.EDITION_TFT);
 		readCatalog();
 		this.lan.dataOpened();
 		try {
@@ -294,12 +301,24 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		updateMusic();
 	}
 
+	/** The campaigns follow the edition in game data that list them per edition. */
+	private void editionChanged() {
+		this.catalog.setEdition(roc() ? LauncherKeys.EDITION_ROC : LauncherKeys.EDITION_TFT);
+		this.campaigns = null;
+		this.dataContent = null;
+		this.profileProgress = null;
+		this.catalog.campaigns(found -> this.campaigns = found);
+		this.catalog.dataContent(found -> this.dataContent = found);
+	}
+
 	private void readCatalog() {
 		this.campaigns = null;
 		this.maps = null;
 		this.saveList = null;
 		this.mapDetails = null;
+		this.dataContent = null;
 		this.catalog.campaigns(found -> this.campaigns = found);
+		this.catalog.dataContent(found -> this.dataContent = found);
 		this.catalog.maps(found -> this.maps = found);
 		this.catalog.saves(found -> this.saveList = found);
 		this.replayList = null;
@@ -759,6 +778,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			playClick();
 			if (home) {
 				this.preferences.edit().putString(LauncherKeys.KEY_EDITION, roc() ? "tft" : "roc").apply();
+				editionChanged();
 				updateMusic();
 			}
 			else {
@@ -1076,7 +1096,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final float hs = t ? 30 : 20;
 		final float ns = t ? 50 : 32;
 		final float a = Math.min(rowH * 0.62f, 72);
-		final int state = muted ? 0 : g.hit(id, x, y, w, rowH);
+		final int state = muted && (id == null) ? 0 : g.hit(id, x, y, w, rowH);
 		if ((state & Gui.HOVER) != 0) {
 			g.image(this.art.image(SkinArt.ROW_HIGHLIGHT), x, y, w, rowH, 0.5f);
 		}
@@ -1331,17 +1351,20 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			final int index = row[1] == null ? -1 : (Integer) row[1];
 			final boolean isChosen = index == chosen;
 			final boolean clicked;
+			final MapIssue issue = index < 0 ? MapIssue.NONE : missionIssue(entry, index);
 			if (reforged) {
 				final boolean won = (index >= 0) && CampaignCatalog.isMissionWon(entry, index, progress);
 				clicked = chapterRow("m" + index + mission.getMissionName(), mission, isChosen,
 						index < 0 ? SkinArt.CHAPTER_CINEMATIC
 								: CampaignResult.chapterIcon(won,
 										progress.getMissionWonDifficulty(entry.getNumber(), index)),
-						x, y, w, rowH);
+						issue, x, y, w, rowH);
 			}
 			else {
-				clicked = campaignRow("m" + index + mission.getMissionName(), mission.getHeader(),
-						mission.getMissionName(), isChosen, x, y, w, rowH);
+				// A mission whose map the game cannot play shows the reason in the header's place, greyed out.
+				clicked = campaignRow("m" + index + mission.getMissionName(),
+						issue != MapIssue.NONE ? s(issue.tag) : mission.getHeader(), mission.getMissionName(),
+						isChosen, issue != MapIssue.NONE, x, y, w, rowH);
 			}
 			if (clicked) {
 				playClick();
@@ -1643,20 +1666,24 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 	/** A Reforged chapter row: its icon (cinematic, won or not yet), the chapter's kind in gold and its name. */
 	private boolean chapterRow(final Object id, final CampaignMission mission, final boolean chosen, final String icon,
-			final float x, final float y, final float w, final float rowH) {
+			final MapIssue issue, final float x, final float y, final float w, final float rowH) {
 		final Gui g = this.gui;
 		final int state = g.hit(id, x, y, w, rowH);
 		if ((state & Gui.HOVER) != 0) {
 			g.image(this.art.image(SkinArt.ROW_HIGHLIGHT), x, y, w, rowH, 0.5f);
 		}
 		final float a = rowH * 0.62f;
-		g.image(icon, x + (rowH * 0.12f), y + ((rowH - a) / 2), a, a);
+		final boolean muted = issue != MapIssue.NONE;
+		final float alpha = muted ? 0.5f : 1;
+		g.image(icon, x + (rowH * 0.12f), y + ((rowH - a) / 2), a, a, alpha);
 		final float tx = (rowH * 0.24f) + a;
-		final String header = glue(mission.getHeader(), mission.getHeader());
+		final String header = muted ? s(issue.tag) : glue(mission.getHeader(), mission.getHeader());
 		final String name = glue(mission.getMissionName(), mission.getMissionName());
-		g.text(header, x + tx, y + (rowH * 0.12f), w - tx, rowH * 0.3f, rowH * 0.22f, g.palette.gold, Align.left);
+		g.text(header, x + tx, y + (rowH * 0.12f), w - tx, rowH * 0.3f, rowH * 0.22f,
+				muted ? Gui.muted(g.palette.gold) : g.palette.gold, Align.left);
+		final int nameColour = chosen ? g.palette.gold : g.palette.text;
 		final boolean cut = g.text(name, x + tx, y + (rowH * 0.42f), w - tx, rowH * 0.42f, rowH * 0.32f,
-				chosen ? g.palette.gold : g.palette.text, Align.left);
+				muted ? Gui.muted(nameColour) : nameColour, Align.left);
 		if (cut && ((state & Gui.HOVER) != 0)) {
 			g.tip(GlueText.plain(name));
 		}
@@ -1678,7 +1705,18 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		}));
 	}
 
+	private MapIssue missionIssue(final CampaignCatalog.Entry entry, final int mission) {
+		return this.campaigns.issue(entry, mission, this.profiles.campaignMaps(this.profiles.current()));
+	}
+
 	private void launchMission(final CampaignCatalog.Entry entry, final int mission, final Page returnPage) {
+		final MapIssue issue = missionIssue(entry, mission);
+		if (issue != MapIssue.NONE) {
+			this.messageTitle = s("game_not_started");
+			this.messageLine = s(issue.message);
+			this.dialog = Dialog.MESSAGE;
+			return;
+		}
 		this.preferences.edit().putInt(LauncherKeys.KEY_CAMPAIGN, entry.getNumber())
 				.putInt(LauncherKeys.KEY_MISSION, mission).apply();
 		launchGame(LaunchRequest.mission(this.campaigns.catalog, entry, mission,
@@ -1844,9 +1882,10 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				g.text(Integer.toString(entry.players), x + 8, rowY + ((rowH - icon) / 2), icon, icon, icon * 0.5f,
 						g.palette.gold, Align.center);
 			}
-			final String label = entry.label != null ? entry.label : entry.name;
+			final String label = (entry.label != null ? entry.label : entry.name)
+					+ (entry.issue == MapIssue.NONE ? "" : " \u00b7 " + s(entry.issue.tag));
 			final boolean cut = g.text(label, x + 8 + icon + 24, rowY, w - icon - 40, rowH, line * 0.56f,
-					g.palette.text, Align.left);
+					entry.issue == MapIssue.NONE ? g.palette.text : g.palette.text2, Align.left);
 			if (cut && ((state & Gui.HOVER) != 0)) {
 				g.tip(GlueText.plain(label));
 			}
@@ -2026,6 +2065,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private void startCustom() {
 		final GameCatalog.MapDetails details = this.mapDetails;
 		if (details == null) {
+			return;
+		}
+		if (details.issue != MapIssue.NONE) {
+			this.messageTitle = s("game_not_started");
+			this.messageLine = s(details.issue.message);
+			this.dialog = Dialog.MESSAGE;
 			return;
 		}
 		this.preferences.edit().putInt(LauncherKeys.KEY_LAUNCH_RACE, this.lobby.playerRace()).apply();
@@ -2631,6 +2676,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_launcher"), versionLine()));
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_engine"), s("options_engine_value")));
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_license"), s("options_license_value")));
+			rows.add(sourceRow(rowY, index, x, w, controlX));
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_art"), s("options_art_value")));
 			rows.add(checkRow(rowY, index, x, w, controlX, s("options_check_updates"),
 					this.preferences.getBoolean(LauncherKeys.KEY_UPDATE_CHECK, true),
@@ -2767,6 +2813,21 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			}
 			this.gui.text(high, controlX + lowW + sliderW + (b.tablet ? 20 : 12), rowY[0], b.tablet ? 240 : 140, b.rowH,
 					b.body * 0.85f, this.gui.palette.text, Align.left);
+			rowY[0] += b.rowH;
+		};
+	}
+
+	private Runnable sourceRow(final float[] rowY, final int[] index, final float x, final float w,
+			final float controlX) {
+		final int at = index[0]++;
+		return () -> {
+			final LauncherBoard b = this.board;
+			optionRow(x, rowY[0], w, at, s("options_source_code"));
+			if (this.gui.button("sourceLink", ProjectInfo.SOURCE_NAME, controlX, rowY[0] + 8, 640, b.rowH - 16,
+					b.tablet ? 32 : 24, Gui.TONE_NORMAL)) {
+				playClick();
+				Gdx.net.openURI(ProjectInfo.SOURCE_URL);
+			}
 			rowY[0] += b.rowH;
 		};
 	}
@@ -3306,10 +3367,31 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				folder == null ? "" : folder.getAbsolutePath()));
 		rows.add(infoRow(rowY, index, x, w, controlX, s("options_version"), dataVersion()));
 		final String locale = folder == null ? "" : DataFolderCheck.locale(kind, folder);
-		rows.add(infoRow(rowY, index, x, w, controlX, s("options_locale"),
-				locale.isEmpty() ? s("options_not_stated") : locale));
+		final List<String> languages = folder == null ? new ArrayList<>() : DataFolderCheck.locales(kind, folder);
+		if (languages.size() > 1) {
+			final String[] names = new String[languages.size()];
+			for (int i = 0; i < names.length; i++) {
+				names[i] = GameLanguage.displayName(languages.get(i));
+			}
+			final String current = GameLanguage.configured(this.ini).isEmpty() ? locale : GameLanguage.configured(this.ini);
+			rows.add(radioRow(rowY, index, x, w, controlX, s("options_language"), names, null,
+					Math.max(0, languages.indexOf(current)), choice -> useLanguage(languages.get(choice))));
+		}
+		else {
+			rows.add(infoRow(rowY, index, x, w, controlX, s("options_locale"),
+					locale.isEmpty() ? s("options_not_stated") : locale));
+		}
 		if (!casc && (folder != null)) {
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_files"), filesText(kind, folder)));
+		}
+		final List<DataContentCheck.Problem> content = this.dataContent;
+		if (content != null) {
+			final List<String> lacking = new ArrayList<>();
+			for (final DataContentCheck.Problem problem : content) {
+				lacking.add(s(problem.message));
+			}
+			rows.add(infoRow(rowY, index, x, w, controlX, s("options_content"),
+					lacking.isEmpty() ? s("options_content_complete") : "\u2717 " + String.join(" \u00b7 ", lacking)));
 		}
 		rows.add(infoRow(rowY, index, x, w, controlX, s("options_reforged_ui"),
 				s(this.data.has("webui\\common\\homescreen.jpg") ? "options_found" : "options_missing")));
@@ -3406,6 +3488,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		}
 		new EngineSettings(this.saves, this.profiles.current(), this.iniFile)
 				.setCustomFolder(folder == null ? null : folder.getAbsoluteFile());
+		reopen(com.etheller.warsmash.desktop.DesktopLauncher.loadWarsmashIni(this.iniFile.getPath()), this.iniFile);
+	}
+
+	/** Names the game language in the engine configuration and reads the game data again in it. */
+	private void useLanguage(final String locale) {
+		new EngineSettings(this.saves, this.profiles.current(), this.iniFile).setLanguage(locale);
 		reopen(com.etheller.warsmash.desktop.DesktopLauncher.loadWarsmashIni(this.iniFile.getPath()), this.iniFile);
 	}
 
@@ -4362,6 +4450,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		this.launching = true;
 		playClick();
 		request.profile = this.profiles.current();
+		request.edition = roc() ? LauncherKeys.EDITION_ROC : LauncherKeys.EDITION_TFT;
 		request.skin = this.art.reforged ? SkinArt.REFORGED_SKIN : SkinArt.CLASSIC_SKIN;
 		if (this.art.reforged) {
 			request.portrait = this.profiles.portrait(request.profile) + 1;
@@ -4397,6 +4486,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				final GameResult failed = new GameResult();
 				failed.result = "error";
 				failed.map = request.mapFile;
+				failed.reason = menu.mapLoadFailureReason();
 				Gdx.app.postRunnable(() -> gameEnded(failed));
 			}
 		});
@@ -4475,7 +4565,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		}
 		else if (returned.failed()) {
 			this.messageTitle = s("game_not_started");
-			this.messageLine = returned.map == null ? "" : returned.map;
+			this.messageLine = returned.failureText();
 			this.dialog = Dialog.MESSAGE;
 		}
 	}

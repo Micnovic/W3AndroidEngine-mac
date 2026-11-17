@@ -192,14 +192,6 @@ public class War3MapConfig implements CPlayerAPI {
 		return this.creatureDensity;
 	}
 
-	public float getStartLocationX(final int startLocIndex) {
-		return this.startLocations[startLocIndex].getX();
-	}
-
-	public float getStartLocationY(final int startLocIndex) {
-		return this.startLocations[startLocIndex].getY();
-	}
-
 	@Override
 	public CBasePlayer getPlayer(final int index) {
 		return this.players[index];

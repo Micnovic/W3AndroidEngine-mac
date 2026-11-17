@@ -402,6 +402,9 @@ final class MeleeUIInfoPanel {
 					if (MeleeUIInfoPanel.this.ui.activeCommand != null) {
 						MeleeUIInfoPanel.this.ui.commands.useActiveCommandOnUnit(MeleeUIInput.isShiftDown(), clickUnit);
 					}
+					else if (!MeleeUIInfoPanel.this.ui.war3MapViewer.scriptUiState.isSelectionEnabled()) {
+						return;
+					}
 					else if (clickUnit == MeleeUIInfoPanel.this.ui.selectedUnit) {
 						final List<RenderWidget> newSelection = Arrays.asList(MeleeUIInfoPanel.this.ui.selectedUnit);
 						MeleeUIInfoPanel.this.ui.input.selectWidgets(newSelection);
@@ -1182,7 +1185,7 @@ final class MeleeUIInfoPanel {
 					final int heroLevel = heroData.getHeroLevel();
 					this.ui.simpleClassValue.setVisible(true);
 					this.ui.rootFrame.setText(this.ui.simpleClassValue,
-							String.format(infopanelLevelClass, heroLevel, unitTypeName));
+							String.format(Locale.ROOT, infopanelLevelClass, heroLevel, unitTypeName));
 					this.ui.rootFrame.setText(this.ui.simpleNameValue, heroData.getProperName());
 					// An illusion hero shows its timed life bar in place of the experience bar.
 					this.ui.simpleHeroLevelBar.setVisible(!simulationUnit.isIllusion());
@@ -1372,6 +1375,11 @@ final class MeleeUIInfoPanel {
 
 	/** The unit portrait's place in the console, in interface coordinates. */
 	Rectangle portraitBounds(final Rectangle out) {
+		final Rectangle moved = this.ui.originFrames.scriptPortraitBounds();
+		return moved != null ? out.set(moved) : defaultPortraitBounds(out);
+	}
+
+	Rectangle defaultPortraitBounds(final Rectangle out) {
 		return out.set(422 * this.ui.widthRatioCorrection, 57 * this.ui.heightRatioCorrection,
 				167 * this.ui.widthRatioCorrection, 170 * this.ui.heightRatioCorrection);
 	}
@@ -1388,7 +1396,7 @@ final class MeleeUIInfoPanel {
 			return;
 		}
 		else {
-			this.ui.portrait.portraitScene.show = true;
+			this.ui.portrait.portraitScene.show = this.ui.originFrames.isPortraitScriptVisible();
 			final Rectangle bounds = portraitBounds(this.portraitBoundsTemp);
 			this.projectionTemp1.x = bounds.x;
 			this.projectionTemp1.y = bounds.y;

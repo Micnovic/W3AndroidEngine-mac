@@ -56,12 +56,6 @@ public class AbilityBuilderSpecialDisplayFields {
 			this.alternateUnitId = parent.alternateUnitId;
 	}
 	
-	public ABBooleanCallback getShowOnAndOffIcons() {
-		return showOnAndOffIcons;
-	}
-	public void setShowOnAndOffIcons(ABBooleanCallback showOnAndOffIcons) {
-		this.showOnAndOffIcons = showOnAndOffIcons;
-	}
 	public ABIntegerCallback getFoodCost() {
 		return foodCost;
 	}
@@ -83,63 +77,33 @@ public class AbilityBuilderSpecialDisplayFields {
 	public ABBooleanCallback getHideAreaCursor() {
 		return hideAreaCursor;
 	}
-	public void setHideAreaCursor(ABBooleanCallback hideAreaCursor) {
-		this.hideAreaCursor = hideAreaCursor;
-	}
 	public ABFloatCallback getAreaCursorOverride() {
 		return areaCursorOverride;
-	}
-	public void setAreaCursorOverride(ABFloatCallback areaCursorOverride) {
-		this.areaCursorOverride = areaCursorOverride;
 	}
 	public ABBooleanCallback getInstantCast() {
 		return instantCast;
 	}
-	public void setInstantCast(ABBooleanCallback instantCast) {
-		this.instantCast = instantCast;
-	}
 	public ABBooleanCallback getCastlessNoTarget() {
 		return castlessNoTarget;
-	}
-	public void setCastlessNoTarget(ABBooleanCallback castlessNoTarget) {
-		this.castlessNoTarget = castlessNoTarget;
 	}
 	public ABBooleanCallback getToggleable() {
 		return toggleable;
 	}
-	public void setToggleable(ABBooleanCallback toggleable) {
-		this.toggleable = toggleable;
-	}
 	public ABBooleanCallback getCastToggleOff() {
 		return castToggleOff;
-	}
-	public void setCastToggleOff(ABBooleanCallback castToggleOff) {
-		this.castToggleOff = castToggleOff;
 	}
 	public ABBooleanCallback getSeparateOnAndOff() {
 		return separateOnAndOff;
 	}
-	public void setSeparateOnAndOff(ABBooleanCallback separateOnAndOff) {
-		this.separateOnAndOff = separateOnAndOff;
-	}
 	public ABIDCallback getAlternateUnitId() {
 		return alternateUnitId;
-	}
-	public void setAlternateUnitId(ABIDCallback alternateUnitId) {
-		this.alternateUnitId = alternateUnitId;
 	}
 
 	public ABBooleanCallback getIsMenu() {
 		return this.isMenu;
 	}
-	public void setIsMenu(ABBooleanCallback isMenu) {
-		this.isMenu = isMenu;
-	}
 	public ABIntegerCallback getMenuId() {
 		return this.menuId;
-	}
-	public void setMenuId(ABIntegerCallback menuId) {
-		this.menuId = menuId;
 	}
 
 }

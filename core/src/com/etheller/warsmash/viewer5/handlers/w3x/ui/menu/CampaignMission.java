@@ -2,6 +2,7 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui.menu;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public class CampaignMission {
 	private final String header;
@@ -19,6 +20,22 @@ public class CampaignMission {
 		this.missionName = missionName;
 		this.mapFilename = mapFilename;
 		this.movies = movies;
+	}
+
+	/**
+	 * @return whether a mission entry names a model rather than a map: the campaign's in-engine cinematic (the fight of
+	 *         Arthas and Illidan ends the Frozen Throne's Undead campaign this way)
+	 */
+	public static boolean isModelEntry(final String mapFilename) {
+		if (mapFilename == null) {
+			return false;
+		}
+		final String lower = mapFilename.toLowerCase(Locale.ROOT);
+		return lower.endsWith(".mdl") || lower.endsWith(".mdx");
+	}
+
+	public boolean isModel() {
+		return isModelEntry(this.mapFilename);
 	}
 
 	public String getHeader() {

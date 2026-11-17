@@ -12,6 +12,7 @@ import java.util.Set;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.common.FetchDataTypeName;
+import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.parsers.w3x.War3Map;
 import com.etheller.warsmash.parsers.w3x.objectdata.Warcraft3MapObjectData;
 import com.etheller.warsmash.units.DataTable;
@@ -111,38 +112,10 @@ final class MapViewerLoading {
 				viewer.animSoundsTable.readSLK(stream);
 			}
 		}
-		viewer.miscData = new DataTable(worldEditStrings);
-		try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("UI\\MiscData.txt")) {
-			viewer.miscData.readTXT(miscDataTxtStream, true);
-		}
-		try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("Units\\MiscData.txt")) {
-			viewer.miscData.readTXT(miscDataTxtStream, true);
-		}
-		try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("Units\\MiscGame.txt")) {
-			viewer.miscData.readTXT(miscDataTxtStream, true);
-		}
-		try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("UI\\MiscUI.txt")) {
-			viewer.miscData.readTXT(miscDataTxtStream, true);
-		}
-		try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("UI\\SoundInfo\\MiscData.txt")) {
-			viewer.miscData.readTXT(miscDataTxtStream, true);
-		}
-		if (viewer.dataSource.has("war3mapMisc.txt")) {
-			try (InputStream miscDataTxtStream = viewer.dataSource.getResourceAsStream("war3mapMisc.txt")) {
-				viewer.miscData.readTXT(miscDataTxtStream, true);
-			}
-		}
+		viewer.miscData = readMiscData(viewer.dataSource, worldEditStrings);
+		viewer.simulationMiscData = viewer.dataSource.graphicsIndependent() == viewer.dataSource ? viewer.miscData
+				: readMiscData(viewer.dataSource.graphicsIndependent(), worldEditStrings);
 		viewer.misc = viewer.miscData.get("Misc");
-		// TODO Find the upkeep constants inside the assets files ?????
-		if (!viewer.misc.hasField("UpkeepUsage")) {
-			viewer.misc.setField("UpkeepUsage", "50,80,10000,10000,10000,10000,10000,10000,10000,10000");
-		}
-		if (!viewer.misc.hasField("UpkeepGoldTax")) {
-			viewer.misc.setField("UpkeepGoldTax", "0.00,0.30,0.60,0.60,0.60,0.60,0.60,0.60,0.60,0.60");
-		}
-		if (!viewer.misc.hasField("UpkeepLumberTax")) {
-			viewer.misc.setField("UpkeepLumberTax", "0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00");
-		}
 		final Element zFogElement = viewer.miscData.get("DefaultZFog");
 		if (zFogElement != null) {
 			viewer.defaultFogSettings = FogSettings.parse(zFogElement, viewer.getGameData().getGameVersion());
@@ -195,6 +168,37 @@ final class MapViewerLoading {
 				viewer.uiSoundsTable.readSLK(miscDataTxtStream);
 			}
 		}
+	}
+
+	/**
+	 * The game's constants as these data have them. The simulation's come from the data without graphics packages, so
+	 * every graphics set plays by the same ones.
+	 */
+	static DataTable readMiscData(final DataSource data, final WorldEditStrings worldEditStrings) throws IOException {
+		final DataTable miscData = new DataTable(worldEditStrings);
+		for (final String file : new String[] { "UI\\MiscData.txt", "Units\\MiscData.txt", "Units\\MiscGame.txt",
+				"UI\\MiscUI.txt", "UI\\SoundInfo\\MiscData.txt" }) {
+			try (InputStream stream = data.getResourceAsStream(file)) {
+				miscData.readTXT(stream, true);
+			}
+		}
+		if (data.has("war3mapMisc.txt")) {
+			try (InputStream stream = data.getResourceAsStream("war3mapMisc.txt")) {
+				miscData.readTXT(stream, true);
+			}
+		}
+		final Element misc = miscData.get("Misc");
+		// TODO Find the upkeep constants inside the assets files ?????
+		if (!misc.hasField("UpkeepUsage")) {
+			misc.setField("UpkeepUsage", "50,80,10000,10000,10000,10000,10000,10000,10000,10000");
+		}
+		if (!misc.hasField("UpkeepGoldTax")) {
+			misc.setField("UpkeepGoldTax", "0.00,0.30,0.60,0.60,0.60,0.60,0.60,0.60,0.60,0.60");
+		}
+		if (!misc.hasField("UpkeepLumberTax")) {
+			misc.setField("UpkeepLumberTax", "0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00");
+		}
+		return miscData;
 	}
 
 	static TextTagConfig parseTextTagConfig(final Element misc, final String name) {

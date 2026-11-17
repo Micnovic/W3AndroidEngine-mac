@@ -251,10 +251,6 @@ public class CWorldCollision {
 		});
 	}
 
-	public void enumBuildingsInRect(final Rectangle rect, final QuadtreeIntersector<CUnit> callback) {
-		this.buildingUnitCollision.intersect(rect, callback);
-	}
-
 	public void enumBuildingsAtPoint(final float x, final float y, final QuadtreeIntersector<CUnit> callback) {
 		this.buildingUnitCollision.intersect(x, y, callback);
 	}

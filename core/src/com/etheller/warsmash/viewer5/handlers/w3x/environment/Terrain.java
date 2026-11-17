@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 
-import org.apache.commons.io.IOUtils;
+import com.etheller.warsmash.util.StreamBytes;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
@@ -1026,10 +1026,7 @@ public class Terrain {
 		gl.glUniform1i(this.groundShader.getUniformLocation("lightTexture"), 21);
 		gl.glUniform1f(this.groundShader.getUniformLocation("lightCount"), lightManager.getTerrainLightCount());
 		gl.glUniform1f(this.groundShader.getUniformLocation("lightTextureHeight"), unitLightsTexture.getHeight());
-		this.groundShader.setUniformf("u_fogColor", this.viewer.worldScene.fogSettings.color);
-		this.groundShader.setUniformf("u_fogParams", this.viewer.worldScene.fogSettings.style.ordinal(),
-				this.viewer.worldScene.fogSettings.start, this.viewer.worldScene.fogSettings.end,
-				this.viewer.worldScene.fogSettings.density);
+		this.viewer.worldScene.fogSettings.uploadUniforms(this.groundShader);
 
 		gl.glUniformMatrix4fv(this.groundShader.getUniformLocation("DepthBiasMVP"), 1, false,
 				dynamicShadowManager.getDepthBiasMVP().val, 0);
@@ -1144,10 +1141,7 @@ public class Terrain {
 		gl.glUniform1i(shader.getUniformLocation("u_lightTexture"), 21);
 		gl.glUniform1f(shader.getUniformLocation("u_lightCount"), lightManager.getTerrainLightCount());
 		gl.glUniform1f(shader.getUniformLocation("u_lightTextureHeight"), terrainLightsTexture.getHeight());
-		shader.setUniformf("u_fogColor", this.viewer.worldScene.fogSettings.color);
-		shader.setUniformf("u_fogParams", this.viewer.worldScene.fogSettings.style.ordinal(),
-				this.viewer.worldScene.fogSettings.start, this.viewer.worldScene.fogSettings.end,
-				this.viewer.worldScene.fogSettings.density);
+		this.viewer.worldScene.fogSettings.uploadUniforms(shader);
 
 		// Render the cliffs
 		for (final SplatModel splat : this.uberSplatModelsList) {
@@ -1186,10 +1180,7 @@ public class Terrain {
 		this.waterShader.setUniformi("lightTexture", 3);
 		this.waterShader.setUniformf("lightCount", lightManager.getTerrainLightCount());
 		this.waterShader.setUniformf("lightTextureHeight", terrainLightsTexture.getHeight());
-		this.waterShader.setUniformf("u_fogColor", this.viewer.worldScene.fogSettings.color);
-		this.waterShader.setUniformf("u_fogParams", this.viewer.worldScene.fogSettings.style.ordinal(),
-				this.viewer.worldScene.fogSettings.start, this.viewer.worldScene.fogSettings.end,
-				this.viewer.worldScene.fogSettings.density);
+		this.viewer.worldScene.fogSettings.uploadUniforms(this.waterShader);
 
 		this.waterShader.setUniformi("water_height_texture", 0);
 		this.waterShader.setUniformi("ground_height_texture", 1);
@@ -1253,10 +1244,7 @@ public class Terrain {
 		gl.glUniform1i(this.cliffShader.getUniformLocation("lightTexture"), 21);
 		gl.glUniform1f(this.cliffShader.getUniformLocation("lightCount"), lightManager.getTerrainLightCount());
 		gl.glUniform1f(this.cliffShader.getUniformLocation("lightTextureHeight"), unitLightsTexture.getHeight());
-		this.cliffShader.setUniformf("u_fogColor", this.viewer.worldScene.fogSettings.color);
-		this.cliffShader.setUniformf("u_fogParams", this.viewer.worldScene.fogSettings.style.ordinal(),
-				this.viewer.worldScene.fogSettings.start, this.viewer.worldScene.fogSettings.end,
-				this.viewer.worldScene.fogSettings.density);
+		this.viewer.worldScene.fogSettings.uploadUniforms(this.cliffShader);
 
 		this.cliffShader.setUniformi("shadowMap", 2);
 		gl.glActiveTexture(GL30.GL_TEXTURE2);
@@ -1340,7 +1328,7 @@ public class Terrain {
 			final byte[] buffer;
 
 			try (final InputStream shadowSource = this.viewer.mapMpq.getResourceAsStream("war3map.shd")) {
-				buffer = IOUtils.toByteArray(shadowSource);
+				buffer = StreamBytes.readAll(shadowSource);
 			}
 
 			for (int i = 0; i < shadowSize; i++) {

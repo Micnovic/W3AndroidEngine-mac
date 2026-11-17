@@ -47,6 +47,11 @@ public final class GameCameraManager extends CameraManager {
 	private float targetControllerYOffset;
 	private boolean targetControllerInheritOrientation;
 	private CustomCameraSetup customSetup;
+	private final boolean[] fieldBlockedFromInput = new boolean[CCameraField.VALUES.length];
+	private final float[] blockedFieldValue = new float[CCameraField.VALUES.length];
+	private boolean anyFieldBlockedFromInput;
+	private final CameraSetup inputBlockedSetup = new CameraSetup(0, 0, 0, 0, 0, 0, 0, 0);
+	private int cameraType;
 	private CameraRates customCameraRates;
 	private Vector2 panDestination;
 	private Vector2 panRate;
@@ -393,20 +398,70 @@ public final class GameCameraManager extends CameraManager {
 	}
 
 	private CameraSetup getCurrentSetup() {
-		CameraSetup setup;
+		final CameraSetup setup = getInputSetup();
+		if (!this.anyFieldBlockedFromInput) {
+			return setup;
+		}
 		if (this.customSetup != null) {
-			setup = this.customSetup;
+			// What a script set is what the player's input has to leave in place afterwards.
+			for (final CCameraField field : CCameraField.VALUES) {
+				if (this.fieldBlockedFromInput[field.ordinal()]) {
+					this.blockedFieldValue[field.ordinal()] = setup.getField(field);
+				}
+			}
+			return setup;
 		}
-		else if (this.cameraPanControls.insertDown && !this.cameraPanControls.deleteDown) {
-			setup = this.presetCamerasInsert[this.currentPreset];
+		for (final CCameraField field : CCameraField.VALUES) {
+			this.inputBlockedSetup.setField(field, this.fieldBlockedFromInput[field.ordinal()]
+					? this.blockedFieldValue[field.ordinal()]
+					: setup.getField(field));
 		}
-		else if (!this.cameraPanControls.insertDown && this.cameraPanControls.deleteDown) {
-			setup = this.presetCamerasDelete[this.currentPreset];
+		return this.inputBlockedSetup;
+	}
+
+	private CameraSetup getInputSetup() {
+		if (this.customSetup != null) {
+			return this.customSetup;
 		}
-		else {
-			setup = this.presetCameras[this.currentPreset];
+		if (this.cameraPanControls.insertDown && !this.cameraPanControls.deleteDown) {
+			return this.presetCamerasInsert[this.currentPreset];
 		}
-		return setup;
+		if (!this.cameraPanControls.insertDown && this.cameraPanControls.deleteDown) {
+			return this.presetCamerasDelete[this.currentPreset];
+		}
+		return this.presetCameras[this.currentPreset];
+	}
+
+	/**
+	 * SetCameraFieldControlledByInput: while a field is not controlled by input, the zoom wheel and the rotate keys
+	 * leave it at the value it has (a script still sets it).
+	 */
+	public void setFieldControlledByInput(final CCameraField field, final boolean controlled) {
+		final int index = field.ordinal();
+		if (controlled == !this.fieldBlockedFromInput[index]) {
+			return;
+		}
+		if (!controlled) {
+			this.blockedFieldValue[index] = getCurrentSetup().getField(field);
+		}
+		this.fieldBlockedFromInput[index] = !controlled;
+		boolean any = false;
+		for (final boolean blocked : this.fieldBlockedFromInput) {
+			any |= blocked;
+		}
+		this.anyFieldBlockedFromInput = any;
+	}
+
+	public boolean isFieldControlledByInput(final CCameraField field) {
+		return !this.fieldBlockedFromInput[field.ordinal()];
+	}
+
+	public int getCameraType() {
+		return this.cameraType;
+	}
+
+	public void setCameraType(final int cameraType) {
+		this.cameraType = cameraType;
 	}
 
 	/**
@@ -976,6 +1031,7 @@ public final class GameCameraManager extends CameraManager {
 			return;
 		}
 		this.customSetup = cameraSetup;
+		this.cameraType = cameraSetup.getCameraType();
 		setTargetZOffset(cameraSetup.getHeight(), forceDuration);
 		if (forceDuration > 0) {
 			this.customCameraRates = ratesTowards(cameraSetup, forceDuration);
@@ -1022,6 +1078,7 @@ public final class GameCameraManager extends CameraManager {
 	public void applyCameraSetup(CustomCameraSetup cameraSetup, boolean doPan, boolean panTimed) {
 		syncToGameStep();
 		this.customSetup = cameraSetup;
+		this.cameraType = cameraSetup.getCameraType();
 		if (doPan) {
 			if (panTimed) {
 				panTo(cameraSetup.getDestPositionX(), cameraSetup.getDestPositionY());

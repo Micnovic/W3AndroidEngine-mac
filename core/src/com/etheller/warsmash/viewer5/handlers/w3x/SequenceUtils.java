@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
@@ -38,7 +39,7 @@ public class SequenceUtils {
 
 		for (int i = 0, l = sequences.size(); i < l; i++) {
 			final Sequence sequence = sequences.get(i);
-			final String name = sequence.getName().split("-")[0].trim().toLowerCase();
+			final String name = sequence.getName().split("-")[0].trim().toLowerCase(Locale.ROOT);
 
 			if (name.equals(type)) {
 				filtered.add(new IndexedSequence(sequence, i));

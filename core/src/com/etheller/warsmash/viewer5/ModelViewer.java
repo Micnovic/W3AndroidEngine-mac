@@ -3,12 +3,20 @@ package com.etheller.warsmash.viewer5;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
@@ -47,6 +55,8 @@ public abstract class ModelViewer {
 	private int textureSizeLimit;
 	private boolean textureCompression;
 	private long textureBytes;
+	private boolean deferTextureLoads;
+	private final Deque<DeferredTexture> deferredTextureLoads = new ArrayDeque<>();
 
 	public ModelViewer(final DataSource dataSource, final CanvasProvider canvas) {
 		this.dataSource = dataSource;
@@ -95,6 +105,99 @@ public abstract class ModelViewer {
 	 */
 	public void setTextureCompression(final boolean textureCompression) {
 		this.textureCompression = textureCompression;
+	}
+
+	/**
+	 * While set, a texture file is read when its model asks for it but decoded and compressed later, on helper threads,
+	 * and uploaded by {@link #loadNextDeferredTexture()}: decoding and compressing the textures of one model can take
+	 * seconds, and a map's loading hands the frame back between them.
+	 *
+	 * @return the setting before
+	 */
+	public boolean setDeferTextureLoads(final boolean defer) {
+		final boolean before = this.deferTextureLoads;
+		this.deferTextureLoads = defer;
+		return before;
+	}
+
+	/**
+	 * Queues the rest of a texture's loading when deferring; false when it is to be done now.
+	 *
+	 * @param prepare runs on a helper thread and may not touch OpenGL or anything the game thread uses
+	 * @param finish  runs on the game thread after prepare, in a frame of its own
+	 */
+	public boolean deferTextureLoad(final Runnable prepare, final Runnable finish) {
+		if (!this.deferTextureLoads) {
+			return false;
+		}
+		this.deferredTextureLoads.add(new DeferredTexture(prepare, finish));
+		return true;
+	}
+
+	public boolean hasDeferredTextures() {
+		return !this.deferredTextureLoads.isEmpty();
+	}
+
+	/**
+	 * Finishes the first queued texture whose preparation is done, and starts the preparation of the next few; when
+	 * none is done it waits a moment for the first.
+	 */
+	public void loadNextDeferredTexture() {
+		final int window = TextureWorkers.WINDOW;
+		int inFlight = 0;
+		for (final DeferredTexture texture : this.deferredTextureLoads) {
+			if (inFlight++ >= window) {
+				break;
+			}
+			if (texture.future == null) {
+				texture.future = TextureWorkers.EXECUTOR.submit(texture.prepare);
+			}
+		}
+		inFlight = 0;
+		for (final Iterator<DeferredTexture> iterator = this.deferredTextureLoads.iterator(); iterator.hasNext()
+				&& (inFlight++ < window);) {
+			final DeferredTexture texture = iterator.next();
+			if (texture.future.isDone()) {
+				iterator.remove();
+				texture.finish.run();
+				return;
+			}
+		}
+		try {
+			this.deferredTextureLoads.peekFirst().future.get(2, TimeUnit.MILLISECONDS);
+		}
+		catch (final InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		catch (final java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+			// a failed preparation is seen as an unprepared texture by its finish
+		}
+	}
+
+	private static final class DeferredTexture {
+		private final Runnable prepare;
+		private final Runnable finish;
+		private Future<?> future;
+
+		private DeferredTexture(final Runnable prepare, final Runnable finish) {
+			this.prepare = prepare;
+			this.finish = finish;
+		}
+	}
+
+	/**
+	 * The threads that decode and compress textures while a map loads. Each such texture holds its decoded levels on
+	 * the heap, and the encoder spreads one texture over the other cores itself, so only a few are at work at once.
+	 */
+	private static final class TextureWorkers {
+		static final int THREADS = Runtime.getRuntime().maxMemory() < (768L << 20) ? 1 : 2;
+		static final int WINDOW = THREADS + 2;
+		static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(THREADS, runnable -> {
+			final Thread thread = new Thread(runnable, "texture-prepare");
+			thread.setDaemon(true);
+			thread.setPriority(Thread.NORM_PRIORITY - 1);
+			return thread;
+		});
 	}
 
 	public boolean isTextureCompression() {
@@ -250,7 +353,7 @@ public abstract class ModelViewer {
 			// Built-in texture sources
 			// ---- TODO not using JS code here
 
-			final Object[] handlerAndDataType = this.findHandler(extension.toLowerCase());
+			final Object[] handlerAndDataType = this.findHandler(extension.toLowerCase(Locale.ROOT));
 
 			// Is there a handler for this file type?
 			if (handlerAndDataType != null) {

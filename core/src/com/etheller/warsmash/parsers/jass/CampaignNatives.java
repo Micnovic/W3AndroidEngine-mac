@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import com.badlogic.gdx.math.Rectangle;
 
+import com.etheller.interpreter.ast.function.ConvertedConstant;
 import com.etheller.interpreter.ast.function.JassFunction;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.trigger.Trigger;
@@ -55,6 +56,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityDisableType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.ScriptMinimapIcon;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CSaveStorage;
@@ -689,8 +692,7 @@ final class CampaignNatives {
 				new AbilityPointTarget(local(camera().getEyeX()), local(camera().getEyeY()))));
 		// Measured: a smoothing factor does not change a timed pan (linear with it too). The original applies it to
 		// the free camera, which has no such movement here.
-		ignored("CameraSetSmoothingFactor", "CameraSetDepthOfFieldScale", "CameraSetFocalDistance",
-				"BlzCameraSetupSetCameraType");
+		ignored("CameraSetSmoothingFactor", "CameraSetDepthOfFieldScale", "CameraSetFocalDistance");
 		// Measured: an empty name leaves a running model camera as it is.
 		add("SetCinematicCamera", (arguments, globalScope, triggerScope) -> {
 			final String file = string(arguments, 0);
@@ -859,7 +861,7 @@ final class CampaignNatives {
 			state.alpha = integer(arguments, 6);
 			state.forcePaused = bool(arguments, 7);
 			state.noBirthTime = bool(arguments, 8);
-			state.handleId = (state.name != null) && (this.viewer.terrain.uberSplatTable.get(state.name) != null)
+			state.handleId = (state.name != null) && this.viewer.hasSimulationUberSplat(state.name)
 					? this.simulation.getHandleIdAllocator().createUbersplatId()
 					: -1;
 			if (state.handleId != -1) {
@@ -1028,11 +1030,41 @@ final class CampaignNatives {
 			return null;
 		});
 		final HandleJassType minimapiconType = type("minimapicon");
-		add("CreateMinimapIconAtLoc", (arguments, globalScope, triggerScope) -> new HandleJassValue(minimapiconType,
-				null));
-		add("CreateMinimapIconOnUnit", (arguments, globalScope, triggerScope) -> new HandleJassValue(minimapiconType,
-				null));
-		ignored("DestroyMinimapIcon", "SetMinimapIconOrphanDestroy");
+		add("CreateMinimapIcon", (arguments, globalScope, triggerScope) -> newMinimapIcon(minimapiconType,
+				real(arguments, 0), real(arguments, 1), null, arguments, 2));
+		add("CreateMinimapIconAtLoc", (arguments, globalScope, triggerScope) -> {
+			final AbilityPointTarget location = object(arguments, 0);
+			return newMinimapIcon(minimapiconType, location == null ? 0f : location.x,
+					location == null ? 0f : location.y, null, arguments, 1);
+		});
+		add("CreateMinimapIconOnUnit", (arguments, globalScope, triggerScope) -> {
+			final CUnit unit = object(arguments, 0);
+			if (unit == null) {
+				return new HandleJassValue(minimapiconType, null);
+			}
+			return newMinimapIcon(minimapiconType, 0f, 0f, unit, arguments, 1);
+		});
+		add("SetMinimapIconVisible", (arguments, globalScope, triggerScope) -> {
+			final ScriptMinimapIcon icon = object(arguments, 0);
+			if (icon != null) {
+				icon.setVisible(bool(arguments, 1));
+			}
+			return null;
+		});
+		add("SetMinimapIconOrphanDestroy", (arguments, globalScope, triggerScope) -> {
+			final ScriptMinimapIcon icon = object(arguments, 0);
+			if (icon != null) {
+				icon.setOrphanDestroy(bool(arguments, 1));
+			}
+			return null;
+		});
+		add("DestroyMinimapIcon", (arguments, globalScope, triggerScope) -> {
+			final ScriptMinimapIcon icon = object(arguments, 0);
+			if (icon != null) {
+				this.viewer.getScriptMinimapIcons().remove(icon);
+			}
+			return null;
+		});
 		add("SetAltMinimapIcon", (arguments, globalScope, triggerScope) -> {
 			this.viewer.setAltMinimapIcon(string(arguments, 0));
 			return null;
@@ -1044,6 +1076,18 @@ final class CampaignNatives {
 			}
 			return null;
 		});
+	}
+
+	/** The colour, path and fog mask of a minimap icon start at {@code first}; a missing fog mask shows it everywhere. */
+	private HandleJassValue newMinimapIcon(final HandleJassType minimapiconType, final float x, final float y,
+			final CUnit unit, final List<JassValue> arguments, final int first) {
+		final Object fogState = object(arguments, first + 4);
+		final int fogMask = fogState instanceof CFogState ? ((CFogState) fogState).getId()
+				: fogState instanceof ConvertedConstant ? ((ConvertedConstant) fogState).getValue() : 7;
+		final ScriptMinimapIcon icon = new ScriptMinimapIcon(x, y, unit, integer(arguments, first),
+				integer(arguments, first + 1), integer(arguments, first + 2), string(arguments, first + 3), fogMask);
+		this.viewer.getScriptMinimapIcons().add(icon);
+		return new HandleJassValue(minimapiconType, icon);
 	}
 
 	private void registerUnits() {

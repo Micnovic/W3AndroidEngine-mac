@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -89,6 +90,8 @@ public class CAbilityItemRecall extends CAbilityPointTargetSpellBase {
 			return false;
 		});
 		units.sort(Comparator.comparingInt(CUnit::getHandleId));
+		// Measured on 1.29: the units are taken in a seeded random order, not in creation order.
+		Collections.shuffle(units, simulation.getSeededRandom());
 		while (units.size() > this.numberOfUnits) {
 			units.remove(units.size() - 1);
 		}

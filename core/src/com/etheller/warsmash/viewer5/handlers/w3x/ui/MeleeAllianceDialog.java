@@ -90,7 +90,10 @@ public class MeleeAllianceDialog {
 		// Melee victory (Blizzard.j MeleeCheckForVictors) reads this as the player's allied victory state.
 		this.alliedVictory = (CheckBoxFrame) rootFrame.getFrameByName("AlliedVictoryCheckBox", 0);
 		// Every other player's row fits in the dialog, and the bar has no place set in the FDF.
-		rootFrame.getFrameByName("AllianceDialogScrollBar", 0).setVisible(false);
+		final UIFrame scrollBar = rootFrame.getFrameByName("AllianceDialogScrollBar", 0);
+		if (scrollBar != null) {
+			scrollBar.setVisible(false);
+		}
 		this.container.setVisible(false);
 	}
 

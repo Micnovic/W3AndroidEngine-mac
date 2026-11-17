@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
 import java.util.EnumSet;
+import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
@@ -368,6 +369,7 @@ public class RenderUnit implements RenderWidget {
 		final boolean corpse = this.simulationUnit.isCorpse();
 		final boolean boneCorpse = this.simulationUnit.isBoneCorpse();
 		final boolean building = this.simulationUnit.isBuilding();
+		this.instance.groundShadow = !dead && !building && (this.typeData.getRenderShadowType() != null);
 		if (dead) {
 			if (!this.dead) {
 				this.unitAnimationListenerImpl.playAnimation(true, PrimaryTag.DEATH, SequenceUtils.EMPTY, 1.0f, true);
@@ -946,10 +948,10 @@ public class RenderUnit implements RenderWidget {
 	public void lockTargetFacing(final String boneNameString, final RenderUnit renderPeerTarget, final float offsetX,
 			final float offsetY, final float offsetZ) {
 		if (boneNameString != null) {
-			if ("head".equals(boneNameString.toLowerCase())) {
+			if ("head".equals(boneNameString.toLowerCase(Locale.ROOT))) {
 				this.unitAnimationListenerImpl.lockHeadFacing(renderPeerTarget.instance,
 						new Vector3(offsetX, offsetY, offsetZ));
-			} else if ("turret".equals(boneNameString.toLowerCase())) {
+			} else if ("turret".equals(boneNameString.toLowerCase(Locale.ROOT))) {
 				this.unitAnimationListenerImpl.lockTurretFacing(renderPeerTarget.instance,
 						new Vector3(offsetX, offsetY, offsetZ));
 			}

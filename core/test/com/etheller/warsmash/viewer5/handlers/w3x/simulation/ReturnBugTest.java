@@ -35,6 +35,7 @@ class ReturnBugTest {
 			"    group g = null", //
 			"    group back = null", //
 			"    texttag tag = null", //
+			"    agent agentBack = null", //
 			"    integer id = -1", //
 			"endglobals", //
 			"function H2I takes handle h returns integer", //
@@ -45,6 +46,12 @@ class ReturnBugTest {
 			"endfunction", //
 			"function I2TT takes integer i returns texttag", //
 			"    return i", //
+			"endfunction", //
+			"function I2A takes integer i returns agent", //
+			"    return i", //
+			"endfunction", //
+			"function ReadAsAgent takes nothing returns nothing", //
+			"    set agentBack = I2A(id)", //
 			"endfunction", //
 			"function Convert takes nothing returns nothing", //
 			"    set id = H2I(g)", //
@@ -151,5 +158,14 @@ class ReturnBugTest {
 		run("Convert");
 		run("ReadAsTextTag");
 		assertNull(handle("tag"));
+	}
+
+	@Test
+	void aHandleReadAsAnotherKindIsStillTheHandle() {
+		final Group group = this.allocator.assign(new Group());
+		setGroup("g", group);
+		run("Convert");
+		run("ReadAsAgent");
+		assertSame(group, handle("agentBack"));
 	}
 }

@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.units.Element;
 
 /**
@@ -72,6 +73,11 @@ public final class DataFolderCheck {
 			return Kind.LOCAL_FILES;
 		}
 		return Kind.NONE;
+	}
+
+	/** The locale layer a local files install keeps its text in; null for the other kinds. */
+	static File localeLayerOf(final Kind kind, final File folder) {
+		return kind == Kind.LOCAL_FILES ? localeLayer(folder) : null;
 	}
 
 	private static File localeLayer(final File folder) {
@@ -324,6 +330,41 @@ public final class DataFolderCheck {
 	}
 
 	/**
+	 * The languages a game data folder can be read in, in the order the launchers list them: an install's build tags, or
+	 * the language folders an extracted folder or local files install keeps, each holding the game's text. A folder
+	 * that names none is read in its own language.
+	 */
+	public static synchronized List<String> locales(final Kind kind, final File folder) {
+		final String key = "locales:" + kind + ":" + folder.getAbsolutePath();
+		String cached = DESCRIPTIONS.get(key);
+		if (cached == null) {
+			final List<String> found = new ArrayList<>();
+			if (kind == Kind.CASC) {
+				found.addAll(cascLocales(folder));
+			}
+			else {
+				final File[] layers = child(folder, "_locales") == null ? null : child(folder, "_locales").listFiles();
+				for (final File layer : layers == null ? new File[0] : layers) {
+					final String name = layer.getName();
+					final String code = name.toLowerCase(Locale.ROOT).endsWith(".w3mod")
+							? GameLanguage.canonical(name.substring(0, name.length() - ".w3mod".length())) : "";
+					if (!code.isEmpty() && isReadable(child(child(layer, "ui"), "WorldEditGameStrings.txt"))
+							&& !found.contains(code)) {
+						found.add(code);
+					}
+				}
+			}
+			final String own = locale(kind, folder);
+			if (found.isEmpty() && !own.isEmpty()) {
+				found.add(own);
+			}
+			cached = String.join(",", GameLanguage.sorted(found));
+			DESCRIPTIONS.put(key, cached);
+		}
+		return cached.isEmpty() ? new ArrayList<>() : new ArrayList<>(Arrays.asList(cached.split(",")));
+	}
+
+	/**
 	 * The language the engine reads an installed game in: the only one it holds, else the one of this computer's
 	 * language, else the first the install lists; English when the tags name none.
 	 */
@@ -372,23 +413,41 @@ public final class DataFolderCheck {
 		return "";
 	}
 
+	/** A field of the build info's row the game runs on (the active one; the first when none is marked). */
 	private static String buildInfoField(final File folder, final String prefix) {
 		try (BufferedReader reader = new BufferedReader(
 				new InputStreamReader(new FileInputStream(new File(folder, ".build.info")), StandardCharsets.UTF_8))) {
 			final String header = reader.readLine();
-			final String values = reader.readLine();
-			if ((header != null) && (values != null)) {
-				final String[] names = header.split("\\|");
-				final String[] fields = values.split("\\|", -1);
-				for (int i = 0; (i < names.length) && (i < fields.length); i++) {
-					if (names[i].startsWith(prefix)) {
-						return fields[i];
-					}
+			if (header == null) {
+				return "";
+			}
+			final String[] names = header.split("\\|");
+			String[] row = null;
+			for (String line = reader.readLine(); line != null; line = reader.readLine()) {
+				if (line.isEmpty()) {
+					continue;
+				}
+				final String[] fields = line.split("\\|", -1);
+				if (row == null) {
+					row = fields;
+				}
+				if ("1".equals(rowField(names, fields, "Active!"))) {
+					row = fields;
+					break;
 				}
 			}
+			return row == null ? "" : rowField(names, row, prefix);
 		}
 		catch (final IOException e) {
 			return "";
+		}
+	}
+
+	private static String rowField(final String[] names, final String[] fields, final String prefix) {
+		for (int i = 0; (i < names.length) && (i < fields.length); i++) {
+			if (names[i].startsWith(prefix)) {
+				return fields[i];
+			}
 		}
 		return "";
 	}

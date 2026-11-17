@@ -1,6 +1,7 @@
 package com.etheller.warsmash.util;
 
 import java.util.Arrays;
+import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 
@@ -146,21 +147,21 @@ public final class PerfStats {
 	private static void report(final long now) {
 		final StringBuilder line = new StringBuilder();
 		final double seconds = (now - reportStart) / 1e9;
-		line.append(String.format("fps=%.1f avg=%.1fms worst=%.1fms steps/s=%.1f paths/s=%.1f iterations/s=%.0f",
+		line.append(String.format(Locale.ROOT, "fps=%.1f avg=%.1fms worst=%.1fms steps/s=%.1f paths/s=%.1f iterations/s=%.0f",
 				frames / seconds, frames == 0 ? 0 : frameTotal / 1e6 / frames, worstFrame / 1e6,
 				simulationSteps / seconds, pathJobs / seconds, pathIterations / seconds));
-		line.append(String.format(" ui_draws=%.0f", frames == 0 ? 0 : (double) interfaceDraws / frames));
+		line.append(String.format(Locale.ROOT, " ui_draws=%.0f", frames == 0 ? 0 : (double) interfaceDraws / frames));
 		for (final Section section : Section.values()) {
 			final long total = TOTALS[section.ordinal()];
-			line.append(' ').append(section.name().toLowerCase()).append('=')
-					.append(String.format("%.2f", frames == 0 ? 0 : total / 1e6 / frames));
+			line.append(' ').append(section.name().toLowerCase(Locale.ROOT)).append('=')
+					.append(String.format(Locale.ROOT, "%.2f", frames == 0 ? 0 : total / 1e6 / frames));
 			TOTALS[section.ordinal()] = 0;
 		}
 		line.append(" |");
 		for (final Step step : Step.values()) {
 			final long total = STEP_TOTALS[step.ordinal()];
-			line.append(' ').append(step.name().toLowerCase()).append('=')
-					.append(String.format("%.2f", frames == 0 ? 0 : total / 1e6 / frames));
+			line.append(' ').append(step.name().toLowerCase(Locale.ROOT)).append('=')
+					.append(String.format(Locale.ROOT, "%.2f", frames == 0 ? 0 : total / 1e6 / frames));
 			STEP_TOTALS[step.ordinal()] = 0;
 		}
 		line.append(" | worst:");
@@ -170,12 +171,12 @@ public final class PerfStats {
 		for (int i = 0; i < sections.length; i++) {
 			covered += WORST_SECTIONS[i];
 		}
-		line.append(String.format(" other=%.1f", (worstFrame - covered) / 1e6));
+		line.append(String.format(Locale.ROOT, " other=%.1f", (worstFrame - covered) / 1e6));
 		for (int i = 0; i < WORST_SECTIONS.length; i++) {
 			if (WORST_SECTIONS[i] >= 2_000_000L) {
 				final String name = i < sections.length ? sections[i].name() : steps[i - sections.length].name();
-				line.append(' ').append(name.toLowerCase()).append('=')
-						.append(String.format("%.1f", WORST_SECTIONS[i] / 1e6));
+				line.append(' ').append(name.toLowerCase(Locale.ROOT)).append('=')
+						.append(String.format(Locale.ROOT, "%.1f", WORST_SECTIONS[i] / 1e6));
 			}
 		}
 		Gdx.app.log("PERF", line.toString());

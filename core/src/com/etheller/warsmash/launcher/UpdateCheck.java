@@ -8,6 +8,7 @@ import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
@@ -20,7 +21,7 @@ public final class UpdateCheck {
 	public static final String RELEASES_URL = "https://api.github.com/repos/nikoltu/W3AndroidEngine/releases/latest";
 	/** A system property that makes the check answer with a release of this tag, without the network (for testing). */
 	public static final String FAKE_PROPERTY = "warsmash.fakeUpdate";
-	private static final String RELEASES_PAGE = "https://github.com/nikoltu/W3AndroidEngine/releases";
+	private static final String RELEASES_PAGE = ProjectInfo.SOURCE_URL + "/releases";
 	private static final String USER_AGENT = "W3AndroidEngine-launcher";
 	private static final int BUFFER = 64 * 1024;
 
@@ -224,7 +225,7 @@ public final class UpdateCheck {
 		if (assets != null) {
 			for (JsonValue asset = assets.child; asset != null; asset = asset.next) {
 				final String assetName = asset.getString("name", "");
-				if (assetName.toLowerCase().endsWith(".apk")) {
+				if (assetName.toLowerCase(Locale.ROOT).endsWith(".apk")) {
 					name = assetName;
 					url = asset.getString("browser_download_url", null);
 					size = asset.getLong("size", 0);

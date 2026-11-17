@@ -38,6 +38,7 @@ public abstract class RawOpenGLTextureResource extends Texture {
 	private final int minFilter = GL20.GL_LINEAR;
 	private ByteBuffer data;
 	private long uploadedBytes;
+	private boolean disposed;
 
 	public RawOpenGLTextureResource(final ModelViewer viewer, final String extension, final PathSolver pathSolver,
 			final String fetchUrl, final ResourceHandler handler) {
@@ -52,6 +53,7 @@ public abstract class RawOpenGLTextureResource extends Texture {
 
 	@Override
 	public void dispose() {
+		this.disposed = true;
 		this.viewer.gl.glDeleteTexture(this.handle);
 		this.viewer.addTextureBytes(-this.uploadedBytes);
 		this.uploadedBytes = 0;
@@ -60,6 +62,10 @@ public abstract class RawOpenGLTextureResource extends Texture {
 	@Override
 	protected void error(final Exception e) {
 		Log.error(e);
+	}
+
+	protected final boolean isDisposed() {
+		return this.disposed;
 	}
 
 	@Override

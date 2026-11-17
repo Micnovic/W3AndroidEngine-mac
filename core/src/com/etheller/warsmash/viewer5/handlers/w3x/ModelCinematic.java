@@ -4,10 +4,14 @@ import java.util.List;
 
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
+import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.RenderMathUtils;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Camera;
+import com.etheller.warsmash.viewer5.ModelViewer;
+import com.etheller.warsmash.viewer5.PathSolver;
+import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.mdx.Sequence;
@@ -19,6 +23,9 @@ import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
  * shows behind the actors: the in-game variant at the place it is given, with the interface and the world as they
  * are; PlayModelCinematic where the game camera is looking, with only the world drawn, and the game again when the
  * last shot is over. The map goes on meanwhile, so the trigger that asked for it can wait for it.
+ * <p>
+ * A campaign entry that is a model rather than a map plays it on a scene of the menu's own, full screen, with the
+ * model at the origin and nothing of a map behind it.
  */
 public final class ModelCinematic {
 	private static final float MODEL_FOV_SCALE = 0.75f;
@@ -71,7 +78,7 @@ public final class ModelCinematic {
 		}
 	}
 
-	private final War3MapViewer viewer;
+	private final Scene scene;
 	private final MdxModel model;
 	private final Timeline timeline;
 	private final boolean inGame;
@@ -93,25 +100,20 @@ public final class ModelCinematic {
 	private boolean finished;
 	private boolean skipped;
 
-	private ModelCinematic(final War3MapViewer viewer, final MdxModel model, final boolean inGame, final float x,
-			final float y, final float z, final float rotationDegrees) {
-		this.viewer = viewer;
+	private ModelCinematic(final Scene scene, final MdxModel model, final int startTick, final boolean inGame,
+			final float x, final float y, final float z, final float rotationDegrees) {
+		this.scene = scene;
 		this.model = model;
 		this.inGame = inGame;
-		this.timeline = new Timeline(model, viewer.simulation.getGameTurnTick());
+		this.timeline = new Timeline(model, startTick);
 		this.instance = (MdxComplexInstance) model.addInstance();
 		this.instance.setSequenceLoopMode(SequenceLoopMode.NEVER_LOOP);
 		this.instance.setSequence(0);
-		if (inGame) {
-			this.origin.set(x, y, z);
-		}
-		else {
-			lookedAtGround(viewer, this.origin);
-		}
+		this.origin.set(x, y, z);
 		this.facing.setFromAxisRad(RenderMathUtils.VEC3_UNIT_Z, (float) Math.toRadians(rotationDegrees));
 		this.instance.setLocation(this.origin.x, this.origin.y, this.origin.z);
 		this.instance.rotate(this.facing);
-		this.instance.setScene(viewer.worldScene);
+		this.instance.setScene(scene);
 		this.shotCameras = shotCameras(model);
 	}
 
@@ -174,15 +176,21 @@ public final class ModelCinematic {
 
 	/** @return the model of a cinematic when it is in the game data and has shots to play, else null */
 	public static MdxModel load(final War3MapViewer viewer, final String path) {
+		return load(viewer.dataSource, viewer, viewer.mapPathSolver, viewer.solverParams, path);
+	}
+
+	/** @return the model of a cinematic as {@link #load(War3MapViewer, String)} finds it, in any viewer */
+	public static MdxModel load(final DataSource data, final ModelViewer viewer, final PathSolver pathSolver,
+			final Object solverParams, final String path) {
 		if ((path == null) || path.isEmpty()) {
 			return null;
 		}
 		final String mdx = War3MapViewer.mdx(path);
-		if (!viewer.dataSource.has(mdx) && !viewer.dataSource.has(War3MapViewer.mdl(mdx))) {
+		if (!data.has(mdx) && !data.has(War3MapViewer.mdl(mdx))) {
 			Log.warn("The cinematic model " + path + " is not in the game data");
 			return null;
 		}
-		final MdxModel model = viewer.loadModelMdx(path);
+		final MdxModel model = War3MapViewer.loadModelMdx(data, viewer, path, pathSolver, solverParams);
 		if ((model == null) || model.getSequences().isEmpty()) {
 			Log.warn("The cinematic model " + path + " cannot play");
 			return null;
@@ -197,7 +205,20 @@ public final class ModelCinematic {
 		if (model == null) {
 			return null;
 		}
-		return new ModelCinematic(viewer, model, inGame, x, y, z, rotationDegrees);
+		final Vector3 origin = new Vector3(x, y, z);
+		if (!inGame) {
+			lookedAtGround(viewer, origin);
+		}
+		return new ModelCinematic(viewer.worldScene, model, viewer.simulation.getGameTurnTick(), inGame, origin.x,
+				origin.y, origin.z, rotationDegrees);
+	}
+
+	/**
+	 * @return a cinematic that plays full screen on a scene with nothing else on it, at the origin, turned about the Z
+	 *         axis by no degrees
+	 */
+	public static ModelCinematic playOnScene(final Scene scene, final MdxModel model) {
+		return new ModelCinematic(scene, model, 0, false, 0, 0, 0, 0);
 	}
 
 	public MdxModel getModel() {
@@ -246,7 +267,7 @@ public final class ModelCinematic {
 	/** The game's camera shows what the model's camera shows, in the place the model is put. */
 	public void placeWorldCamera() {
 		advance();
-		final Camera camera = this.viewer.worldScene.camera;
+		final Camera camera = this.scene.camera;
 		placeCamera(camera);
 		camera.update();
 	}

@@ -122,6 +122,7 @@ final class ReforgedInputNatives {
 			final String data = string(arguments, 1);
 			final CPlayerUnitOrderListener sink = commandSink();
 			if ((sink == null) || (prefix == null) || (data == null) || prefix.isEmpty()
+					|| (prefix.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_SYNC_BYTES)
 					|| (data.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_SYNC_BYTES)) {
 				return BooleanJassValue.FALSE;
 			}

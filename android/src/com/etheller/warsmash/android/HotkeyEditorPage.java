@@ -576,9 +576,15 @@ final class HotkeyEditorPage extends LauncherViews {
 		return drawable;
 	}
 
-	/** A key pressed on the keyboard while a command waits: a letter, digit or punctuation mark binds, Esc gives up. */
+	/**
+	 * A key pressed on the keyboard while a command is chosen: a letter, digit or punctuation mark binds, Esc gives up a
+	 * waiting one.
+	 */
 	boolean handleKey(final KeyEvent event) {
-		if ((this.capturing == null) || !current()) {
+		// A key pressed while a command is chosen but not yet waiting binds at once, so the key typed right after the
+		// tap on a command or before "Press a key…" shows is not lost.
+		final boolean armed = this.capturing != null;
+		if (!current() || (this.hotkeys == null) || (!armed && (this.command == null))) {
 			return false;
 		}
 		final int code = event.getKeyCode();
@@ -588,13 +594,16 @@ final class HotkeyEditorPage extends LauncherViews {
 			final int typed = event.getUnicodeChar(0) & KeyCharacterMap.COMBINING_ACCENT_MASK;
 			key = (typed > 0) && (typed < 0x80) ? KeyEditor.keyOfChar((char) typed) : null;
 		}
-		if ((key == null) && (code != KeyEvent.KEYCODE_ESCAPE)) {
+		if ((key == null) && (!armed || (code != KeyEvent.KEYCODE_ESCAPE))) {
+			return false;
+		}
+		if (!armed && ((event.getModifiers() & (KeyEvent.META_CTRL_ON | KeyEvent.META_ALT_ON | KeyEvent.META_META_ON)) != 0)) {
 			return false;
 		}
 		if ((event.getAction() != KeyEvent.ACTION_DOWN) || (event.getRepeatCount() > 0)) {
 			return true;
 		}
-		final String waiting = this.capturing;
+		final String waiting = armed ? this.capturing : this.command;
 		this.capturing = null;
 		if (key != null) {
 			final HotkeyCatalog.Command found = find(waiting);

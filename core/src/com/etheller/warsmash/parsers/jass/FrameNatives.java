@@ -10,6 +10,7 @@ import java.util.Set;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.utils.TimeUtils;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.interpreter.ast.function.ConvertedConstant;
 import com.etheller.interpreter.ast.function.JassFunction;
@@ -32,6 +33,7 @@ import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.datamodel.TextJustify;
+import com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame;
 import com.etheller.warsmash.parsers.fdf.frames.AbstractUIFrame;
 import com.etheller.warsmash.parsers.fdf.frames.BackdropFrame;
 import com.etheller.warsmash.parsers.fdf.frames.CheckBoxFrame;
@@ -52,8 +54,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
-import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.ClickableFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.FrameEventSink;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.ClickableFrame;
 
 /**
  * The Frame API of Reforged (BlzCreateFrame, BlzFrameSetPoint and the rest): a map script makes frames from the
@@ -66,18 +69,27 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
  * (created or looked up), so scripts that make frames for one player only keep the same numbers on every machine
  * only when they make them in the same order everywhere.
  */
-final class FrameNatives {
+final class FrameNatives implements FrameEventSink {
 	private static final int EVENT_CONTROL_CLICK = 1;
+	private static final int EVENT_MOUSE_ENTER = 2;
+	private static final int EVENT_MOUSE_LEAVE = 3;
 	private static final int EVENT_MOUSE_UP = 4;
 	private static final int EVENT_MOUSE_DOWN = 5;
+	private static final int EVENT_MOUSE_WHEEL = 6;
 	private static final int EVENT_CHECKBOX_CHECKED = 7;
 	private static final int EVENT_CHECKBOX_UNCHECKED = 8;
 	private static final int EVENT_EDITBOX_TEXT_CHANGED = 9;
+	private static final int EVENT_MOUSE_DOUBLECLICK = 11;
 	private static final int EVENT_SLIDER_VALUE_CHANGED = 13;
 	private static final int EVENT_EDITBOX_ENTER = 16;
 	private static final int ORIGIN_GAME_UI = 0;
 	private static final int ORIGIN_WORLD_FRAME = 17;
 	private static final int ORIGIN_SIMPLE_UI_PARENT = 18;
+	private static final int ORIGIN_MINIMAP = 8;
+	private static final int ORIGIN_CHAT_MSG = 13;
+	private static final int ORIGIN_UNIT_MSG = 14;
+	private static final int ORIGIN_PORTRAIT = 16;
+	private static final long DOUBLE_CLICK_MILLIS = 300;
 
 	private final JassProgram program;
 	private final War3MapViewer viewer;
@@ -91,7 +103,11 @@ final class FrameNatives {
 	private final Map<Integer, List<Registration>> registrations = new java.util.HashMap<>();
 	private final Map<UIFrame, UIFrame> tooltips = new IdentityHashMap<>();
 	private final Map<UIFrame, Integer> textSizeLimits = new IdentityHashMap<>();
-	private final Map<UIFrame, Float> scales = new IdentityHashMap<>();
+	/** Minimum, maximum and step a script gave a slider or a status bar; the frames count in whole steps. */
+	private final Map<UIFrame, float[]> ranges = new IdentityHashMap<>();
+	private final Set<UIFrame> layoutDirty = new LinkedHashSet<>();
+	private UIFrame lastClicked;
+	private long lastClickMillis;
 	private UIFrame worldFrame;
 	private final List<UIFrame> hiddenByScript = new ArrayList<>();
 
@@ -137,6 +153,10 @@ final class FrameNatives {
 		natives.registerEvents();
 		natives.registerCoordinates();
 		natives.simulation.setFrameEventHandler(natives::onFrameEvent);
+		if (ui != null) {
+			ui.setFrameEventSink(natives);
+		}
+		viewer.scriptUiState.setFrameFlush(natives::flushLayout);
 	}
 
 	private void add(final String name, final JassFunction function) {
@@ -204,8 +224,40 @@ final class FrameNatives {
 		return GameUI.convertY(this.uiViewport, y);
 	}
 
+	/** A frame the script made or changed is laid out again before the next draw. */
+	private void markDirty(final UIFrame frame) {
+		if (frame != null) {
+			this.layoutDirty.add(frame);
+		}
+	}
+
+	private void flushLayout() {
+		if (this.layoutDirty.isEmpty()) {
+			return;
+		}
+		final List<UIFrame> dirty = new ArrayList<>(this.layoutDirty);
+		this.layoutDirty.clear();
+		// Twice, as a frame set relative to another one that is laid out after it.
+		for (int pass = 0; pass < (dirty.size() > 1 ? 2 : 1); pass++) {
+			for (final UIFrame frame : dirty) {
+				frame.positionBounds(gameUI(), this.uiViewport);
+			}
+		}
+	}
+
+	/** A frame the script made, or one inside such a frame; the others are the game's own. */
+	private boolean isScriptOwned(final UIFrame frame) {
+		for (UIFrame owner = frame; owner != null; owner = owner.getParent()) {
+			if (this.scriptFrames.contains(owner)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private void created(final UIFrame frame) {
 		if (frame != null) {
+			markDirty(frame);
 			this.scriptFrames.add(frame);
 			if (this.viewer.scriptUiState.isOriginFramesHidden()) {
 				idOf(frame);
@@ -284,7 +336,7 @@ final class FrameNatives {
 				}
 				return handle(globalScope, this.worldFrame);
 			}
-			return handle(globalScope, null);
+			return handle(globalScope, this.ui == null ? null : this.ui.getOriginFrame(type, integer(arguments, 1)));
 		});
 		add("BlzEnableUIAutoPosition", (arguments, globalScope, triggerScope) -> {
 			this.viewer.scriptUiState.setUiAutoPosition(bool(arguments, 0));
@@ -296,6 +348,13 @@ final class FrameNatives {
 			final boolean hide = bool(arguments, 0);
 			this.viewer.scriptUiState.setOriginFramesHidden(hide);
 			if (hide) {
+				// The minimap, the portrait and the message lines hide through place holder frames.
+				if (this.ui != null) {
+					for (final int type : new int[] { ORIGIN_MINIMAP, ORIGIN_CHAT_MSG, ORIGIN_UNIT_MSG,
+							ORIGIN_PORTRAIT }) {
+						this.ui.getOriginFrame(type, 0);
+					}
+				}
 				for (final UIFrame child : new ArrayList<>(gameUI().getChildFrames())) {
 					if (!this.scriptFrames.contains(child) && child.isVisible() && (child != this.worldFrame)) {
 						this.hiddenByScript.add(child);
@@ -322,6 +381,7 @@ final class FrameNatives {
 			if ((frame != null) && (point != null) && (relativePoint != null)) {
 				frame.addSetPoint(new SetPoint(point, relative, relativePoint, frameX(real(arguments, 4)),
 						frameY(real(arguments, 5))));
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -329,8 +389,11 @@ final class FrameNatives {
 			final UIFrame frame = object(arguments, 0);
 			final FramePoint point = framePoint(arguments, 1);
 			if ((frame != null) && (point != null)) {
-				frame.setFramePointX(point, frameX(real(arguments, 2)));
-				frame.setFramePointY(point, frameY(real(arguments, 3)));
+				// Kept as a point of the screen's corner, so that laying the frame out again keeps it there.
+				frame.addSetPoint(new SetPoint(point, gameUI(), FramePoint.BOTTOMLEFT,
+						frameX(real(arguments, 2)) - gameUI().getFramePointX(FramePoint.LEFT),
+						frameY(real(arguments, 3)) - gameUI().getFramePointY(FramePoint.BOTTOM)));
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -339,6 +402,7 @@ final class FrameNatives {
 			if (frame instanceof com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) {
 				((com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) frame)
 						.clearFramePointAssignments();
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -348,6 +412,7 @@ final class FrameNatives {
 			if (frame != null) {
 				frame.addSetPoint(new SetPoint(FramePoint.TOPLEFT, relative, FramePoint.TOPLEFT, 0, 0));
 				frame.addSetPoint(new SetPoint(FramePoint.BOTTOMRIGHT, relative, FramePoint.BOTTOMRIGHT, 0, 0));
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -356,6 +421,7 @@ final class FrameNatives {
 			if (frame != null) {
 				frame.setWidth(frameX(real(arguments, 1)));
 				frame.setHeight(frameY(real(arguments, 2)));
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -391,6 +457,7 @@ final class FrameNatives {
 				if (parent instanceof AbstractUIFrame) {
 					((AbstractUIFrame) parent).add(frame);
 				}
+				markDirty(frame);
 			}
 			return null;
 		});
@@ -580,7 +647,13 @@ final class FrameNatives {
 		add("BlzFrameSetVisible", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame != null) {
-				frame.setVisible(bool(arguments, 1));
+				// The game keeps showing and hiding its own frames; the script's hiding is a layer over that.
+				if ((frame instanceof AbstractRenderableFrame) && !isScriptOwned(frame)) {
+					((AbstractRenderableFrame) frame).setScriptHidden(!bool(arguments, 1));
+				}
+				else {
+					frame.setVisible(bool(arguments, 1));
+				}
 			}
 			return null;
 		});
@@ -627,22 +700,29 @@ final class FrameNatives {
 		add("BlzFrameSetValue", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float value = real(arguments, 1);
+			final float[] range = this.ranges.get(frame);
 			if (frame instanceof SimpleStatusBarFrame) {
-				((SimpleStatusBarFrame) frame).setValue(Math.max(0, Math.min(1, value)));
+				final float ratio = range == null ? value : (value - range[0]) / (range[1] - range[0]);
+				((SimpleStatusBarFrame) frame).setValue(Math.max(0, Math.min(1, ratio)));
 			}
 			else if (frame instanceof ScrollBarFrame) {
-				((ScrollBarFrame) frame).setValue(gameUI(), this.uiViewport, Math.round(value));
+				((ScrollBarFrame) frame).setValue(gameUI(), this.uiViewport,
+						range == null ? Math.round(value) : toStep(range, value));
 			}
 			return null;
 		});
 		add("BlzFrameGetValue", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
-			return RealJassValue.of(frame instanceof ScrollBarFrame ? ((ScrollBarFrame) frame).getValue() : 0);
+			return RealJassValue.of(valueOf(frame));
 		});
 		add("BlzFrameClick", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof ClickableFrame) {
 				((ClickableFrame) frame).onClick(1);
+				// The game's own frames tell the script through the interface's input, which a call does not pass.
+				if (!isScriptOwned(frame)) {
+					click(frame);
+				}
 			}
 			return null;
 		});
@@ -651,9 +731,57 @@ final class FrameNatives {
 			final UIFrame tooltip = object(arguments, 1);
 			if (frame != null) {
 				this.tooltips.put(frame, tooltip);
+				// Shown while the pointer is over the frame, not before.
+				if (tooltip != null) {
+					tooltip.setVisible(false);
+				}
 			}
 			return null;
 		});
+	}
+
+	private int stepsOf(final float[] range) {
+		return range[2] > 0 ? Math.max(1, Math.round((range[1] - range[0]) / range[2])) : 1000;
+	}
+
+	private int toStep(final float[] range, final float value) {
+		return Math.round(((value - range[0]) / (range[1] - range[0])) * stepsOf(range));
+	}
+
+	private float fromStep(final float[] range, final int step) {
+		return range[0] + ((step / (float) stepsOf(range)) * (range[1] - range[0]));
+	}
+
+	/** What BlzFrameGetValue tells: the slider's value or the status bar's fill in the script's units. */
+	private float valueOf(final UIFrame frame) {
+		final float[] range = this.ranges.get(frame);
+		if (frame instanceof ScrollBarFrame) {
+			final int step = ((ScrollBarFrame) frame).getValue();
+			return range == null ? step : fromStep(range, step);
+		}
+		if (frame instanceof SimpleStatusBarFrame) {
+			final float ratio = ((SimpleStatusBarFrame) frame).getValue();
+			return range == null ? ratio : range[0] + (ratio * (range[1] - range[0]));
+		}
+		return 0;
+	}
+
+	/** A slider counts whole steps inside its range; the range or the step changed keeps its value in place. */
+	private void rangeChanged(final UIFrame frame, final float[] range) {
+		if (frame instanceof ScrollBarFrame) {
+			final ScrollBarFrame slider = (ScrollBarFrame) frame;
+			final float value = valueOf(frame);
+			this.ranges.put(frame, range);
+			final float kept = Math.max(range[0], Math.min(range[1], value));
+			slider.setMinValue(0);
+			slider.setMaxValue(stepsOf(range));
+			slider.setStepSize(1);
+			slider.setRange(stepsOf(range), toStep(range, kept));
+			markDirty(frame);
+		}
+		else {
+			this.ranges.put(frame, range);
+		}
 	}
 
 	private void registerEvents() {
@@ -699,22 +827,49 @@ final class FrameNatives {
 		});
 		// Frame handles in a hashtable, as the other handles.
 		// The frame keeps what the script gave it, so it reads back.
+		// The frame and what it holds are drawn larger or smaller about the frame's center, text and textures
+		// alike, and the pointer finds them where they are drawn; models of the interface scene keep their size.
 		add("BlzFrameSetScale", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float scale = real(arguments, 1);
-			if ((frame != null) && (scale > 0)) {
-				final Float old = this.scales.get(frame);
-				final float ratio = scale / (old == null ? 1f : old);
-				this.scales.put(frame, scale);
-				frame.setWidth(frame.getAssignedWidth() * ratio);
-				frame.setHeight(frame.getAssignedHeight() * ratio);
+			if ((frame instanceof AbstractRenderableFrame) && (scale > 0)) {
+				((AbstractRenderableFrame) frame).setRenderScale(scale);
+			}
+			return null;
+		});
+		// The font file of the data at the height of the script (in the 0.6 high screen), for the frame's text.
+		add("BlzFrameSetFont", (arguments, globalScope, triggerScope) -> {
+			final StringFrame target = textFrame(object(arguments, 0));
+			if ((target != null) && (real(arguments, 2) > 0)) {
+				target.setFrameFont(gameUI().generateFont(string(arguments, 1), real(arguments, 2)));
+				gameUI().setText(target, target.getText());
+			}
+			return null;
+		});
+		add("BlzFrameSetMinMaxValue", (arguments, globalScope, triggerScope) -> {
+			final UIFrame frame = object(arguments, 0);
+			final float min = real(arguments, 1);
+			final float max = real(arguments, 2);
+			if (((frame instanceof ScrollBarFrame) || (frame instanceof SimpleStatusBarFrame)) && (max > min)) {
+				final float[] old = this.ranges.get(frame);
+				rangeChanged(frame, new float[] { min, max, old == null ? 0 : old[2] });
+			}
+			return null;
+		});
+		add("BlzFrameSetStepSize", (arguments, globalScope, triggerScope) -> {
+			final UIFrame frame = object(arguments, 0);
+			final float step = real(arguments, 1);
+			if ((frame instanceof ScrollBarFrame) || (frame instanceof SimpleStatusBarFrame)) {
+				final float[] old = this.ranges.get(frame);
+				rangeChanged(frame, new float[] { old == null ? 0 : old[0], old == null ? 100 : old[1],
+						Math.max(0, step) });
 			}
 			return null;
 		});
 		// No focus or mouse capture in the game's frames: a frame takes input where it is clicked, nothing else
-		// holds it, and the fonts and the slider steps of a frame come from its template.
-		for (final String name : new String[] { "BlzFrameSetFocus", "BlzFrameCageMouse", "BlzFrameSetFont",
-				"BlzFrameSetMinMaxValue", "BlzFrameSetStepSize", "BlzTextAreaFrameSetAutoScroll" }) {
+		// holds it.
+		for (final String name : new String[] { "BlzFrameSetFocus", "BlzFrameCageMouse",
+				"BlzTextAreaFrameSetAutoScroll" }) {
 			add(name, (arguments, globalScope, triggerScope) -> null);
 		}
 	}
@@ -728,6 +883,10 @@ final class FrameNatives {
 	}
 
 	private void hook(final UIFrame frame, final int frameId) {
+		// The game's own frames keep their click handling; what is done to them comes by the interface's input.
+		if (!isScriptOwned(frame)) {
+			return;
+		}
 		if (frame instanceof CheckBoxFrame) {
 			final CheckBoxFrame box = (CheckBoxFrame) frame;
 			box.setOnClick(() -> {
@@ -771,9 +930,71 @@ final class FrameNatives {
 			box.setOnEnter(() -> send(frameId, EVENT_EDITBOX_ENTER, 0, box.getText()));
 		}
 		else if (frame instanceof ScrollBarFrame) {
-			((ScrollBarFrame) frame).setChangeListener(
-					(gameUI, viewport, newValue) -> send(frameId, EVENT_SLIDER_VALUE_CHANGED, newValue, ""));
+			((ScrollBarFrame) frame).setChangeListener((gameUI, viewport, newValue) -> {
+				final float[] range = this.ranges.get(frame);
+				send(frameId, EVENT_SLIDER_VALUE_CHANGED, range == null ? newValue : fromStep(range, newValue), "");
+			});
 		}
+	}
+
+	/** The frame's events go out only when a trigger listens for the frame, as the registration made it known. */
+	private void deliver(final UIFrame frame, final int eventType, final float value) {
+		final Integer frameId = this.frameIds.get(frame);
+		if ((frameId != null) && this.registrations.containsKey(frameId)) {
+			send(frameId, eventType, value, "");
+		}
+	}
+
+	@Override
+	public void mouseEnter(final UIFrame frame) {
+		final UIFrame tooltip = this.tooltips.get(frame);
+		if (tooltip != null) {
+			tooltip.setVisible(true);
+		}
+		deliver(frame, EVENT_MOUSE_ENTER, 0);
+	}
+
+	@Override
+	public void mouseLeave(final UIFrame frame) {
+		final UIFrame tooltip = this.tooltips.get(frame);
+		if (tooltip != null) {
+			tooltip.setVisible(false);
+		}
+		deliver(frame, EVENT_MOUSE_LEAVE, 0);
+	}
+
+	// The buttons the script made hook their own press and click; only the game's frames come here for these.
+	@Override
+	public void mouseDown(final UIFrame frame) {
+		if (!isScriptOwned(frame)) {
+			deliver(frame, EVENT_MOUSE_DOWN, 0);
+		}
+	}
+
+	@Override
+	public void mouseUp(final UIFrame frame) {
+		if (!isScriptOwned(frame)) {
+			deliver(frame, EVENT_MOUSE_UP, 0);
+		}
+	}
+
+	@Override
+	public void click(final UIFrame frame) {
+		final long now = TimeUtils.millis();
+		final boolean doubled = (frame == this.lastClicked) && ((now - this.lastClickMillis) <= DOUBLE_CLICK_MILLIS);
+		this.lastClicked = doubled ? null : frame;
+		this.lastClickMillis = now;
+		if (!isScriptOwned(frame)) {
+			deliver(frame, EVENT_CONTROL_CLICK, 0);
+		}
+		if (doubled) {
+			deliver(frame, EVENT_MOUSE_DOUBLECLICK, 0);
+		}
+	}
+
+	@Override
+	public void mouseWheel(final UIFrame frame, final float amount) {
+		deliver(frame, EVENT_MOUSE_WHEEL, amount);
 	}
 
 	/** The command of a frame event came: the triggers registered for that frame and event run. */

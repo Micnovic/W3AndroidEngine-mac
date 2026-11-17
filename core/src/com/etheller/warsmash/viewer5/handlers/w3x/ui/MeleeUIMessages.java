@@ -3,12 +3,14 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.TimeUtils;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.warsmash.parsers.fdf.GameUI;
@@ -46,6 +48,12 @@ final class MeleeUIMessages {
 	private static final long WORLD_FRAME_MESSAGE_FADE_DURATION = WORLD_FRAME_MESSAGE_EXPIRE_MILLIS
 			- WORLD_FRAME_MESSAGE_FADEOUT_MILLIS;
 	private StringFrame errorMessageFrame;
+	private SimpleFrame unitMessageProxy;
+	private SimpleFrame chatMessageProxy;
+	private final Rectangle unitMessageHome = new Rectangle();
+	private final Rectangle chatMessageHome = new Rectangle();
+	private final float[] unitMessageOffset = new float[2];
+	private final float[] chatMessageOffset = new float[2];
 	private final ArrayDeque<GameMessage> gameMessages = new ArrayDeque<>();
 	// Measured on 1.29: a message is shown fully for its duration and then fades out over 3 s; 0 shows it until it is
 	// cleared or scrolled away. New messages come in at the bottom line and push the older ones up; a message that
@@ -109,6 +117,13 @@ final class MeleeUIMessages {
 	private static final float LEADERBOARD_ROWS_TOP = 0.028f;
 	private static final float LEADERBOARD_ROW_HEIGHT = 0.014f;
 	private static final float LEADERBOARD_BOTTOM_INSET = 0.012f;
+
+	// Measured on 1.29: a script dialog is centered on the screen, a little above its middle, and takes the height of
+	// its content; its buttons are 0.034 high with 0.004 between them and 0.015 under the title.
+	private static final float SCRIPT_DIALOG_CENTER_LIFT = 0.056f;
+	private static final float SCRIPT_DIALOG_BUTTON_HEIGHT = 0.034f;
+	private static final float SCRIPT_DIALOG_BUTTON_GAP = 0.004f;
+	private static final float SCRIPT_DIALOG_FIRST_BUTTON_GAP = 0.015f;
 
 	final MeleeUI ui;
 
@@ -180,10 +195,12 @@ final class MeleeUIMessages {
 		private final int lines;
 		private final long fadeTime;
 		private final long expireTime;
+		private final boolean chat;
 		private boolean expired;
 
 		private GameMessage(final StringFrame stringFrame, final int lines, final long fadeTime,
-				final long expireTime) {
+				final long expireTime, final boolean chat) {
+			this.chat = chat;
 			this.stringFrame = stringFrame;
 			this.lines = lines;
 			this.fadeTime = fadeTime;
@@ -216,7 +233,9 @@ final class MeleeUIMessages {
 		while (descendingIterator.hasNext()) {
 			final GameMessage gameMessage = descendingIterator.next();
 			if (!gameMessage.expired) {
-				gameMessage.stringFrame.addAnchor(new AnchorDefinition(FramePoint.BOTTOMLEFT, left, bottom));
+				final float[] offset = gameMessage.chat ? this.chatMessageOffset : this.unitMessageOffset;
+				gameMessage.stringFrame.addAnchor(
+						new AnchorDefinition(FramePoint.BOTTOMLEFT, left + offset[0], bottom + offset[1]));
 				gameMessage.stringFrame.positionBounds(this.ui.rootFrame, this.ui.uiViewport);
 			}
 			bottom += gameMessage.stringFrame.getAssignedHeight();
@@ -224,7 +243,76 @@ final class MeleeUIMessages {
 	}
 
 	public void showGameMessage(final String message, final float duration) {
-		showGameMessage(message, Color.WHITE, duration);
+		showGameMessage(message, Color.WHITE, duration, false);
+	}
+
+	/** A line of the players' chat, which a map script's chat message frame holds apart from the unit messages. */
+	public void showChatMessage(final String message, final float duration) {
+		showGameMessage(message, Color.WHITE, duration, true);
+	}
+
+	/** The frame of ORIGIN_FRAME_TOP_MSG, where the interface's errors and alerts appear. */
+	StringFrame getErrorMessageFrame() {
+		return this.errorMessageFrame;
+	}
+
+	/**
+	 * The frame a map script hides or moves for the unit messages or the chat lines: a place holder at where the
+	 * messages stack up, the messages follow its visibility and how far it was moved.
+	 */
+	UIFrame messageProxy(final boolean chat) {
+		final SimpleFrame existing = chat ? this.chatMessageProxy : this.unitMessageProxy;
+		if (existing != null) {
+			return existing;
+		}
+		final SimpleFrame proxy = new SimpleFrame(chat ? "ChatMessageOrigin" : "UnitMessageOrigin", this.ui.rootFrame);
+		final float left = GameUI.convertX(this.ui.uiViewport, GAME_MESSAGE_LEFT);
+		final float bottom = GameUI.convertY(this.ui.uiViewport, GAME_MESSAGE_BOTTOM);
+		proxy.addSetPoint(new SetPoint(FramePoint.BOTTOMLEFT, this.ui.rootFrame, FramePoint.BOTTOMLEFT,
+				left - this.ui.rootFrame.getFramePointX(FramePoint.LEFT),
+				bottom - this.ui.rootFrame.getFramePointY(FramePoint.BOTTOM)));
+		proxy.setWidth(GameUI.convertX(this.ui.uiViewport, GAME_MESSAGE_WIDTH));
+		proxy.setHeight(GameUI.convertY(this.ui.uiViewport, 0.1f));
+		this.ui.rootFrame.add(proxy);
+		proxy.positionBounds(this.ui.rootFrame, this.ui.uiViewport);
+		if (chat) {
+			this.chatMessageProxy = proxy;
+			this.chatMessageHome.set(proxy.getRenderBounds());
+		}
+		else {
+			this.unitMessageProxy = proxy;
+			this.unitMessageHome.set(proxy.getRenderBounds());
+		}
+		return proxy;
+	}
+
+	/** Follows the message place holders of the script: shown or hidden, and moved from where they were made. */
+	private void followMessageProxies() {
+		boolean moved = false;
+		for (int chat = 0; chat < 2; chat++) {
+			final SimpleFrame proxy = chat == 1 ? this.chatMessageProxy : this.unitMessageProxy;
+			if (proxy == null) {
+				continue;
+			}
+			proxy.positionBounds(this.ui.rootFrame, this.ui.uiViewport);
+			final Rectangle home = chat == 1 ? this.chatMessageHome : this.unitMessageHome;
+			final float[] offset = chat == 1 ? this.chatMessageOffset : this.unitMessageOffset;
+			final float x = proxy.getRenderBounds().x - home.x;
+			final float y = proxy.getRenderBounds().y - home.y;
+			if ((x != offset[0]) || (y != offset[1])) {
+				offset[0] = x;
+				offset[1] = y;
+				moved = true;
+			}
+			for (final GameMessage gameMessage : this.gameMessages) {
+				if ((gameMessage.chat == (chat == 1)) && !gameMessage.expired) {
+					gameMessage.stringFrame.setScriptHidden(!proxy.isVisible());
+				}
+			}
+		}
+		if (moved) {
+			layoutGameMessages();
+		}
 	}
 
 	private long gameClock() {
@@ -236,7 +324,8 @@ final class MeleeUIMessages {
 		this.gameClockMillis += gameSeconds * 1000.0;
 	}
 
-	private void showGameMessage(final String message, final Color color, final float duration) {
+	private void showGameMessage(final String message, final Color color, final float duration,
+			final boolean chat) {
 		this.ui.messageLog.add(message);
 		// The score screen replaces the game screen; messages that come after it are only kept in the log.
 		if ((this.ui.scoreScreen != null) && this.ui.scoreScreen.isVisible()) {
@@ -269,7 +358,7 @@ final class MeleeUIMessages {
 			fadeTime = TimeUtils.millis() + (long) (Math.max(0, duration) * 1000);
 			expireTime = fadeTime + GAME_MESSAGE_FADE_MILLIS;
 		}
-		this.gameMessages.addLast(new GameMessage(gameMessagesFrame, lines, fadeTime, expireTime));
+		this.gameMessages.addLast(new GameMessage(gameMessagesFrame, lines, fadeTime, expireTime, chat));
 		int shownLines = 0;
 		final Iterator<GameMessage> descendingIterator = this.gameMessages.descendingIterator();
 		while (descendingIterator.hasNext()) {
@@ -354,7 +443,7 @@ final class MeleeUIMessages {
 		final CPlayer owner = this.ui.war3MapViewer.simulation.getPlayer(ownerIndex);
 		final String name = "|cff" + MeleeChat.playerTextHex(owner.getColor()) + owner.getName() + "|r";
 		showGameMessage(format.replaceFirst("%s", Matcher.quoteReplacement(name)), SHARED_CONTROL_MESSAGE_COLOR,
-				SHARED_CONTROL_MESSAGE_SECONDS);
+				SHARED_CONTROL_MESSAGE_SECONDS, false);
 	}
 
 	private final class SharedControlWatcher implements CPlayerStateListener {
@@ -453,6 +542,7 @@ final class MeleeUIMessages {
 
 	void updateMessages(final long currentMillis) {
 		showPendingHeroDeaths();
+		followMessageProxies();
 		if (currentMillis > this.lastErrorMessageExpireTime) {
 			this.errorMessageFrame.setVisible(false);
 		}
@@ -659,7 +749,7 @@ final class MeleeUIMessages {
 	}
 
 	private static void appendLeaderboardText(final StringBuilder text, final String value, final int rgba) {
-		text.append("|c").append(String.format("%02x%06x", rgba & 0xFF, (rgba >>> 8) & 0xFFFFFF)).append(value)
+		text.append("|c").append(String.format(Locale.ROOT, "%02x%06x", rgba & 0xFF, (rgba >>> 8) & 0xFFFFFF)).append(value)
 				.append("|r");
 	}
 
@@ -803,7 +893,8 @@ final class MeleeUIMessages {
 	public CScriptDialog createScriptDialog(final GlobalScope globalScope) {
 		final SimpleFrame scriptDialog = (SimpleFrame) this.ui.rootFrame.createFrame("ScriptDialog", this.ui.rootFrame,
 				0, 0);
-		scriptDialog.addAnchor(new AnchorDefinition(FramePoint.TOP, 0, GameUI.convertY(this.ui.uiViewport, -0.05f)));
+		scriptDialog.addAnchor(
+				new AnchorDefinition(FramePoint.CENTER, 0, GameUI.convertY(this.ui.uiViewport, SCRIPT_DIALOG_CENTER_LIFT)));
 		scriptDialog.setVisible(false);
 		final StringFrame scriptDialogTextFrame = (StringFrame) this.ui.rootFrame.getFrameByName("ScriptDialogText", 0);
 		scriptDialog.positionBounds(this.ui.rootFrame, this.ui.uiViewport);
@@ -826,12 +917,13 @@ final class MeleeUIMessages {
 	void attachScriptDialogButton(final CScriptDialog scriptDialog, final CScriptDialogButton button) {
 		final GlueTextButtonFrame scriptDialogButton = (GlueTextButtonFrame) this.ui.rootFrame
 				.createFrame("ScriptDialogButton", scriptDialog.getScriptDialogFrame(), 0, 0);
-		scriptDialogButton.setHeight(GameUI.convertY(this.ui.uiViewport, 0.03f));
+		scriptDialogButton.setHeight(GameUI.convertY(this.ui.uiViewport, SCRIPT_DIALOG_BUTTON_HEIGHT));
 		final StringFrame scriptDialogTextFrame = (StringFrame) this.ui.rootFrame
 				.getFrameByName("ScriptDialogButtonText", 0);
 		this.ui.rootFrame.setText(scriptDialogTextFrame, button.getText());
 		scriptDialogButton.addSetPoint(new SetPoint(FramePoint.TOP, scriptDialog.getLastAddedComponent(),
-				FramePoint.BOTTOM, 0, GameUI.convertY(this.ui.uiViewport, -0.005f)));
+				FramePoint.BOTTOM, 0, GameUI.convertY(this.ui.uiViewport,
+						-(scriptDialog.getButtons().isEmpty() ? SCRIPT_DIALOG_FIRST_BUTTON_GAP : SCRIPT_DIALOG_BUTTON_GAP))));
 		button.attachFrames(scriptDialogButton, scriptDialogTextFrame);
 		scriptDialog.addButton(this.ui.rootFrame, this.ui.uiViewport, button,
 				() -> pressScriptDialogButton(scriptDialog, button));
@@ -862,7 +954,8 @@ final class MeleeUIMessages {
 		this.ui.scriptDialogs.add(dialog);
 		final SimpleFrame scriptDialog = (SimpleFrame) this.ui.rootFrame.createFrame("ScriptDialog", this.ui.rootFrame,
 				0, 0);
-		scriptDialog.addAnchor(new AnchorDefinition(FramePoint.TOP, 0, GameUI.convertY(this.ui.uiViewport, -0.05f)));
+		scriptDialog.addAnchor(
+				new AnchorDefinition(FramePoint.CENTER, 0, GameUI.convertY(this.ui.uiViewport, SCRIPT_DIALOG_CENTER_LIFT)));
 		scriptDialog.setVisible(false);
 		final StringFrame scriptDialogTextFrame = (StringFrame) this.ui.rootFrame.getFrameByName("ScriptDialogText", 0);
 		scriptDialog.positionBounds(this.ui.rootFrame, this.ui.uiViewport);

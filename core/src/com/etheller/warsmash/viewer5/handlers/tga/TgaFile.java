@@ -6,7 +6,6 @@ package com.etheller.warsmash.viewer5.handlers.tga;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -14,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import com.etheller.warsmash.util.ArgbImage;
+import com.etheller.warsmash.util.StreamBytes;
 
 /**
  *
@@ -85,15 +85,7 @@ public class TgaFile {
 		}
 
 		// Read pixel data
-		final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-		int nRead;
-		byte[] data = new byte[16384];
-
-		while ((nRead = stream.read(data, 0, data.length)) != -1) {
-			buffer.write(data, 0, nRead);
-		}
-		buffer.flush();
-		data = buffer.toByteArray();
+		final byte[] data = StreamBytes.readAll(stream);
 
 		// Verify Header
 		final int idLength = header[0] & 0xFF;

@@ -51,54 +51,6 @@ public class ABUnitStateListener implements CUnitStateListener {
 		this.onHideStateChanged = onHideStateChanged;
 	}
 
-	public void setOnLifeChanged(List<ABAction> onLifeChanged) {
-		this.onLifeChanged = onLifeChanged;
-	}
-
-	public void setOnManaChanged(List<ABAction> onManaChanged) {
-		this.onManaChanged = onManaChanged;
-	}
-
-	public void setOnOrdersChanged(List<ABAction> onOrdersChanged) {
-		this.onOrdersChanged = onOrdersChanged;
-	}
-
-	public void setOnQueueChanged(List<ABAction> onQueueChanged) {
-		this.onQueueChanged = onQueueChanged;
-	}
-
-	public void setOnRallyPointChanged(List<ABAction> onRallyPointChanged) {
-		this.onRallyPointChanged = onRallyPointChanged;
-	}
-
-	public void setOnWaypointsChanged(List<ABAction> onWaypointsChanged) {
-		this.onWaypointsChanged = onWaypointsChanged;
-	}
-
-	public void setOnHeroStatsChanged(List<ABAction> onHeroStatsChanged) {
-		this.onHeroStatsChanged = onHeroStatsChanged;
-	}
-
-	public void setOnInventoryChanged(List<ABAction> onInventoryChanged) {
-		this.onInventoryChanged = onInventoryChanged;
-	}
-
-	public void setOnAttacksChanged(List<ABAction> onAttacksChanged) {
-		this.onAttacksChanged = onAttacksChanged;
-	}
-
-	public void setOnAbilitiesChanged(List<ABAction> onAbilitiesChanged) {
-		this.onAbilitiesChanged = onAbilitiesChanged;
-	}
-
-	public void setOnUpgradesChanged(List<ABAction> onUpgradesChanged) {
-		this.onUpgradesChanged = onUpgradesChanged;
-	}
-
-	public void setOnHideStateChanged(List<ABAction> onHideStateChanged) {
-		this.onHideStateChanged = onHideStateChanged;
-	}
-
 	@Override
 	public void lifeChanged() {
 		if (onLifeChanged != null) {

@@ -1,13 +1,28 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.List;
+
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.RenderMathUtils;
+import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.RenderScaler;
+import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.gl.WebGL;
+import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
+import com.etheller.warsmash.viewer5.handlers.mdx.MdxShadowCaster;
+import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.GameOptions;
 
 public class DynamicShadowManager {
 	public static boolean IS_SHADOW_MAPPING = false;
@@ -22,11 +37,279 @@ public class DynamicShadowManager {
 	/** The GL of the context the shadow map was made in, which leaves deletes alone once that context is lost. */
 	private GL30 gl;
 
+	/** The light's direction when the map has no day and night light: a shadow is 1.14 times as long as its caster is high. */
+	private static final float DEFAULT_LIGHT_X = -1.05f;
+	private static final float DEFAULT_LIGHT_Y = -0.45f;
+	/** A shadow is never longer than this many times the height of what casts it, however low the light is. */
+	private static final float MAX_SHADOW_LENGTH = 3.5f;
+	/** At night the shadows of the moonlight are this many times as long as the light direction makes them by day. */
+	private static final float NIGHT_LENGTH = Float.parseFloat(System.getProperty("warsmash.shadowNightLength", "1.7"));
+	private static final float DAY_STRENGTH = 0.6f;
+	private static final float NIGHT_STRENGTH = 0.5f;
+	/** The ground slope is taken between points this far from the unit, and is never counted steeper than this. */
+	private static final float SLOPE_SPAN = 32f;
+	private static final float MIN_GROUND_NORMAL_Z = 0.5f;
+	/** The most that are drawn in a frame, the first in the scene order; every one costs a draw of its whole model. */
+	private static final int MAX_CASTERS = 160;
+	/** How high a shadow caster is taken to be when seeing whether its shadow is in view. */
+	private static final float CULL_HEIGHT = 192f;
+	private static final float CULL_EDGE = 1.15f;
+	/** The mask is drawn at this part of the world's size and smoothed when it is laid over the ground. */
+	private static final float MASK_SCALE = 0.5f;
+	/** A unit this far above the ground is in the air: its shadow lies straight below it. */
+	private static final float AIRBORNE_HEIGHT = 48f;
+
+	private static final String COMPOSITE_VERTEX = "    attribute vec2 a_position;\r\n" + //
+			"    varying vec2 v_uv;\r\n" + //
+			"    void main() {\r\n" + //
+			"      v_uv = a_position * 0.5 + 0.5;\r\n" + //
+			"      gl_Position = vec4(a_position, 0.0, 1.0);\r\n" + //
+			"    }";
+
+	private static final String COMPOSITE_FRAGMENT = "    uniform sampler2D u_mask;\r\n" + //
+			"    uniform vec2 u_texel;\r\n" + //
+			"    uniform float u_strength;\r\n" + //
+			"    varying vec2 v_uv;\r\n" + //
+			"    void main() {\r\n" + //
+			"      float m = texture2D(u_mask, v_uv).r * 0.25;\r\n" + //
+			"      m += (texture2D(u_mask, v_uv + vec2(u_texel.x, 0.0)).r\r\n" + //
+			"          + texture2D(u_mask, v_uv - vec2(u_texel.x, 0.0)).r\r\n" + //
+			"          + texture2D(u_mask, v_uv + vec2(0.0, u_texel.y)).r\r\n" + //
+			"          + texture2D(u_mask, v_uv - vec2(0.0, u_texel.y)).r) * 0.125;\r\n" + //
+			"      m += (texture2D(u_mask, v_uv + u_texel).r + texture2D(u_mask, v_uv - u_texel).r\r\n" + //
+			"          + texture2D(u_mask, v_uv + vec2(u_texel.x, -u_texel.y)).r\r\n" + //
+			"          + texture2D(u_mask, v_uv + vec2(-u_texel.x, u_texel.y)).r) * 0.0625;\r\n" + //
+			"      gl_FragColor = vec4(0.0, 0.0, 0.0, m * u_strength);\r\n" + //
+			"    }";
+
+	private final Vector3 sunDirection = new Vector3(DEFAULT_LIGHT_X, DEFAULT_LIGHT_Y, 1f).nor();
+	private final Vector3 shadowLight = new Vector3();
+	private final Vector3 groundNormal = new Vector3();
+	private final Vector3 groundPoint = new Vector3();
+	private final Vector3 straightDown = new Vector3(0f, 0f, 1f);
+	private final Vector3 viewHeap = new Vector3();
+	private final Vector3 viewHeap2 = new Vector3();
+	private float night;
+	private float strength = DAY_STRENGTH;
+	private final MdxShadowCaster caster = new MdxShadowCaster();
+	private final List<MdxComplexInstance> casters = new ArrayList<>();
+	private boolean modelShadows;
+	private int maskFramebuffer;
+	private int maskTexture;
+	private int maskWidth;
+	private int maskHeight;
+	private int quadBuffer;
+	private ShaderProgram compositeShader;
+
+	private void disposeMask() {
+		final GL30 gl = Gdx.gl30;
+		if ((gl == null) || (this.maskFramebuffer == 0)) {
+			return;
+		}
+		gl.glDeleteFramebuffer(this.maskFramebuffer);
+		gl.glDeleteTexture(this.maskTexture);
+		this.maskFramebuffer = 0;
+		this.maskTexture = 0;
+		this.maskWidth = 0;
+		this.maskHeight = 0;
+	}
+
+	/**
+	 * Takes the direction of the shadows from the main light of the day and night cycle and their length and strength
+	 * from the time of day.
+	 *
+	 * @param towardLight the unit vector from the ground towards the cycle's main light, or null for the default
+	 * @param dayRatio    how far the day is, 0 to 1, with the middle at noon
+	 */
+	public void setSunLight(final Vector3 towardLight, final float dayRatio) {
+		if (towardLight != null) {
+			this.sunDirection.set(towardLight);
+		}
+		final float hour = (dayRatio - (float) Math.floor(dayRatio)) * 24f;
+		this.night = hour < 12f ? 1f - smoothStep(5f, 7f, hour) : smoothStep(17f, 19f, hour);
+		this.strength = DAY_STRENGTH + ((NIGHT_STRENGTH - DAY_STRENGTH) * this.night);
+	}
+
+	private static float smoothStep(final float from, final float to, final float value) {
+		final float t = Math.max(0f, Math.min(1f, (value - from) / (to - from)));
+		return t * t * (3f - (2f * t));
+	}
+
+	/** Sets the shadow light to the light direction with its elevation lowered for the night and kept above a limit. */
+	private void prepareShadowLight() {
+		final float length = 1f + ((NIGHT_LENGTH - 1f) * this.night);
+		final float x = this.sunDirection.x;
+		final float y = this.sunDirection.y;
+		final float horizontal = (float) Math.sqrt((x * x) + (y * y));
+		final float z = Math.max(Math.max(this.sunDirection.z, 0.01f) / length, horizontal / MAX_SHADOW_LENGTH);
+		this.shadowLight.set(x, y, z);
+	}
+
+	/** Whether the shadow of something at this place, from its foot to the end of its length, could reach the view. */
+	private boolean shadowInView(final Matrix4 viewProjection, final float x, final float y, final float z) {
+		final float tipX = x - ((this.shadowLight.x / this.shadowLight.z) * CULL_HEIGHT);
+		final float tipY = y - ((this.shadowLight.y / this.shadowLight.z) * CULL_HEIGHT);
+		final float[] m = viewProjection.val;
+		final float footW = (m[Matrix4.M30] * x) + (m[Matrix4.M31] * y) + (m[Matrix4.M32] * z) + m[Matrix4.M33];
+		final float tipW = (m[Matrix4.M30] * tipX) + (m[Matrix4.M31] * tipY) + (m[Matrix4.M32] * z) + m[Matrix4.M33];
+		if ((footW <= 0f) || (tipW <= 0f)) {
+			return true;
+		}
+		final Vector3 foot = this.viewHeap.set(x, y, z).prj(viewProjection);
+		final Vector3 tip = this.viewHeap2.set(tipX, tipY, z).prj(viewProjection);
+		return !(((foot.x < -CULL_EDGE) && (tip.x < -CULL_EDGE)) || ((foot.x > CULL_EDGE) && (tip.x > CULL_EDGE))
+				|| ((foot.y < -CULL_EDGE) && (tip.y < -CULL_EDGE)) || ((foot.y > CULL_EDGE) && (tip.y > CULL_EDGE)));
+	}
+
+	/** Whether units cast shadows in the shape of their models onto the ground instead of round blobs. */
+	public boolean isModelShadows() {
+		return this.modelShadows;
+	}
+
+	public void setModelShadows(final boolean modelShadows) {
+		this.modelShadows = modelShadows;
+	}
+
+	/**
+	 * Draws the shapes of the units in view, flattened along the light, into a mask of the world's size. This is done
+	 * before the world itself, so that the world's render target is not left and come back to in the middle of the
+	 * frame, which a tile based GPU pays for. {@link #compositeUnitShadows} lays the mask over the ground.
+	 *
+	 * @return whether there is anything in the mask
+	 */
+	public boolean renderUnitShadowMask(final WebGL webGL, final Scene scene, final Terrain terrain) {
+		this.casters.clear();
+		if (!this.modelShadows || !scene.show || !GameOptions.get().isUnitShadows()) {
+			return false;
+		}
+		final List<ModelInstance> instances = scene.instances;
+		for (int i = 0, n = instances.size(); i < n; i++) {
+			final ModelInstance instance = instances.get(i);
+			if (instance.rendered && (instance instanceof MdxComplexInstance)
+					&& ((MdxComplexInstance) instance).groundShadow) {
+				this.casters.add((MdxComplexInstance) instance);
+			}
+		}
+		if (this.casters.isEmpty()) {
+			return false;
+		}
+		final GL30 gl = Gdx.gl30;
+		final Rectangle rect = scene.camera.rect;
+		final int width = Math.max(1, (int) Math.ceil(rect.width * MASK_SCALE));
+		final int height = Math.max(1, (int) Math.ceil(rect.height * MASK_SCALE));
+		if ((this.maskFramebuffer == 0) || (width != this.maskWidth) || (height != this.maskHeight)) {
+			if (!createMask(gl, width, height)) {
+				this.modelShadows = false;
+				return false;
+			}
+		}
+		gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, this.maskFramebuffer);
+		gl.glViewport(0, 0, width, height);
+		gl.glDisable(GL20.GL_SCISSOR_TEST);
+		gl.glClearColor(0f, 0f, 0f, 0f);
+		gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		MdxShadowCaster.prepareState(gl);
+		final Matrix4 viewProjection = scene.camera.viewProjectionMatrix;
+		prepareShadowLight();
+		int drawn = 0;
+		for (int i = 0, n = this.casters.size(); (i < n) && (drawn < MAX_CASTERS); i++) {
+			final MdxComplexInstance instance = this.casters.get(i);
+			final float x = instance.worldLocation.x;
+			final float y = instance.worldLocation.y;
+			final float groundZ = terrain.getGroundHeight(x, y);
+			if (!shadowInView(viewProjection, x, y, groundZ)) {
+				continue;
+			}
+			this.groundPoint.set(x, y, groundZ);
+			if ((instance.worldLocation.z - groundZ) > AIRBORNE_HEIGHT) {
+				this.caster.draw(webGL, instance, viewProjection, this.straightDown, this.straightDown,
+						this.groundPoint);
+			}
+			else {
+				groundNormal(terrain, x, y);
+				this.caster.draw(webGL, instance, viewProjection, this.shadowLight, this.groundNormal,
+						this.groundPoint);
+			}
+			drawn++;
+		}
+		gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, RenderScaler.currentTarget());
+		gl.glEnable(GL20.GL_SCISSOR_TEST);
+		return true;
+	}
+
+	private void groundNormal(final Terrain terrain, final float x, final float y) {
+		final float dx = terrain.getGroundHeight(x - SLOPE_SPAN, y) - terrain.getGroundHeight(x + SLOPE_SPAN, y);
+		final float dy = terrain.getGroundHeight(x, y - SLOPE_SPAN) - terrain.getGroundHeight(x, y + SLOPE_SPAN);
+		final float horizontal = (float) Math.sqrt((dx * dx) + (dy * dy));
+		final float limit = (2f * SLOPE_SPAN * (float) Math.sqrt(1f - (MIN_GROUND_NORMAL_Z * MIN_GROUND_NORMAL_Z)))
+				/ MIN_GROUND_NORMAL_Z;
+		final float scale = horizontal > limit ? limit / horizontal : 1f;
+		this.groundNormal.set(dx * scale, dy * scale, 2f * SLOPE_SPAN).nor();
+	}
+
+	private boolean createMask(final GL30 gl, final int width, final int height) {
+		disposeMask();
+		this.maskTexture = gl.glGenTexture();
+		gl.glBindTexture(GL20.GL_TEXTURE_2D, this.maskTexture);
+		gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, width, height, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE,
+				null);
+		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, GL20.GL_LINEAR);
+		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_LINEAR);
+		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_WRAP_S, GL20.GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_WRAP_T, GL20.GL_CLAMP_TO_EDGE);
+		this.maskFramebuffer = gl.glGenFramebuffer();
+		gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, this.maskFramebuffer);
+		gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_COLOR_ATTACHMENT0, GL20.GL_TEXTURE_2D,
+				this.maskTexture, 0);
+		final int status = gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER);
+		gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, RenderScaler.currentTarget());
+		if (status != GL20.GL_FRAMEBUFFER_COMPLETE) {
+			disposeMask();
+			return false;
+		}
+		this.maskWidth = width;
+		this.maskHeight = height;
+		return true;
+	}
+
+	/** Lays the mask of {@link #renderUnitShadowMask} over what is drawn so far, the ground. */
+	public void compositeUnitShadows(final WebGL webGL) {
+		if ((this.maskFramebuffer == 0) || this.casters.isEmpty()) {
+			return;
+		}
+		final GL30 gl = Gdx.gl30;
+		if (this.compositeShader == null) {
+			this.compositeShader = webGL.createShaderProgram(COMPOSITE_VERTEX, COMPOSITE_FRAGMENT);
+			this.quadBuffer = gl.glGenBuffer();
+			final FloatBuffer quad = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer();
+			quad.put(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 }).flip();
+			gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.quadBuffer);
+			gl.glBufferData(GL20.GL_ARRAY_BUFFER, 32, quad, GL20.GL_STATIC_DRAW);
+		}
+		webGL.useShaderProgram(this.compositeShader);
+		gl.glActiveTexture(GL20.GL_TEXTURE0);
+		gl.glBindTexture(GL20.GL_TEXTURE_2D, this.maskTexture);
+		this.compositeShader.setUniformi("u_mask", 0);
+		this.compositeShader.setUniformf("u_texel", 1.5f / this.maskWidth, 1.5f / this.maskHeight);
+		this.compositeShader.setUniformf("u_strength", this.strength);
+		gl.glDisable(GL20.GL_DEPTH_TEST);
+		gl.glDepthMask(false);
+		gl.glDisable(GL20.GL_CULL_FACE);
+		gl.glEnable(GL20.GL_BLEND);
+		gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.quadBuffer);
+		this.compositeShader.setVertexAttribute("a_position", 2, GL20.GL_FLOAT, false, 0, 0);
+		gl.glDrawArrays(GL20.GL_TRIANGLE_STRIP, 0, 4);
+		gl.glEnable(GL20.GL_DEPTH_TEST);
+		gl.glDepthMask(true);
+	}
+
 	public void dispose() {
 		if (this.gl != null) {
 			this.gl.glDeleteFramebuffer(this.framebufferName);
 			this.gl.glDeleteTexture(this.depthTexture);
 		}
+		disposeMask();
 	}
 
 	/**

@@ -221,15 +221,34 @@ final class CUnitEvents {
 	}
 
 	static void firePickUpItemEvents(final CUnit self, final CSimulation game, final CItem item) {
+		firePickUpItemEvents(self, game, item, null);
+	}
+
+	static void firePickUpItemEvents(final CUnit self, final CSimulation game, final CItem item,
+			final CItem absorbingItem) {
 		final List<CWidgetEvent> eventList = self.getEventList(JassGameEventsWar3.EVENT_UNIT_PICKUP_ITEM);
 		if (eventList != null) {
 			for (int i = eventList.size() - 1; i >= 0; i--) {
 				CWidgetEvent event = eventList.get(i);
 				event.fire(self, CommonTriggerExecutionScope.unitPickupItemScope(
-						JassGameEventsWar3.EVENT_UNIT_PICKUP_ITEM, event.getTrigger(), self, item));
+						JassGameEventsWar3.EVENT_UNIT_PICKUP_ITEM, event.getTrigger(), self, item, absorbingItem));
 			}
 		}
-		game.getPlayer(self.playerIndex).firePickUpItemEvents(self, item, game);
+		game.getPlayer(self.playerIndex).firePickUpItemEvents(self, item, game, absorbingItem);
+	}
+
+	static void fireStackItemEvents(final CUnit self, final CSimulation game, final CItem source, final CItem target,
+			final int targetPreviousCharges) {
+		final List<CWidgetEvent> eventList = self.getEventList(JassGameEventsWar3.EVENT_UNIT_STACK_ITEM);
+		if (eventList != null) {
+			for (int i = eventList.size() - 1; i >= 0; i--) {
+				final CWidgetEvent event = eventList.get(i);
+				event.fire(self, CommonTriggerExecutionScope.unitStackItemScope(
+						JassGameEventsWar3.EVENT_UNIT_STACK_ITEM, event.getTrigger(), self, source, target,
+						targetPreviousCharges));
+			}
+		}
+		game.getPlayer(self.playerIndex).fireStackItemEvents(self, source, target, targetPreviousCharges);
 	}
 
 	static void fireUseItemEvents(final CUnit self, final CSimulation game, final CItem item) {

@@ -26,7 +26,7 @@ public class StringFrame extends AbstractRenderableFrame {
 	/** How the lines lie within the block of text, where justifyH places the block in the frame. */
 	private TextJustify lineJustifyH;
 	private TextJustify justifyV;
-	private final BitmapFont frameFont;
+	private BitmapFont frameFont;
 	private Color fontShadowColor;
 	private float fontShadowOffsetX;
 	private float fontShadowOffsetY;
@@ -442,6 +442,11 @@ public class StringFrame extends AbstractRenderableFrame {
 
 	public void setLineSpacing(final float lineSpacing) {
 		this.lineSpacing = lineSpacing;
+	}
+
+	/** A map script's font for the text; the lines are laid out again by the next setText or positionBounds. */
+	public void setFrameFont(final BitmapFont frameFont) {
+		this.frameFont = frameFont;
 	}
 
 	public BitmapFont getFrameFont() {

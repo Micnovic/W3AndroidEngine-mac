@@ -960,6 +960,12 @@ public final class LanLauncherModel {
 		return this.session == null ? null : this.session.client();
 	}
 
+	/** Where this machine has the lobby's map once it is there (found or downloaded); null before. */
+	public File lobbyMapFile() {
+		final LanClient client = client();
+		return (client == null) || (this.mapState != LanClient.MAP_READY) ? null : client.mapFile();
+	}
+
 	// ------------------------------------------------------------------ events
 
 	private void addSystem(final String text) {
@@ -1189,6 +1195,7 @@ public final class LanLauncherModel {
 			}
 			else if (state == LanClient.MAP_READY) {
 				if ((old == LanClient.MAP_DOWNLOADING) || (old == LanClient.MAP_VERIFYING)) {
+					addSystem(LanText.mapReceived());
 					LanLauncherModel.this.attention.onEvent(LanAttention.Event.MAP_DOWNLOADED);
 				}
 				// A game joined while running waited for its map (the answer to a rejoin comes before it is found).

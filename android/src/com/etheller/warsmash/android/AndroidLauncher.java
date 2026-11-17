@@ -22,6 +22,8 @@ import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -42,6 +44,7 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.WarsmashGdxMapScreen;
 import com.etheller.warsmash.WarsmashGdxMenuScreen;
 import com.etheller.warsmash.WarsmashGdxMultiScreenGame;
@@ -60,6 +63,7 @@ import com.etheller.warsmash.launcher.GameResult;
 import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.LauncherKeys;
 import com.etheller.warsmash.launcher.MapListCache;
+import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.movie.Movies;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.DataTable;
@@ -83,10 +87,14 @@ public class AndroidLauncher extends AndroidApplication {
 
 	/** The texture size limit of this device when the player chose none: by screen size and memory. */
 	static int defaultTextureSize(final Context context) {
+		final boolean tablet = context.getResources().getConfiguration().smallestScreenWidthDp >= 600;
+		return GraphicsSettings.defaultTextureSize(true, tablet, totalMemoryMb(context));
+	}
+
+	static long totalMemoryMb(final Context context) {
 		final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
 		((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(memory);
-		final boolean tablet = context.getResources().getConfiguration().smallestScreenWidthDp >= 600;
-		return GraphicsSettings.defaultTextureSize(true, tablet, memory.totalMem >> 20);
+		return memory.totalMem >> 20;
 	}
 	/**
 	 * Map to start right away, like the desktop -loadfile argument.
@@ -111,6 +119,10 @@ public class AndroidLauncher extends AndroidApplication {
 	private Runnable afterMovies;
 	private Movies.Player moviePlayer;
 	private WarsmashGdxMultiScreenGame game;
+	private final Handler loadWatch = new Handler(Looper.getMainLooper());
+	private final Runnable loadWatcher = this::keepScreenOnWhileLoading;
+	private boolean screenKeptOn;
+	private boolean replayScreenOn;
 
 	/**
 	 * Settings files written before version 2 were made with music off by default, when music could not play yet; they
@@ -200,12 +212,27 @@ public class AndroidLauncher extends AndroidApplication {
 			return;
 		}
 		MapListCache.setShared(GameCatalog.mapListFile(this));
+		RenderScaleStore.Holder.install(new RenderScaleStore() {
+			@Override
+			public int percent() {
+				return GraphicsSettings
+						.renderScalePercent(new EngineSettings(AndroidLauncher.this).graphics(GraphicsSettings.KEY_RENDER_SCALE, ""));
+			}
+
+			@Override
+			public void set(final int percent) {
+				new EngineSettings(AndroidLauncher.this).setGraphics(GraphicsSettings.KEY_RENDER_SCALE,
+						Integer.toString(percent));
+			}
+		});
 		WarsmashConstants.loadConstants(warsmashIni.get("Emulator"), warsmashIni);
 		// The warsmash.lan.* test settings of the ini are for runs started with a map, not for the launcher's games,
 		// and only a test (debuggable) build takes them.
 		final boolean testBuild = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
 		LanProperties.apply(this.fromLauncher || !testBuild ? null : warsmashIni.get("Emulator"));
+		CCampaignProgress.setAllMissionsOpen(testBuild);
 		GraphicsSettings.applyDefaultTextureSize(warsmashIni, defaultTextureSize(this));
+		GraphicsSettings.setDeviceMemoryMb(totalMemoryMb(this));
 		final Element touchSettings = warsmashIni.get("Touch");
 		final TouchInputRouter router = new TouchInputRouter(
 				TouchSettings.fromIni(touchSettings, getResources().getDisplayMetrics().density,
@@ -252,6 +279,7 @@ public class AndroidLauncher extends AndroidApplication {
 		if (getIntent().getStringExtra(LaunchContract.EXTRA_REPLAY_FILE) != null) {
 			// A replay is watched without touching the screen, which must not go dark under it.
 			getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+			this.replayScreenOn = true;
 		}
 		this.game = game;
 		BackCallbacks.register(this, this::goBack);
@@ -310,7 +338,10 @@ public class AndroidLauncher extends AndroidApplication {
 				}
 				if (!started) {
 					Log.e(TAG, "The launcher asked for a game the engine cannot start: " + launch);
-					gameEnded(withoutGame("error"));
+					final GameResult failed = withoutGame("error");
+					failed.map = launch.mapFile;
+					failed.reason = menu.mapLoadFailureReason();
+					gameEnded(failed);
 				}
 			});
 		}
@@ -482,6 +513,7 @@ public class AndroidLauncher extends AndroidApplication {
 		// The backend pauses only the music and sounds it made itself.
 		PreparedMusic.pauseAll();
 		PooledSounds.pauseAll();
+		this.loadWatch.removeCallbacks(this.loadWatcher);
 		super.onPause();
 		// The game cannot draw or step while the app is away; the session service keeps the connection, and the
 		// host and the others are told why this player stands still.
@@ -491,9 +523,26 @@ public class AndroidLauncher extends AndroidApplication {
 	@Override
 	protected void onResume() {
 		super.onResume();
+		this.loadWatch.post(this.loadWatcher);
 		LanSessions.appState(false);
 		PreparedMusic.resumeAll();
 		PooledSounds.resumeAll();
+	}
+
+	/** The screen stays on while a map loads, which can take minutes on a first run and draws no touch input. */
+	private void keepScreenOnWhileLoading() {
+		final WarsmashGdxMultiScreenGame current = this.game;
+		final boolean keep = this.replayScreenOn || ((current != null) && current.isLoadingMap());
+		if (keep != this.screenKeptOn) {
+			this.screenKeptOn = keep;
+			if (keep) {
+				getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+			}
+			else {
+				getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+			}
+		}
+		this.loadWatch.postDelayed(this.loadWatcher, 1000);
 	}
 
 	/**
@@ -508,6 +557,14 @@ public class AndroidLauncher extends AndroidApplication {
 		}
 		final WarsmashGdxMapScreen running = current.getRunningMapScreen();
 		if (running == null) {
+			if (current.getScreen() instanceof WarsmashGdxMenuScreen) {
+				// A campaign mission that is a model plays on the menu's screen; Back skips it.
+				final WarsmashGdxMenuScreen menu = (WarsmashGdxMenuScreen) current.getScreen();
+				Gdx.app.postRunnable(menu::skipModelMission);
+				if (menu.isPlayingModelMission()) {
+					return;
+				}
+			}
 			finishAfterTransition();
 			return;
 		}

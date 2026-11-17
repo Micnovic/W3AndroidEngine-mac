@@ -49,6 +49,9 @@ final class SoundNatives extends CommonNatives {
 					final CSound soundHandle = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (soundHandle != null) {
 						soundHandle.start(this.simulation.getGameTurnTick());
+						if (soundHandle instanceof CSoundFilename) {
+							meleeUI.dialogueSoundStarted(((CSoundFilename) soundHandle).getFileName());
+						}
 					}
 					return null;
 				});
@@ -176,11 +179,11 @@ final class SoundNatives extends CommonNatives {
 					final Sound newSound = UnitSound.createSound(war3MapViewer.mapMpq, fileName);
 					war3MapViewer.rememberFileSound(newSound, fileName);
 					final float fileDuration = UnitSound.fileDuration(war3MapViewer.mapMpq, fileName);
-					return newHandle(soundType,
-							new CSoundFilename(newSound, fileDuration,
-									is3D ? war3MapViewer.worldScene.audioContext
-											: meleeUI.getUiScene().audioContext,
-									looping, stopWhenOutOfRange, fadeInRate, fadeOutRate, eaxSetting));
+					final CSoundFilename soundHandle = new CSoundFilename(newSound, fileDuration,
+							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
+							stopWhenOutOfRange, fadeInRate, fadeOutRate, eaxSetting);
+					soundHandle.setFileName(fileName);
+					return newHandle(soundType, soundHandle);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateSoundFilenameWithLabel",
 				(arguments, globalScope, triggerScope) -> {
@@ -198,6 +201,7 @@ final class SoundNatives extends CommonNatives {
 					final CSoundFilename soundHandle = new CSoundFilename(newSound, fileDuration,
 							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
 							stopWhenOutOfRange, fadeInRate, fadeOutRate, "");
+					soundHandle.setFileName(fileName);
 					CampaignNatives.applyLabelParameters(soundHandle, war3MapViewer.getSoundLabel(label));
 					return newHandle(soundType, soundHandle);
 				});

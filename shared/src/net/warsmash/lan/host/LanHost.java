@@ -138,6 +138,7 @@ public final class LanHost {
 		boolean ready;
 		boolean loaded;
 		int loadPercent;
+		long loadProgressMs;
 		int state = LanProtocol.PRESENCE_PLAYING;
 		int appState;
 		/** Last MAP_STATUS value, -1 until the participant reported one for the current map. */
@@ -284,6 +285,8 @@ public final class LanHost {
 	private int nextTurn;
 	private LanLoop.Timer countdownTimer;
 	private LanLoop.Timer loadTimer;
+	private long loadStartedMs;
+	private static final int LOAD_HARD_LIMIT_FACTOR = 5;
 	private LanLoop.Timer turnTimer;
 	private boolean countingDown;
 	private long nextTurnDue;
@@ -899,13 +902,7 @@ public final class LanHost {
 			scheduleTurn();
 		}
 		else if (this.state == LanProtocol.STATE_LOADING) {
-			this.loadTimer = this.loop.schedule(this.loop.timings().loadTimeoutMs, new Runnable() {
-				@Override
-				public void run() {
-					LanHost.this.loadTimer = null;
-					go();
-				}
-			});
+			startLoadTimer();
 			maybeGo();
 		}
 		updateAnnouncement();
@@ -1921,14 +1918,45 @@ public final class LanHost {
 		}
 		setState(LanProtocol.STATE_LOADING);
 		broadcast(new LanMessages.Start(g));
-		this.loadTimer = this.loop.schedule(this.loop.timings().loadTimeoutMs, new Runnable() {
+		startLoadTimer();
+		maybeGo();
+	}
+
+	/**
+	 * The load timeout counts the time without progress: a participant that still reports a rising load percentage
+	 * (a cold Reforged load takes minutes) is waited for, up to a hard limit, instead of being sent on as absent.
+	 */
+	private void startLoadTimer() {
+		final long now = LanLoop.nowMs();
+		this.loadStartedMs = now;
+		for (final Participant p : this.participants.values()) {
+			p.loadProgressMs = now;
+		}
+		scheduleLoadTimer();
+	}
+
+	private void scheduleLoadTimer() {
+		final int timeout = this.loop.timings().loadTimeoutMs;
+		this.loadTimer = this.loop.schedule(timeout, new Runnable() {
 			@Override
 			public void run() {
 				LanHost.this.loadTimer = null;
+				if (LanHost.this.state != LanProtocol.STATE_LOADING) {
+					return;
+				}
+				final long now = LanLoop.nowMs();
+				if (now - LanHost.this.loadStartedMs < LOAD_HARD_LIMIT_FACTOR * (long) timeout) {
+					for (final Participant p : LanHost.this.participants.values()) {
+						if (p.conn != null && !p.loaded && p.state == LanProtocol.PRESENCE_PLAYING
+								&& now - p.loadProgressMs < timeout) {
+							scheduleLoadTimer();
+							return;
+						}
+					}
+				}
 				go();
 			}
 		});
-		maybeGo();
 	}
 
 	private void maybeGo() {
@@ -1977,7 +2005,10 @@ public final class LanHost {
 			throws LanProtocolException {
 		switch (m.type()) {
 		case LanProtocol.LOAD_PROGRESS:
-			p.loadPercent = ((LanMessages.LoadProgress) m).percent;
+			final int percent = ((LanMessages.LoadProgress) m).percent;
+			// A loader repeats its percent while it works through a long step, so any report counts as progress.
+			p.loadProgressMs = LanLoop.nowMs();
+			p.loadPercent = percent;
 			broadcast(new LanMessages.LoadProgress(p.id, p.loadPercent));
 			return;
 		case LanProtocol.LOADED:
@@ -2170,7 +2201,8 @@ public final class LanHost {
 
 	private boolean canRelease(final int n) {
 		for (final Participant p : this.participants.values()) {
-			if (p.state == LanProtocol.PRESENCE_PLAYING && p.ackTurn < n - this.setup.syncLimit) {
+			if (p.role == LanProtocol.ROLE_PLAYER && p.state == LanProtocol.PRESENCE_PLAYING
+					&& p.ackTurn < n - this.setup.syncLimit) {
 				return false;
 			}
 		}
@@ -2181,7 +2213,7 @@ public final class LanHost {
 		final List<LagEntry> list = new ArrayList<LagEntry>();
 		final int waited = (int) Math.min(Integer.MAX_VALUE, now - this.stalledSince);
 		for (final Participant p : this.participants.values()) {
-			if (p.state == LanProtocol.PRESENCE_PLAYING && p.ackTurn < this.nextTurn - this.setup.syncLimit) {
+			if (isLaggard(p)) {
 				final int reason = p.conn == null ? LanProtocol.LAG_RECONNECTING
 						: (p.appState == LanProtocol.APP_BACKGROUND ? LanProtocol.LAG_BACKGROUND
 								: LanProtocol.LAG_LAGGING);
@@ -2192,7 +2224,8 @@ public final class LanHost {
 	}
 
 	private boolean isLaggard(final Participant p) {
-		return p.state == LanProtocol.PRESENCE_PLAYING && p.ackTurn < this.nextTurn - this.setup.syncLimit;
+		return p.role == LanProtocol.ROLE_PLAYER && p.state == LanProtocol.PRESENCE_PLAYING
+				&& p.ackTurn < this.nextTurn - this.setup.syncLimit;
 	}
 
 	private void onVote(final Participant p, final int vote) {
@@ -2271,7 +2304,7 @@ public final class LanHost {
 
 	private void continueWithoutLaggards() {
 		for (final Participant p : new ArrayList<Participant>(this.participants.values())) {
-			if (p.state == LanProtocol.PRESENCE_PLAYING && p.ackTurn < this.nextTurn - this.setup.syncLimit) {
+			if (isLaggard(p)) {
 				setPresence(p, LanProtocol.PRESENCE_ABSENT);
 			}
 		}

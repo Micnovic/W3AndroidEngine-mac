@@ -30,33 +30,41 @@
 									"type": "getFirstBuffId"
 								}
 							},{
-								"type": "f<",
-								"value1": {
-									"type": "getBuffDurationElapsed",
-									"buff": {
-										"type": "getMatchingBuff"
-									}
-								},
-								"value2": {
-									"type": "f-",
+								"type": "or",
+								"conditions": [{
+									"type": "f<",
 									"value1": {
-										"type": "getStoredFloatByKey",
-										"key": {
-											"type": "rawString",
-											"value": "curDelay"
+										"type": "getBuffDurationElapsed",
+										"buff": {
+											"type": "getMatchingBuff"
 										}
 									},
 									"value2": {
-										"type": "f*",
+										"type": "f-",
 										"value1": {
-											"type": "oneGameTick"
+											"type": "getStoredFloatByKey",
+											"key": {
+												"type": "rawString",
+												"value": "curDelay"
+											}
 										},
 										"value2": {
-											"type": "rawFloat",
-											"value": 2
+											"type": "f*",
+											"value1": {
+												"type": "oneGameTick"
+											},
+											"value2": {
+												"type": "rawFloat",
+												"value": 2
+											}
 										}
 									}
-								}
+								},{
+									"type": "isUnitPaused",
+									"unit": {
+										"type": "getEnumUnit"
+									}
+								}]
 						}]
 					}
 				}
@@ -312,6 +320,10 @@
 					"delay": {
 						"type": "rawFloat",
 						"value": 0
+					},
+					"exact": {
+						"type": "rawBoolean",
+						"value": "true"
 					},
 					"actions": [{
 						"type": "runReuseAction",

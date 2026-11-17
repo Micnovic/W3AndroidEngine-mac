@@ -6,6 +6,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -214,6 +215,8 @@ public final class LanClient {
 	private volatile boolean runningJoin;
 	/** After a resync: no turns go to the game that is being dropped, and none of its sums or acknowledgments to the host. */
 	private volatile boolean held;
+	/** Whether the game has taken any turn from {@link #pollTurn}; turns nobody has played yet are free to keep. */
+	private volatile boolean polled;
 	private volatile int resyncKind = -1;
 	/** After a RESYNC and before the REJOIN that answers it: turns still on their way are the dropped game's. */
 	private boolean awaitingRejoin;
@@ -489,7 +492,7 @@ public final class LanClient {
 
 	private static boolean refused(final IOException error) {
 		final String m = error.getMessage();
-		return error instanceof java.net.ConnectException && m != null && m.toLowerCase().contains("refused");
+		return error instanceof java.net.ConnectException && m != null && m.toLowerCase(Locale.ROOT).contains("refused");
 	}
 
 	/** Waits a moment and tries again, until the time for it is up; then the loss is reported. */
@@ -582,6 +585,8 @@ public final class LanClient {
 					this.mySlot = s.index;
 				}
 			}
+			LanLog.info("joined as participant " + w.participantId + ", slot " + this.mySlot + ", state "
+					+ w.gameState);
 			// A client coming back to a running game has no lobby to show; a link that only broke has nothing new.
 			if (!this.rejoinAttempt || this.reconnectUntil == 0) {
 				fire(new Runnable() {
@@ -632,11 +637,15 @@ public final class LanClient {
 		case LanProtocol.LOBBY_STATE: {
 			final LanMessages.LobbyState ls = (LanMessages.LobbyState) m;
 			this.lastLobby = ls;
+			final int previousSlot = this.mySlot;
 			this.mySlot = LanProtocol.NO_SLOT;
 			for (final LanData.SlotInfo s : ls.slots) {
 				if (s.participantId == this.participantId && s.kind == LanProtocol.SLOT_HUMAN) {
 					this.mySlot = s.index;
 				}
+			}
+			if (this.mySlot != previousSlot) {
+				LanLog.info("own slot " + previousSlot + " -> " + this.mySlot);
 			}
 			fire(new Runnable() {
 				@Override
@@ -695,6 +704,7 @@ public final class LanClient {
 			return;
 		case LanProtocol.START: {
 			final LanGameSetup s = ((LanMessages.Start) m).setup;
+			LanLog.info("start, seed " + s.seed + ", " + s.slots.size() + " slots");
 			reconnected();
 			if (this.phase == LanProtocol.STATE_LOBBY) {
 				this.phase = LanProtocol.STATE_LOADING;
@@ -744,11 +754,14 @@ public final class LanClient {
 		case LanProtocol.REJOIN: {
 			final LanMessages.Rejoin r = (LanMessages.Rejoin) m;
 			this.awaitingRejoin = false;
-			if (r.turnsFrom == 0 && this.lastTurn >= 0 && !this.held) {
+			// A game that has played none of the turns held (it loaded after the host let the others go) has nothing to
+			// drop: they are the host's own, and the ones that come again are skipped as seen.
+			final boolean keepHeld = r.turnsFrom == 0 && this.lastTurn >= 0 && !this.held && !this.polled;
+			if (r.turnsFrom == 0 && this.lastTurn >= 0 && !this.held && !keepHeld) {
 				// The host has none of what this client holds beyond its own turns (a game handed over to a new host).
 				startOver(LanProtocol.RESYNC_TURNS, -1);
 			}
-			if (r.turnsFrom == 0) {
+			if (r.turnsFrom == 0 && !keepHeld) {
 				resetHistory();
 			}
 			onSetup(r.setup);
@@ -759,7 +772,7 @@ public final class LanClient {
 			this.catchUpSteps = 0;
 			this.catchUpTarget = r.totalSteps;
 			this.catchingUp = true;
-			this.runningJoin = r.turnsFrom == 0;
+			this.runningJoin = r.turnsFrom == 0 && !keepHeld;
 			// The host remembers the commands of the seat; a client that started over numbers its own after them.
 			synchronized (this.cmdLock) {
 				if (this.nextSeq < r.lastSeq) {
@@ -882,6 +895,7 @@ public final class LanClient {
 		this.ackedSentTo = -1;
 		this.pending.clear();
 		this.held = true;
+		this.polled = false;
 		this.resyncKind = kind;
 		this.resyncTick = tick;
 		resetHistory();
@@ -1186,6 +1200,7 @@ public final class LanClient {
 	private void mapReady(final File file) {
 		this.download = null;
 		this.mapFile = file;
+		LanLog.info("map ready: " + (file == null ? "-" : file.getName()));
 		this.mapState = MAP_READY;
 		sendMapStatus(LanProtocol.MAP_STATUS_HAVE, 100);
 		fireMapState(0);
@@ -1203,6 +1218,15 @@ public final class LanClient {
 	}
 
 	private void setMapState(final int state, final int percent) {
+		if (state != this.mapState && this.mapInfo != null) {
+			if (state == MAP_DOWNLOADING) {
+				LanLog.info("map download started: " + this.mapInfo.name + " (" + this.mapInfo.size + " bytes), "
+						+ percent + "% already there");
+			}
+			else if (state == MAP_VERIFYING) {
+				LanLog.info("map download complete, verifying");
+			}
+		}
 		this.mapState = state;
 		if (state == MAP_DOWNLOADING || state == MAP_VERIFYING) {
 			sendMapStatus(LanProtocol.MAP_STATUS_DOWNLOADING, percent);
@@ -1736,7 +1760,14 @@ public final class LanClient {
 
 	/** Next received turn for the game thread, or null. */
 	public TurnData pollTurn() {
-		return this.held ? null : this.turns.poll();
+		if (this.held) {
+			return null;
+		}
+		final TurnData t = this.turns.poll();
+		if (t != null) {
+			this.polled = true;
+		}
+		return t;
 	}
 
 	public int lastTurn() {

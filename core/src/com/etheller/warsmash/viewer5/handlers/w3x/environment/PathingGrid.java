@@ -345,7 +345,7 @@ public class PathingGrid {
 
 	public short getCellPathing(final int cellX, final int cellY) {
 		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if (index >= this.pathingGrid.length) {
+		if ((index < 0) || (index >= this.pathingGrid.length)) {
 			return 0;
 		}
 		return (short) (this.pathingGrid[index] | this.dynamicPathingOverlay[index]);
@@ -353,7 +353,7 @@ public class PathingGrid {
 
 	private short getCellPermanentPathing(final int cellX, final int cellY) {
 		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if (index >= this.pathingGrid.length) {
+		if ((index < 0) || (index >= this.pathingGrid.length)) {
 			return 0;
 		}
 		return (this.pathingGrid[index]);
@@ -361,7 +361,7 @@ public class PathingGrid {
 
 	public void setCellPathing(final int cellX, final int cellY, final short pathingValue) {
 		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if (index >= this.pathingGrid.length) {
+		if ((index < 0) || (index >= this.pathingGrid.length)) {
 			return;
 		}
 		this.pathingGrid[index] = pathingValue;

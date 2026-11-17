@@ -203,7 +203,7 @@ final class QuestNatives extends CommonNatives {
 					final CScriptDialogButton button = meleeUI.createScriptDialogButton(dialog, buttonText,
 							(char) hotkeyInt);
 					// The melee victory and defeat dialogs quit to the score screen.
-					button.setQuitAction(() -> meleeUI.endGame(doScoreScreen));
+					button.setQuitAction(doScoreScreen, () -> meleeUI.endGame(doScoreScreen));
 					return newHandle(buttonType, button);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DialogDisplay",

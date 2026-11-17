@@ -200,6 +200,8 @@ final class MapViewerUpdate {
 				}
 			}
 			viewer.startFrame();
+			final boolean unitShadows = !viewer.worldHidden
+					&& viewer.dynamicShadowManager.renderUnitShadowMask(viewer.webGL, worldScene, viewer.terrain);
 			final float scale = beginScaledWorld(viewer, true);
 			worldScene.startFrame();
 			if (!viewer.worldHidden && (viewer.skyInstance != null)) {
@@ -213,6 +215,9 @@ final class MapViewerUpdate {
 			PerfStats.end(PerfStats.Section.GROUND);
 			if (!viewer.worldHidden && (viewer.debugDepth > 2)) {
 				viewer.terrain.renderCliffs();
+			}
+			if (unitShadows) {
+				viewer.dynamicShadowManager.compositeUnitShadows(viewer.webGL);
 			}
 			PerfStats.end(PerfStats.Section.CLIFFS);
 			if (!viewer.worldHidden && (viewer.debugDepth > 3)) {

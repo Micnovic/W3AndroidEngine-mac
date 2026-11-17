@@ -46,6 +46,10 @@ public class SimpleStatusBarFrame extends AbstractUIFrame {
 		return this.decorateFileNames;
 	}
 
+	public float getValue() {
+		return Float.isNaN(this.lastValue) ? 0 : this.lastValue;
+	}
+
 	public void setValue(final float value) {
 		this.barFrame.setTexCoord(0, value, 0, 1);
 		this.barFrame.setWidth(((this.renderBounds.width - (this.barInset * 2)) * value));

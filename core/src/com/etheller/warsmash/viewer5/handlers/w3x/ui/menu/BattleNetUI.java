@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import net.warsmash.map.Crc32c;
 
 import com.badlogic.gdx.Gdx;
@@ -784,7 +785,7 @@ public class BattleNetUI {
 	public void joinedChannel(final String channelName) {
 		this.currentChannel = channelName;
 		this.rootFrame.setText(this.chatChannelNameLabel, channelName);
-		final String messageText = String.format(this.rootFrame.getTemplates().getDecoratedString("BNET_JOIN_CHANNEL"),
+		final String messageText = String.format(Locale.ROOT, this.rootFrame.getTemplates().getDecoratedString("BNET_JOIN_CHANNEL"),
 				channelName);
 		this.chatTextArea.addItem(messageText, this.rootFrame, this.uiViewport);
 	}
@@ -797,7 +798,7 @@ public class BattleNetUI {
 	}
 
 	public void channelMessage(final String userName, final String message) {
-		final String messageText = String.format(this.rootFrame.getTemplates().getDecoratedString("CHATEVENT_ID_TALK"),
+		final String messageText = String.format(Locale.ROOT, this.rootFrame.getTemplates().getDecoratedString("CHATEVENT_ID_TALK"),
 				this.rootFrame.getTemplates().getDecoratedString("CHATCOLOR_TALK_USER"), userName,
 				this.rootFrame.getTemplates().getDecoratedString("CHATCOLOR_TALK_MESSAGE"), message);
 		if (this.currentChannel == null) {
@@ -809,7 +810,7 @@ public class BattleNetUI {
 	}
 
 	public void channelEmote(final String userName, final String message) {
-		final String messageText = String.format(this.rootFrame.getTemplates().getDecoratedString("CHATEVENT_ID_EMOTE"),
+		final String messageText = String.format(Locale.ROOT, this.rootFrame.getTemplates().getDecoratedString("CHATEVENT_ID_EMOTE"),
 				this.rootFrame.getTemplates().getDecoratedString("CHATCOLOR_EMOTE_MESSAGE"), userName, message);
 		if (this.currentChannel == null) {
 			this.gameChatroomChatTextArea.addItem(messageText, this.rootFrame, this.uiViewport);
@@ -836,7 +837,7 @@ public class BattleNetUI {
 		}
 		}
 
-		final String messageText = String.format(this.rootFrame.getTemplates().getDecoratedString(msgKey), userName);
+		final String messageText = String.format(Locale.ROOT, this.rootFrame.getTemplates().getDecoratedString(msgKey), userName);
 		if (this.currentChannel == null) {
 			this.gameChatroomChatTextArea.addItem(messageText, this.rootFrame, this.uiViewport);
 		}

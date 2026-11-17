@@ -5,6 +5,7 @@ import java.util.List;
 import com.badlogic.gdx.audio.Music;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.warsmash.input.touch.PointKind;
+import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.handlers.w3x.camera.GameCameraManager;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
@@ -28,6 +29,18 @@ public interface WarsmashUI extends CommandErrorListener, WarsmashBaseUI {
 	/** The unit under the pointer now, or null. */
 	default CUnit getMouseFocusUnit() {
 		return null;
+	}
+
+	/**
+	 * A frame the game's own interface is made of, for BlzGetOriginFrame: the ORIGIN_FRAME_* type of Reforged and the
+	 * index among those of its kind. Null when this interface has no such frame.
+	 */
+	default UIFrame getOriginFrame(final int originType, final int index) {
+		return null;
+	}
+
+	/** Where the interface tells the script what the player does to its frames; null for none. */
+	default void setFrameEventSink(final FrameEventSink sink) {
 	}
 
 	CScriptDialog createScriptDialog(GlobalScope globalScope);
@@ -116,6 +129,10 @@ public interface WarsmashUI extends CommandErrorListener, WarsmashBaseUI {
 
 	void setCinematicScene(int portraitUnitId, CPlayerColor color, String speakerTitle, String text,
 			float sceneDuration, float voiceoverDuration);
+
+	/** A script started the sound file of a dialogue line, which the portrait of a scene may lip sync to. */
+	default void dialogueSoundStarted(final String soundPath) {
+	}
 
 	void enableUserControl(boolean value);
 

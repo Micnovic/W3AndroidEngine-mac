@@ -173,7 +173,7 @@ public final class SavedObjectGraph {
 	public static final class Writer {
 		private final Rules rules;
 		private final DataOutput bodies;
-		private final ByteArrayOutputStream tableBytes = new Bytes(1 << 16);
+		private final Bytes tableBytes = new Bytes(1 << 16);
 		private final DataOutputStream table = new DataOutputStream(this.tableBytes);
 		private final IdentityIds ids = new IdentityIds(lastObjectCount);
 		private final Set<Object> external = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -198,8 +198,16 @@ public final class SavedObjectGraph {
 
 		/** Goes after the bodies; a reader needs it first, so the caller stores it where it can be found. */
 		public byte[] finishTable() throws IOException {
+			return finishTableBytes().toByteArray();
+		}
+
+		/**
+		 * Like {@link #finishTable()}, without the copies of a table that runs to megabytes; the writer's own table
+		 * moves into the result, so this is to be called once.
+		 */
+		public Bytes finishTableBytes() throws IOException {
 			this.table.flush();
-			final ByteArrayOutputStream result = new Bytes(1 << 16);
+			final Bytes result = new Bytes(1 << 16);
 			final DataOutputStream out = new DataOutputStream(result);
 			out.writeInt(this.nextId);
 			out.writeInt(this.classIds.size());
@@ -219,8 +227,9 @@ public final class SavedObjectGraph {
 					out.writeUTF(fieldKey(field));
 				}
 			}
-			this.tableBytes.writeTo(out);
-			return result.toByteArray();
+			out.flush();
+			result.take(this.tableBytes);
+			return result;
 		}
 
 		public int objectCount() {
@@ -864,6 +873,42 @@ public final class SavedObjectGraph {
 			for (int i = 0; i < this.chunkCount; i++) {
 				out.write(this.chunks[i], 0, i == (this.chunkCount - 1) ? this.position : this.used[i]);
 			}
+		}
+
+		/** Moves the contents of the other buffer to the end of this one, which leaves it empty. */
+		void take(final Bytes other) {
+			if (this.current != null) {
+				this.used[this.chunkCount - 1] = this.position;
+			}
+			if (other.current != null) {
+				other.used[other.chunkCount - 1] = other.position;
+			}
+			for (int i = 0; i < other.chunkCount; i++) {
+				if (this.chunkCount == this.chunks.length) {
+					this.chunks = Arrays.copyOf(this.chunks, this.chunkCount << 1);
+					this.used = Arrays.copyOf(this.used, this.chunkCount << 1);
+				}
+				this.chunks[this.chunkCount] = other.chunks[i];
+				this.used[this.chunkCount] = other.used[i];
+				this.chunkCount++;
+			}
+			this.total += other.total;
+			// Nothing is written into the last chunk taken, but it is read up to its used part.
+			this.current = null;
+			this.position = this.chunkCount == 0 ? 0 : this.used[this.chunkCount - 1];
+			other.reset();
+		}
+
+		/**
+		 * Writes the contents like {@link #writeTo}, and lets go of each chunk once it is written, so that a buffer
+		 * being compressed does not stay whole while the compressed bytes grow. The buffer is empty afterwards.
+		 */
+		void writeToAndRelease(final java.io.OutputStream out) throws IOException {
+			for (int i = 0; i < this.chunkCount; i++) {
+				out.write(this.chunks[i], 0, i == (this.chunkCount - 1) ? this.position : this.used[i]);
+				this.chunks[i] = null;
+			}
+			reset();
 		}
 
 		@Override

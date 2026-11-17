@@ -104,20 +104,8 @@ public class CRegion extends AllocatedHandle {
 		regionManager.addRectForRegion(this, this.currentBounds);
 	}
 
-	public Rectangle getCurrentBounds() {
-		return this.currentBounds;
-	}
-
-	public void setCurrentBounds(final Rectangle currentBounds) {
-		this.currentBounds = currentBounds;
-	}
-
 	public boolean isComplexRegion() {
 		return this.complexRegion;
-	}
-
-	public void setComplexRegion(final boolean complexRegion) {
-		this.complexRegion = complexRegion;
 	}
 
 	public boolean contains(final float x, final float y, final CRegionManager regionManager) {

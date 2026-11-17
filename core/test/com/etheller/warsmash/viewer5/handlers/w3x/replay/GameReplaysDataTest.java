@@ -27,14 +27,50 @@ import com.etheller.warsmash.util.StringBundle;
  */
 class GameReplaysDataTest {
 	private static final String SKIN = "Units\\UnitSkin.txt";
+	private static final String FOOTMAN = "units\\human\\footman\\footman.mdx";
 
 	@Test
-	void layeredDataHasAnotherChecksumThanTheBase() throws Exception {
+	void everyGraphicsSetHasTheChecksumOfTheBase() throws Exception {
 		final DataSource base = installed();
 		final DataTable ini = new DataTable(StringBundle.EMPTY);
 		GraphicsSettings.apply(ini, GraphicsSet.DE, 0);
-		final DataSource layered = GraphicsSettings.gameData(base, ini, GraphicsSet.DE);
-		assertNotEquals(GameReplays.dataChecksum(base), GameReplays.dataChecksum(layered));
+		final int expected = GameReplays.dataChecksum(base);
+		assertEquals(expected, GameReplays.dataChecksum(GraphicsSettings.gameData(base, ini, GraphicsSet.DE)));
+		assertEquals(expected, GameReplays.dataChecksum(GraphicsSettings.gameData(base, ini, GraphicsSet.REFORGED)));
+	}
+
+	@Test
+	void theBasesSimulationFilesChangeTheChecksum() throws Exception {
+		final Map<String, String> files = new HashMap<>();
+		files.put("terrainart\\water.slk", "classic water");
+		files.put("ui\\soundinfo\\uisounds.slk", "classic sounds");
+		final int before = GameReplays.dataChecksum(new Fake(files));
+		files.put("terrainart\\water.slk", "another water");
+		assertNotEquals(before, GameReplays.dataChecksum(new Fake(files)));
+		files.put("terrainart\\water.slk", "classic water");
+		files.put("ui\\soundinfo\\uisounds.slk", "other sounds");
+		assertNotEquals(before, GameReplays.dataChecksum(new Fake(files)));
+	}
+
+	@Test
+	void aGraphicsPackagesWaterAndSoundTablesAreNotChecked() throws Exception {
+		final Map<String, String> files = new HashMap<>();
+		files.put("terrainart\\water.slk", "classic water");
+		files.put("units\\unitskin.txt", "classic skin");
+		final DataTable ini = new DataTable(StringBundle.EMPTY);
+		final int before = GameReplays.dataChecksum(GraphicsSettings.gameData(withPackages(files), ini,
+				GraphicsSet.REFORGED));
+		files.put("_hd.w3mod\\terrainart\\water.slk", "hd water without uSha");
+		files.put("_hd.w3mod\\ui\\soundinfo\\uisounds.slk", "hd sounds");
+		assertEquals(before, GameReplays.dataChecksum(GraphicsSettings.gameData(withPackages(files), ini,
+				GraphicsSet.REFORGED)));
+	}
+
+	private static DataSource withPackages(final Map<String, String> files) {
+		final Map<String, String> all = new HashMap<>(files);
+		all.put("_hd.w3mod\\" + FOOTMAN, "mark");
+		all.put("_de.w3mod\\" + FOOTMAN, "mark");
+		return new Fake(all);
 	}
 
 	@Test

@@ -27,10 +27,6 @@ public class COrderButton extends CExtensibleHandleAbstract {
 		return this.orderId;
 	}
 
-	public void setOrderId(final int orderId) {
-		this.orderId = orderId;
-	}
-
 	public int getAutoCastOrderId() {
 		return this.autoCastOrderId;
 	}

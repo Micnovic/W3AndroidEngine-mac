@@ -257,10 +257,6 @@ public class TransformationHandler {
 					this.foodCost != null ? -this.foodCost : null, null, this.onUntransformActions, this.castId);
 		}
 
-		public void setOnUntransformActions(final List<ABAction> onUntransformActions) {
-			this.onUntransformActions = onUntransformActions;
-		}
-
 		public int getCastId() {
 			return this.castId;
 		}

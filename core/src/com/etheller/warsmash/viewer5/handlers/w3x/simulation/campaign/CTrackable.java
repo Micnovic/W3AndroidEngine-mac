@@ -92,7 +92,4 @@ public final class CTrackable extends AllocatedHandle {
 		}
 	}
 
-	public boolean hasEvents() {
-		return !this.hitTriggers.isEmpty() || !this.trackTriggers.isEmpty();
-	}
 }

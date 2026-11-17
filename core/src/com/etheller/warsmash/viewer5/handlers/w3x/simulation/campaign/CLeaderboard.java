@@ -188,10 +188,6 @@ public final class CLeaderboard extends AllocatedHandle implements SavedAddedFie
 		return this.showValues;
 	}
 
-	public boolean isShowIcons() {
-		return this.showIcons;
-	}
-
 	public void setLabelColor(final int color) {
 		this.labelColor = color;
 		this.labelColorSet = true;

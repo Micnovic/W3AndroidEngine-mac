@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -19,6 +21,7 @@ import java.util.function.ToIntFunction;
 
 import org.junit.jupiter.api.Test;
 
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.testing.TestObjects;
 import com.etheller.warsmash.util.GameDataConstants;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -429,16 +432,40 @@ public class CReplayTest {
 				at = i;
 			}
 		}
-		assertTrue(at > 0, "the mask closes the header");
-		final byte[] old = new byte[now.length - 4];
-		System.arraycopy(now, 0, old, 0, at);
-		System.arraycopy(now, at + 4, old, at, now.length - at - 4);
+		assertTrue(at > 0, "the mask is the last number of the header");
+		// The authorship line follows the mask, so a format 4 file ends where the mask began.
+		final byte[] old = Arrays.copyOf(now, at);
 		old[7] = 4;
 		final CReplayHeader read = CReplay.readHeader(new ByteArrayInputStream(old));
 		assertEquals("test", read.getEngineVersion());
 		assertEquals(1337, read.getSeed());
 		assertFalse(read.usesKeyboardAndMouse(2));
 		assertFalse(CReplay.read(new ByteArrayInputStream(old)).getHeader().usesKeyboardAndMouse(2));
+	}
+
+	@Test
+	public void theHeaderNamesTheProjectAndAFormat5FileStillReads() throws IOException {
+		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		new CReplayWriter(bytes, header()).close();
+		final byte[] now = bytes.toByteArray();
+		final ByteArrayOutputStream line = new ByteArrayOutputStream();
+		new DataOutputStream(line).writeUTF(ProjectInfo.AUTHORSHIP);
+		assertTrue(new String(now, StandardCharsets.ISO_8859_1).contains("W3AndroidEngine by nikoltu"));
+		// Format 5 ended its header with the mask, so cutting the line out (it sits before the body) makes one.
+		final byte[] lineBytes = line.toByteArray();
+		int at = -1;
+		for (int i = 8; (i + lineBytes.length <= now.length) && (at < 0); i++) {
+			if (Arrays.equals(Arrays.copyOfRange(now, i, i + lineBytes.length), lineBytes)) {
+				at = i;
+			}
+		}
+		assertTrue(at > 0);
+		final byte[] old = new byte[now.length - lineBytes.length];
+		System.arraycopy(now, 0, old, 0, at);
+		System.arraycopy(now, at + lineBytes.length, old, at, now.length - at - lineBytes.length);
+		old[7] = 5;
+		assertEquals("test", CReplay.read(new ByteArrayInputStream(old)).getHeader().getEngineVersion());
+		assertEquals("test", CReplay.read(new ByteArrayInputStream(now)).getHeader().getEngineVersion());
 	}
 
 	@Test

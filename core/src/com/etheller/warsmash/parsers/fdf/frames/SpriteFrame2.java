@@ -1,6 +1,7 @@
 package com.etheller.warsmash.parsers.fdf.frames;
 
 import java.util.EnumSet;
+import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
@@ -173,6 +174,10 @@ public class SpriteFrame2 extends AbstractUIFrame {
 		this.scene.camera.ortho(0, this.renderBounds.width, 0, this.renderBounds.height, -1024f, 1024);
 	}
 
+	public MdxComplexInstance getInstance() {
+		return this.instance;
+	}
+
 	public void setSequence(final int index) {
 		if (this.instance != null) {
 			this.instance.setSequence(index);
@@ -181,7 +186,7 @@ public class SpriteFrame2 extends AbstractUIFrame {
 
 	public void setSequence(final String animationName) {
 		if (this.instance != null) {
-			SequenceUtils.randomSequence(this.instance, animationName.toLowerCase());
+			SequenceUtils.randomSequence(this.instance, animationName.toLowerCase(Locale.ROOT));
 		}
 	}
 

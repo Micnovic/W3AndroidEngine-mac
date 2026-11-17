@@ -30,6 +30,7 @@ final class EngineResources {
 	 * noticed.
 	 */
 	private static final String MANIFEST = "resources.manifest";
+	private static final String ASIDE_PREFIX = "resources.replaced-";
 
 	private EngineResources() {
 	}
@@ -68,8 +69,16 @@ final class EngineResources {
 		if (manifest.exists() && !manifest.delete()) {
 			throw new IOException("Unable to reset " + manifest);
 		}
-		for (final String path : shipped) {
-			copyAsset(context, ASSET_ROOT + "/" + path, new File(target, path));
+		try {
+			copyAll(context, shipped, target);
+		}
+		catch (final IOException e) {
+			// Files that adb push (the shell user) left in the folder cannot be written or deleted by the app, but the
+			// folder itself can be moved aside, which gives the app a folder of its own again.
+			Log.w(TAG, "Engine resources could not be written, replacing the folder", e);
+			moveAside(appFolder, target);
+			copyAll(context, shipped, target);
+			stale.clear();
 		}
 		for (final String path : stale) {
 			final File file = new File(target, path);
@@ -87,6 +96,45 @@ final class EngineResources {
 		}
 		Log.i(TAG, "Engine resources unpacked for " + stamp + ": " + shipped.size() + " files, " + stale.size()
 				+ " removed");
+	}
+
+	private static void copyAll(final Context context, final Set<String> shipped, final File target)
+			throws IOException {
+		for (final String path : shipped) {
+			copyAsset(context, ASSET_ROOT + "/" + path, new File(target, path));
+		}
+	}
+
+	/**
+	 * Renames the folder to a name of its own and removes what can be removed; whatever the app may not delete stays
+	 * under the new name, out of the engine's way, and is tried again at the next unpack.
+	 */
+	private static void moveAside(final File appFolder, final File target) throws IOException {
+		final File[] leftovers = appFolder.listFiles((dir, name) -> name.startsWith(ASIDE_PREFIX));
+		if (leftovers != null) {
+			for (final File leftover : leftovers) {
+				deleteTree(leftover);
+			}
+		}
+		if (!target.exists()) {
+			return;
+		}
+		final File aside = new File(appFolder, ASIDE_PREFIX + System.currentTimeMillis());
+		if (!target.renameTo(aside)) {
+			throw new IOException("Unable to replace " + target + ": the folder cannot be renamed");
+		}
+		deleteTree(aside);
+	}
+
+	private static boolean deleteTree(final File file) {
+		final File[] children = file.isDirectory() ? file.listFiles() : null;
+		boolean all = true;
+		if (children != null) {
+			for (final File child : children) {
+				all &= deleteTree(child);
+			}
+		}
+		return file.delete() && all;
 	}
 
 	/**
@@ -152,6 +200,9 @@ final class EngineResources {
 	private static void copyAsset(final Context context, final String assetPath, final File target)
 			throws IOException {
 		target.getParentFile().mkdirs();
+		if (target.exists() && !target.canWrite()) {
+			target.delete();
+		}
 		try (InputStream in = context.getAssets().open(assetPath);
 				OutputStream out = new FileOutputStream(target)) {
 			final byte[] buffer = new byte[8192];

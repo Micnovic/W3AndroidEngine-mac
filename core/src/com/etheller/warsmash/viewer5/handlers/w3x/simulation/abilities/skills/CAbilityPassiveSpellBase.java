@@ -130,10 +130,6 @@ public abstract class CAbilityPassiveSpellBase extends AbilityGenericSingleIconP
 		this.duration = duration;
 	}
 
-	public void setHeroDuration(final float heroDuration) {
-		this.heroDuration = heroDuration;
-	}
-
 	public War3ID getCode() {
 		return code;
 	}

@@ -109,6 +109,40 @@ class LanRejoinTest {
 	}
 
 	@Test
+	void aPlayerThatLoadsAfterTheOthersWentOnKeepsTheTurnsItAlreadyHolds() throws Exception {
+		this.env.startHost();
+		final Node a = this.env.joinAndWait("A");
+		final LanClient.Config slow = LanTestSupport.clientConfig("B");
+		slow.autoLoad = false;
+		final Recorder rec = new Recorder();
+		final Node b = this.env.join(slow, rec);
+		waitFor("welcome B", () -> rec.welcome != null);
+		a.client.setReady(true);
+		b.client.setReady(true);
+		waitFor("both ready", () -> a.rec.lobby != null && a.rec.lobby.slots.stream()
+				.filter(s -> s.kind == LanProtocol.SLOT_HUMAN && s.ready).count() == 2);
+		a.client.requestStart();
+		// the host lets the others go when the load time is over, B still loading
+		waitFor("go for B", 30000, () -> rec.go);
+		final Thread sender = sender(a, 0, 40, 3);
+		sender.join();
+		waitFor("turns held by B", () -> b.client.lastTurn() > 20);
+		final int held = rec.turns.size();
+		b.client.loaded();
+		waitFor("caught up", 30000, () -> rec.caughtUp > 0);
+		assertEquals(1, rec.rejoins);
+		assertTrue(rec.resyncs.isEmpty(), "a game that played none of its turns was told to start over");
+		assertTrue(!b.client.isRunningJoin());
+		waitFor("playing", () -> this.env.host.presenceOf(b.client.participantId()) == LanProtocol.PRESENCE_PLAYING);
+		final int common = Math.min(a.rec.turns.size(), rec.turns.size());
+		assertTrue(common >= held);
+		assertTrue(sameTurns(a.rec.turns, rec.turns, common), "B got other turns");
+		for (int i = 1; i < rec.turns.size(); i++) {
+			assertEquals(rec.turns.get(i - 1).n + 1, rec.turns.get(i).n, "a turn was given twice or lost");
+		}
+	}
+
+	@Test
 	void aClientThatStartsOverPlaysTheWholeGameAndNumbersItsCommandsOnFromTheOldOnes() throws Exception {
 		this.env.startHost();
 		final Node a = this.env.joinAndWait("A");

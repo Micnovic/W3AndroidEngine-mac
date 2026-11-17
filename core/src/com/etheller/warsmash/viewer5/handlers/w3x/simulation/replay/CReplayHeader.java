@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ai.AIDifficulty;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.CBasePlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
@@ -166,10 +167,6 @@ public final class CReplayHeader {
 		return this.gameSpeed;
 	}
 
-	public CMapDifficulty getDifficulty() {
-		return this.difficulty;
-	}
-
 	public int getChecksumInterval() {
 		return this.checksumInterval;
 	}
@@ -208,6 +205,7 @@ public final class CReplayHeader {
 			out.write(this.gameCaches);
 		}
 		out.writeInt(this.keyboardAndMouseSlots);
+		out.writeUTF(ProjectInfo.AUTHORSHIP);
 	}
 
 	static CReplayHeader read(final DataInputStream in, final int formatVersion) throws IOException {
@@ -236,6 +234,10 @@ public final class CReplayHeader {
 			in.readFully(gameCaches);
 		}
 		final int keyboardAndMouseSlots = formatVersion >= 5 ? in.readInt() : 0;
+		if (formatVersion >= 6) {
+			// Who made the build; kept for people reading the file, the simulation never needs it.
+			in.readUTF();
+		}
 		return new CReplayHeader(engineVersion, buildCommit, officialBuild, mapPath, mapChecksum, mapSize,
 				dataChecksum, recordedAt, seed,
 				localPlayerIndex, gameSpeed, difficulty, checksumInterval, slots, gameCaches, keyboardAndMouseSlots);

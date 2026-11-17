@@ -277,6 +277,7 @@ public class MdxShaders {
 				"uniform float u_filterMode;\r\n" + //
 				"uniform vec4 u_fogColor;\r\n" + //
 				"uniform vec4 u_fogParams;\r\n" + //
+				"uniform vec4 u_vertexColor;\r\n" + //
 				"uniform vec2 u_iblParams;\r\n" + //
 				"// uniform sampler2D u_lutMap;\r\n" + //
 				"// uniform sampler2D u_envDiffuseMap;\r\n" + //
@@ -582,8 +583,11 @@ public class MdxShaders {
 				"  vec3 iblDiffuse = envDiffuse * iblScale;\r\n" + //
 				"  vec3 iblSpecular = envSpecular * fresnel * (smoothness * smoothness) * iblScale;\r\n" + //
 				"  vec3 color = clamp(specularSum, 0.0, 1.0) + diffuse * (lambertFactorSum + iblDiffuse * aoFactor) + iblSpecular * aoFactor + emissive;\r\n" + //
+				// The fog of war shade and the unit tint come in the vertex color, as with the classic models.
+				"  color *= u_vertexColor.rgb;\r\n" + //
 				Shaders.fogSystem(false, null) + //
-				"  gl_FragColor = vec4(color, baseColor.a);\r\n" + //
+				// The unit's own transparency (invisibility, fading corpses, a trigger's alpha) and the geoset and layer alpha.
+				"  gl_FragColor = vec4(color, baseColor.a * v_layerAlpha * u_vertexColor.a);\r\n" + //
 				"}\r\n" + //
 				"void main() {\r\n" + //
 				"  #if defined(ONLY_DIFFUSE)\r\n" + //

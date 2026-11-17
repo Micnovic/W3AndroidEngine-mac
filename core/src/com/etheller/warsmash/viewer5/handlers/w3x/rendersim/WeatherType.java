@@ -14,6 +14,7 @@ import com.hiveworkshop.rms.parsers.mdlx.MdlxTexture;
  */
 public final class WeatherType {
 	private static final float BOUNDS = 100000;
+	private static final int UNSHADED = 0x8000;
 	private static final int UNFOGGED = 0x40000;
 	// Calibration: the original draws a streak (rain) wider and longer than the table's size and tail length give;
 	// the factors make the streaks match the original's pictures.
@@ -124,6 +125,8 @@ public final class WeatherType {
 		emitter.setSegmentScaling(sizes);
 		emitter.setHeadIntervals(new long[][] { { this.headUv[0], this.headUv[1], 1 }, { this.headUv[1], this.headUv[2], 1 } });
 		emitter.setTailIntervals(new long[][] { { this.tailUv[0], this.tailUv[1], 1 }, { this.tailUv[1], this.tailUv[2], 1 } });
+		// Weather is not lit: under a dark ambient light the lit streaks turn black instead of staying a pale veil.
+		emitter.setFlags(emitter.getFlags() | UNSHADED);
 		emitter.setTextureId(0);
 		if (!this.fogged) {
 			emitter.setFlags(emitter.getFlags() | UNFOGGED);

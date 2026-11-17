@@ -33,10 +33,27 @@ public class CBehaviorGiveItemToHero extends CAbstractRangedBehavior {
 
 	@Override
 	public boolean isWithinRange(final CSimulation simulation) {
-		final float range = this.targetHero.getInventoryData() != null
-				? simulation.getGameplayConstants().getGiveItemRange()
-				: simulation.getGameplayConstants().getPawnItemRange();
-		return this.unit.canReach(this.target, range);
+		if (receivesItems(simulation)) {
+			// Measured on 1.29: the hand-over counts from the centers and needs the distance below the range.
+			return distanceBetweenCenters() < simulation.getGameplayConstants().getGiveItemRange();
+		}
+		if (this.targetHero.getFirstAbilityOfType(CAbilityShopPurhaseItem.class) != null) {
+			return this.unit.canReach(this.target, simulation.getGameplayConstants().getPawnItemRange());
+		}
+		// Measured on 1.29: a unit without an inventory or a shop gets the item dropped at its feet, from the drop range.
+		return distanceBetweenCenters() <= simulation.getGameplayConstants().getDropItemRange();
+	}
+
+	private boolean receivesItems(final CSimulation simulation) {
+		final CAbilityInventory targetInventory = this.targetHero.getInventoryData();
+		return (targetInventory != null) && targetInventory.isCanGetItems()
+				&& targetInventory.isRequirementsMet(simulation, this.targetHero);
+	}
+
+	private double distanceBetweenCenters() {
+		final double dx = this.target.getX() - this.unit.getX();
+		final double dy = this.target.getY() - this.unit.getY();
+		return StrictMath.sqrt((dx * dx) + (dy * dy));
 	}
 
 	@Override
@@ -58,9 +75,10 @@ public class CBehaviorGiveItemToHero extends CAbstractRangedBehavior {
 
 	@Override
 	protected CBehavior update(final CSimulation simulation, final boolean withinFacingWindow) {
-		if (this.targetHero.getInventoryData() != null) {
-			this.inventory.dropItem(simulation, this.unit, this.targetItem, this.target.getX(), this.target.getY(),
-					true);
+		if (receivesItems(simulation)) {
+			// Measured on 1.29: the item keeps the position it had, it does not move to the new holder.
+			this.inventory.dropItem(simulation, this.unit, this.targetItem, this.targetItem.getX(),
+					this.targetItem.getY(), true);
 			this.targetHero.getInventoryData().giveItem(simulation, this.targetHero, this.targetItem, false);
 		}
 		else {
@@ -95,6 +113,10 @@ public class CBehaviorGiveItemToHero extends CAbstractRangedBehavior {
 				CShopEvents.firePawnItemEvents(simulation, this.unit, this.targetItem, this.targetHero);
 				simulation.removeItem(this.targetItem);
 				simulation.unitSoundEffectEvent(this.targetHero, shopPurchaseItemAbility.getAlias());
+			}
+			else {
+				this.inventory.dropItem(simulation, this.unit, this.targetItem, this.target.getX(),
+						this.target.getY(), true);
 			}
 		}
 		return this.unit.pollNextOrderBehavior(simulation);

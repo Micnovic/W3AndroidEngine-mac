@@ -12,10 +12,10 @@ import java.io.InputStream;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Locale;
 
 import javax.imageio.ImageIO;
 
-import org.apache.commons.io.IOUtils;
 
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -54,7 +54,7 @@ public final class ImageUtils {
 				// them as linear and then uploads with an sRGB format.
 				return getTexture(blpImage.getWidth(), blpImage.getHeight(), blpImage.getRgba());
 			}
-			if (!IMAGE_IO_AVAILABLE && path.toLowerCase().endsWith(".blp") && dataSource.has(path)) {
+			if (!IMAGE_IO_AVAILABLE && path.toLowerCase(Locale.ROOT).endsWith(".blp") && dataSource.has(path)) {
 				Log.warn("No decoder for " + path + " on this platform");
 				return null;
 			}
@@ -72,7 +72,7 @@ public final class ImageUtils {
 
 	public static AnyExtensionImage getAnyExtensionImageFixRGB(final DataSource dataSource, final String path,
 			final String errorType) throws IOException {
-		if (path.toLowerCase().endsWith(".blp")) {
+		if (path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 			try (InputStream stream = dataSource.getResourceAsStream(path)) {
 				if (stream == null) {
 					final String tgaPath = path.substring(0, path.length() - 4) + ".tga";
@@ -118,7 +118,7 @@ public final class ImageUtils {
 
 	private static DdsDecoder findDdsInsteadOfBlp(final DataSource dataSource, final String path, final int maxSize)
 			throws IOException {
-		if (!path.toLowerCase().endsWith(".blp")) {
+		if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 			return null;
 		}
 		final String basePath = path.substring(0, path.length() - 4);
@@ -138,7 +138,7 @@ public final class ImageUtils {
 	 */
 	private static ByteBuffer readFully(final DataSource dataSource, final String path) throws IOException {
 		try (InputStream stream = dataSource.getResourceAsStream(path)) {
-			return stream == null ? null : ByteBuffer.wrap(IOUtils.toByteArray(stream));
+			return stream == null ? null : ByteBuffer.wrap(StreamBytes.readAll(stream));
 		}
 	}
 
@@ -158,7 +158,7 @@ public final class ImageUtils {
 
 	private static BlpDecoder findDecodableBlp(final DataSource dataSource, final String path, final int maxSize)
 			throws IOException {
-		if (!path.toLowerCase().endsWith(".blp")) {
+		if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 			return null;
 		}
 		final ByteBuffer blpData = readFully(dataSource, path);
@@ -336,7 +336,7 @@ public final class ImageUtils {
 		if (stream == null) {
 			throw new IllegalStateException("Missing image: " + path);
 		}
-		final ByteBuffer data = ByteBuffer.wrap(IOUtils.toByteArray(stream));
+		final ByteBuffer data = ByteBuffer.wrap(StreamBytes.readAll(stream));
 		if (BlpDecoder.isBlp(data)) {
 			final BlpDecoder blp = BlpDecoder.decode(data);
 			final ByteBuffer rgba = blp.getRgba();

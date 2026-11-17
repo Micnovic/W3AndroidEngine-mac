@@ -35,10 +35,6 @@ public class CBuffWarClub extends CBuffTimed implements CUnitAttackPostDamageLis
 		this.strikesLeft = strikes;
 	}
 
-	public int getStrikesLeft() {
-		return this.strikesLeft;
-	}
-
 	@Override
 	protected void onBuffAdd(final CSimulation game, final CUnit unit) {
 		unit.addStateModBuff(this.enableClubAttack);

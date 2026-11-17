@@ -8,6 +8,18 @@ public final class ScriptUiState {
 	private boolean targetIndicatorEnabled = true;
 	private boolean originFramesHidden;
 	private boolean uiAutoPosition = true;
+	private Runnable frameFlush;
+
+	/** Called by the interface every frame, for the Frame API to lay out the frames a script changed. */
+	public void setFrameFlush(final Runnable frameFlush) {
+		this.frameFlush = frameFlush;
+	}
+
+	public void flushFrames() {
+		if (this.frameFlush != null) {
+			this.frameFlush.run();
+		}
+	}
 
 	public boolean isCursorEnabled() {
 		return this.cursorEnabled;

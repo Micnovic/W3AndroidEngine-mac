@@ -40,20 +40,25 @@ public final class LayeredDataSource implements DataSource {
 
 	/**
 	 * @param graphics the in-game graphics; its packages the data lacks are left out
-	 * @param locale   the language folder of the data, such as "enus"
+	 * @param locales  the language folders of the data, such as "enus", the one that wins first
 	 */
-	private LayeredDataSource(final DataSource data, final GraphicsSet graphics, final String locale) {
+	private LayeredDataSource(final DataSource data, final GraphicsSet graphics, final String[] locales) {
 		this.data = data;
 		this.graphics = graphics;
-		this.layers = layers(data, graphics.getPackages(), locale);
+		this.layers = layers(data, graphics.getPackages(), locales);
 	}
 
 	/** The data as a game reads it with these graphics: the data itself for Classic, or for data without them. */
-	public static DataSource wrap(final DataSource data, final GraphicsSet graphics, final String locale) {
+	public static DataSource wrap(final DataSource data, final GraphicsSet graphics, final String... locales) {
 		if ((graphics == GraphicsSet.CLASSIC) || !graphics.isAvailable(data)) {
 			return data;
 		}
-		return new LayeredDataSource(data, graphics, locale);
+		return new LayeredDataSource(data, graphics, locales);
+	}
+
+	@Override
+	public DataSource graphicsIndependent() {
+		return this.data.graphicsIndependent();
 	}
 
 	/** The graphics a data source shows: its own when it is layered, else Classic. */
@@ -61,13 +66,15 @@ public final class LayeredDataSource implements DataSource {
 		return data instanceof LayeredDataSource ? ((LayeredDataSource) data).graphics : GraphicsSet.CLASSIC;
 	}
 
-	private static String[] layers(final DataSource data, final String[] packages, final String locale) {
+	private static String[] layers(final DataSource data, final String[] packages, final String[] locales) {
 		final List<String> layers = new ArrayList<>();
 		for (final String graphicsPackage : packages) {
 			if (data.has(graphicsPackage + "\\" + GraphicsSet.PACKAGE_MARK)) {
 				// The package's speech wins over its other files, as a locale layer does over the Classic data.
-				if ((locale != null) && !locale.isEmpty()) {
-					layers.add(graphicsPackage + "\\_locales\\" + locale + ".w3mod\\");
+				for (final String locale : locales) {
+					if ((locale != null) && !locale.isEmpty()) {
+						layers.add(graphicsPackage + "\\_locales\\" + locale + ".w3mod\\");
+					}
 				}
 				layers.add(graphicsPackage + "\\");
 			}

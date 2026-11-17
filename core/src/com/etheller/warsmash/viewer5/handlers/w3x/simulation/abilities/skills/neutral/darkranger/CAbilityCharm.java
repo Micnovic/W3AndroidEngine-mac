@@ -61,7 +61,4 @@ public class CAbilityCharm extends CAbilityTargetSpellBase {
 		return maximumCreepLevel;
 	}
 
-	public void setMaximumCreepLevel(final int maximumCreepLevel) {
-		this.maximumCreepLevel = maximumCreepLevel;
-	}
 }

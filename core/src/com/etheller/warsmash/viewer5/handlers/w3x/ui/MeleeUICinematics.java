@@ -25,6 +25,7 @@ import com.etheller.warsmash.parsers.fdf.frames.SpriteFrame2;
 import com.etheller.warsmash.parsers.fdf.frames.StringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
 import com.etheller.warsmash.util.War3ID;
+import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens;
@@ -150,6 +151,10 @@ final class MeleeUICinematics {
 			this.cinematicPortrait = cinematicPortrait;
 			this.cinematicScenePanel = cinematicScenePanel;
 			this.secondaryTags = SequenceUtils.EMPTY;
+		}
+
+		MdxComplexInstance getInstance() {
+			return this.cinematicPortrait.getInstance();
 		}
 
 		public void endCinematicSequence() {
@@ -427,15 +432,20 @@ final class MeleeUICinematics {
 		}
 	}
 
+	/** Measured on 1.29: with the user interface disabled the world shows at about 0.36 of its brightness. */
+	boolean isUserUIDisabledDim() {
+		return !this.ui.userUIEnabled && !isInterfaceFading() && this.interfaceShown;
+	}
+
 	boolean isInterfaceFading() {
 		return this.interfaceFadeRate != 0f;
 	}
 
 	float getGameInterfaceAlpha() {
-		if (!this.ui.userUIEnabled) {
-			return 0f;
-		}
 		if (isInterfaceFading()) {
+			if (!this.ui.userUIEnabled) {
+				return 0f;
+			}
 			return this.interfaceOpacity;
 		}
 		return this.interfaceShown ? 1f : 0f;
@@ -490,7 +500,8 @@ final class MeleeUICinematics {
 
 	/**
 	 * EnableUserUI(false) hides the game interface during a fade without entering cinematic mode, so the letterbox
-	 * follows ShowInterface alone.
+	 * follows ShowInterface alone. Outside a fade the interface stays and only the world is darkened (see
+	 * isUserUIDisabledDim).
 	 */
 	private void applyInterfaceVisibility() {
 		if (isInterfaceFading()) {
@@ -499,7 +510,7 @@ final class MeleeUICinematics {
 			setInterfaceAlpha(getGameInterfaceAlpha(), 1f - this.interfaceOpacity);
 		}
 		else {
-			updateInterfaceVisibility(this.interfaceShown && this.ui.userUIEnabled);
+			updateInterfaceVisibility(this.interfaceShown);
 			this.ui.cinematicPanel.setVisible(!this.interfaceShown);
 			setInterfaceAlpha(1f, 1f);
 		}
@@ -540,11 +551,13 @@ final class MeleeUICinematics {
 					unitTypeData == null ? SequenceUtils.EMPTY : unitTypeData.getRequiredAnimationNames(),
 					sceneDuration);
 			this.ui.cinematicPortrait.talk(null, voiceoverDuration);
+			this.ui.lipSync().sceneStarted(this.ui.cinematicPortrait::getInstance);
 		}
 		else {
 			if (unitTypeData != null) {
 				this.ui.portrait.setCinematicTalkingHead(unitTypeData.getPortraitModel(), color.getHandleId(),
 						unitTypeData.getRequiredAnimationNames(), sceneDuration, null, voiceoverDuration);
+				this.ui.lipSync().sceneStarted(() -> this.ui.portrait.modelInstance);
 			}
 			if (areSubtitlesShown()) {
 				this.ui.messages.showGameMessage("|Cffffcc00" + speakerTitle + "|r: " + text, sceneDuration);

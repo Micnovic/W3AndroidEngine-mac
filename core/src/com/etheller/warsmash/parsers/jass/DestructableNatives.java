@@ -19,6 +19,7 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColor;
 
 /**
  * Destructable natives.
@@ -92,15 +93,17 @@ final class DestructableNatives extends CommonNatives {
 							.createDestructableZ(new War3ID(rawcode), x, y, z, facing, scale, variation));
 				});
 		// The 3.0 creation natives for destructables, in the argument order of common.j: object id, x, y, [z], face,
-		// [roll, pitch], scale, variation, [skin id], [color]. Roll, pitch and color are read but not shown yet.
+		// [roll, pitch], scale, variation, [skin id], [color]. Roll and pitch are read but not shown yet.
 		for (final String name : new String[] { "BlzCreateDestructablePitchRoll", "BlzCreateDestructableZPitchRoll",
 				"BlzCreateDestructableWithSkinPitchRoll", "BlzCreateDestructableZWithSkinPitchRoll",
 				"BlzCreateDestructableZWithSkin", "BlzCreateDestructableWithColor", "BlzCreateDestructableZWithColor",
 				"BlzCreateDestructableWithSkinColor", "BlzCreateDestructableZWithSkinColor",
-				"BlzCreateDestructableWithSkinPitchRollColor", "BlzCreateDestructableZWithSkinPitchRollColor" }) {
+				"BlzCreateDestructableWithSkinPitchRollColor", "BlzCreateDestructableZWithSkinPitchRollColor",
+				"BlzCreateDestructablePitchRollWithColor", "BlzCreateDestructableZPitchRollWithColor" }) {
 			final boolean hasZ = name.startsWith("BlzCreateDestructableZ");
 			final boolean hasPitchRoll = name.contains("PitchRoll");
 			final boolean hasSkin = name.contains("WithSkin");
+			final boolean hasColor = name.contains("Color");
 			jassProgramVisitor.getJassNativeManager().createNative(name, (arguments, globalScope, triggerScope) -> {
 				int index = 0;
 				int rawcode = arguments.get(index++).visit(IntegerJassValueVisitor.getInstance());
@@ -123,9 +126,19 @@ final class DestructableNatives extends CommonNatives {
 								scale, variation)
 						: this.simulation.createDestructable(new War3ID(rawcode), x, y, facing,
 								scale, variation);
+				if (hasColor) {
+					final Object color = arguments.get(index++).visit(ObjectJassValueVisitor.getInstance());
+					applyColor(destructable, color);
+				}
 				return new HandleJassValue(destructableType, destructable);
 			});
 		}
+		jassProgramVisitor.getJassNativeManager().createNative("SetDestructableColor",
+				(arguments, globalScope, triggerScope) -> {
+					applyColor(inGame(nullable(arguments, 0, ObjectJassValueVisitor.getInstance())),
+							arguments.get(1).visit(ObjectJassValueVisitor.getInstance()));
+					return null;
+				});
 		jassProgramVisitor.getJassNativeManager().createNative("KillDestructable",
 				(arguments, globalScope, triggerScope) -> {
 					final CDestructable dest = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
@@ -236,5 +249,12 @@ final class DestructableNatives extends CommonNatives {
 					} // else birth plays automatically
 					return null;
 				});
+	}
+
+	private void applyColor(final CDestructable destructable, final Object color) {
+		final RenderDestructable renderPeer = (destructable == null) ? null : war3MapViewer.getRenderPeer(destructable);
+		if ((renderPeer != null) && (color instanceof CPlayerColor)) {
+			renderPeer.setPlayerColor(((CPlayerColor) color).ordinal());
+		}
 	}
 }

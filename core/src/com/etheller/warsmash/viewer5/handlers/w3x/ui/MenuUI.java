@@ -24,7 +24,10 @@ import com.etheller.warsmash.WarsmashGdxMenuScreen;
 import com.etheller.warsmash.WarsmashGdxMultiScreenGame;
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.lan.LanGameStart;
+import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.launcher.CustomContent;
+import com.etheller.warsmash.launcher.ProjectInfo;
+import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.input.touch.VirtualCursor;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
@@ -457,6 +460,14 @@ public class MenuUI {
 		this.glueScreenLoop.play(this.uiScene.audioContext, 0f, 0f, 0f);
 	}
 
+	/**
+	 * The edition a launcher started the game in ({@link com.etheller.warsmash.launcher.LauncherKeys#EDITION_ROC} or
+	 * EDITION_TFT), which chooses the campaign list of game data that keep one per edition; before the menu is built.
+	 */
+	public void setCampaignEdition(final String edition) {
+		this.campaigns.setEdition(edition);
+	}
+
 	/** The profile a launcher starts the game with, for a loading screen previewed before it is taken on. */
 	public void setStartupProfile(final String profile) {
 		this.loadingScreen.setStartupProfile(profile);
@@ -475,6 +486,11 @@ public class MenuUI {
 	/** The menu with the error dialog, for a map that could not be started or loaded. */
 	public int mapLoadErrorCount() {
 		return this.mapStart.mapLoadErrorCount();
+	}
+
+	/** Why the last map or mission could not be started or loaded, in one line; null when none could not. */
+	public String mapLoadFailureReason() {
+		return this.mapStart.mapLoadFailureReason();
 	}
 
 	public void showMapLoadError() {
@@ -750,7 +766,25 @@ public class MenuUI {
 			if (!this.loadingScreen.render(batch, font20, glyphLayout)) {
 				this.rootFrame.render(batch, font20, glyphLayout);
 			}
+			if (this.loadingScreen.isShown()) {
+				drawLoadingCredit(batch, glyphLayout);
+			}
 		}
+	}
+
+	/** The project's name in the corner of a map's loading screen, small enough to leave the screen's own text alone. */
+	private void drawLoadingCredit(final SpriteBatch batch, final GlyphLayout glyphLayout) {
+		final BitmapFont font = this.rootFrame.getFont14();
+		final Rectangle screen = this.rootFrame.getRenderBounds();
+		final Color previous = font.getColor().cpy();
+		glyphLayout.setText(font, ProjectInfo.CREDIT);
+		final float x = (screen.x + screen.width) - glyphLayout.width - 8;
+		final float y = screen.y + glyphLayout.height + 8;
+		font.setColor(0, 0, 0, 0.6f);
+		font.draw(batch, ProjectInfo.CREDIT, x + 1, y - 1);
+		font.setColor(1, 1, 1, 0.55f);
+		font.draw(batch, ProjectInfo.CREDIT, x, y);
+		font.setColor(previous);
 	}
 
 	private float getMinWorldWidth() {
@@ -971,6 +1005,10 @@ public class MenuUI {
 
 						@Override
 						public void applied() {
+							final RenderScaleStore store = RenderScaleStore.Holder.get();
+							if (store != null) {
+								GraphicsSettings.setRenderScalePercent(MenuUI.this.warsmashIni, store.percent());
+							}
 							if (MenuUI.this.currentMusics != null) {
 								for (final Music music : MenuUI.this.currentMusics) {
 									if (music != null) {

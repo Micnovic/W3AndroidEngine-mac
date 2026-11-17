@@ -307,6 +307,10 @@ public final class LanText {
 		return t("lan_downloading");
 	}
 
+	public static String mapReceived() {
+		return t("lan_map_received");
+	}
+
 	public static String controlSchemeNow(final String name, final boolean keyboardAndMouse) {
 		return t(keyboardAndMouse ? "lan_control_kbm" : "lan_control_touch", name);
 	}

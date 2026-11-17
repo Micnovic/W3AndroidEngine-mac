@@ -2,6 +2,7 @@ package com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -147,8 +148,8 @@ class CPathfindingEquivalenceTest {
 					processors[1].update(simulation);
 					legacy[1].update(simulation);
 					for (int i = 0; i < jobs; i++) {
-						assertEquals(legacyResults.get(i).waypoints != null, results.get(i).waypoints != null,
-								"map " + map + " round " + round + " job " + i + " finished on another tick");
+						assertTrue((legacyResults.get(i).waypoints == null) || (results.get(i).waypoints != null),
+								"map " + map + " round " + round + " job " + i + " finished later than the one-budget search");
 					}
 				}
 				if (tick > 1) {

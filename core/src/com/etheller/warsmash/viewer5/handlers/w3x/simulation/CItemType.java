@@ -33,6 +33,7 @@ public class CItemType {
 	private final CItemTypeJass itemClass;
 	private final List<CUnitTypeRequirement> requirements;
 	private int stockInitial = 1;
+	private int stackMax;
 
 	public CItemType(final War3ID typeId, final List<War3ID> abilityList, final War3ID cooldownGroup, final boolean ignoreCooldown,
 			final int numberOfCharges, final boolean activelyUsed, final boolean perishable,
@@ -128,6 +129,15 @@ public class CItemType {
 
 	public void setStockInitial(final int stockInitial) {
 		this.stockInitial = stockInitial;
+	}
+
+	/** The charges one held item of this type takes in when another of its type is picked up; 0 means it does not stack. */
+	public int getStackMax() {
+		return this.stackMax;
+	}
+
+	public void setStackMax(final int stackMax) {
+		this.stackMax = stackMax;
 	}
 
 	public int getMaxLife() {

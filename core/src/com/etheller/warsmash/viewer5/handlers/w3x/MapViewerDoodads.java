@@ -1,6 +1,11 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.function.Consumer;
+
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -16,12 +21,15 @@ import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.tga.TgaFile;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.CreatedDestructable;
+import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.LoadMapTask;
+import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.MapLoader;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.BuildingShadow;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDoodad;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDoodadTable;
 
 /**
  * Creates the doodads and destructables of a map, and works out their pathing.
@@ -30,8 +38,14 @@ final class MapViewerDoodads {
 	private MapViewerDoodads() {
 	}
 
-	static void loadDoodadsAndDestructibles(final War3MapViewer viewer, final Warcraft3MapRuntimeObjectData modifications,
-			final War3MapW3i w3iFile) throws IOException {
+	/**
+	 * Queues the creation of the map's doodads and destructables onto the loader a slice at a time: a map with
+	 * thousands of them, which load models and textures, would otherwise hold the frame for as long as the app can be
+	 * left unpaused.
+	 */
+	static void queueDoodadsAndDestructibles(final War3MapViewer viewer,
+			final Warcraft3MapRuntimeObjectData modifications, final War3MapW3i w3iFile, final MapLoader loader)
+			throws IOException {
 		MapViewerLoading.applyModificationFile(viewer, viewer.doodadsData, viewer.doodadMetaData, modifications.getDoodads(),
 				WorldEditorDataType.DOODADS);
 		MapViewerLoading.applyModificationFile(viewer, viewer.doodadsData, viewer.destructableMetaData, modifications.getDestructibles(),
@@ -39,81 +53,91 @@ final class MapViewerDoodads {
 
 		final War3MapDoo doo = viewer.mapMpq.readDoodads(w3iFile);
 
+		final List<com.etheller.warsmash.parsers.w3x.doo.Doodad> placed = new ArrayList<>();
 		for (final com.etheller.warsmash.parsers.w3x.doo.Doodad doodad : doo.getDoodads()) {
-			if ((doodad.getFlags() & 0x2) == 0) {
-				continue;
+			if ((doodad.getFlags() & 0x2) != 0) {
+				placed.add(doodad);
 			}
-			final War3ID doodadId = doodad.getId();
-			final int doodadVariation = doodad.getVariation();
-			final float[] location = doodad.getLocation();
-			final float facingRadians = doodad.getAngle();
-			final short lifePercent = doodad.getLife();
-			final float[] scale = doodad.getScale();
-			createDestructableOrDoodad(viewer, doodadId, modifications, doodadVariation, location, facingRadians, lifePercent,
-					scale);
 		}
+		final LoadMapTask finish = () -> {
+			viewer.doodadTable = CDoodadTable.build(doo.getDoodads(), id -> {
+				final GameObject doodadRow = modifications.getDoodads().get(id);
+				return doodadRow == null ? null
+						: new float[] { doodadRow.readSLKTagFloat("maxPitch"), doodadRow.readSLKTagFloat("maxRoll") };
+			}, viewer.simulation.getTerrainData());
 
-		// Cliff/Terrain doodads.
-		for (final com.etheller.warsmash.parsers.w3x.doo.TerrainDoodad doodad : doo.getTerrainDoodads()) {
-			final GameObject row = modifications.getDoodads().get(doodad.getId());
-			String file = row.readSLKTag("file");//
-			if ("".equals(file)) {
-				final String blaBla = row.readSLKTag("file");
-				Log.info("bla");
-			}
-			if (file.toLowerCase().endsWith(".mdl")) {
+			viewer.doodadsReady = true;
+			viewer.anyReady = true;
+		};
+		final LoadMapTask terrainDoodads = () -> loader.addSlices(doo.getTerrainDoodads().iterator(),
+				doodad -> loadTerrainDoodad(viewer, modifications, doodad), finish);
+		loader.addSlices(placed.iterator(), doodad -> {
+			final float[] location = doodad.getLocation();
+			createDestructableOrDoodad(viewer, doodad.getId(), modifications, doodad.getVariation(), location,
+					doodad.getAngle(), doodad.getLife(), doodad.getScale());
+		}, terrainDoodads);
+	}
+
+	private static void loadTerrainDoodad(final War3MapViewer viewer, final Warcraft3MapRuntimeObjectData modifications,
+			final com.etheller.warsmash.parsers.w3x.doo.TerrainDoodad doodad) {
+		final GameObject row = modifications.getDoodads().get(doodad.getId());
+		String file = row.readSLKTag("file");//
+		final MdxModel model;
+		if ((file == null) || MapViewerEffects.isNoModelPath(file)) {
+			// A doodad type without a model file (map dummies) is placed all the same, just not seen.
+			model = viewer.emptyModel();
+		}
+		else {
+			if (file.toLowerCase(Locale.ROOT).endsWith(".mdl")) {
 				file = file.substring(0, file.length() - 4);
 			}
-			if (!file.toLowerCase().endsWith(".mdx")) {
+			if (!file.toLowerCase(Locale.ROOT).endsWith(".mdx")) {
 				file += ".mdx";
 			}
-			final MdxModel model = (MdxModel) viewer.load(file, viewer.mapPathSolver, viewer.solverParams);
-
-			final String pathingTexture = row.readSLKTag("pathTex");
-			ArgbImage pathingTextureImage;
-			if ((pathingTexture != null) && (pathingTexture.length() > 0) && !"_".equals(pathingTexture)) {
-
-				pathingTextureImage = viewer.filePathToPathingMap.get(pathingTexture.toLowerCase());
-				if (pathingTextureImage == null) {
-					if (viewer.mapMpq.has(pathingTexture)) {
-						try {
-							pathingTextureImage = TgaFile.readTGAPixels(pathingTexture,
-									viewer.mapMpq.getResourceAsStream(pathingTexture));
-							viewer.filePathToPathingMap.put(pathingTexture.toLowerCase(), pathingTextureImage);
-						} catch (final Exception exc) {
-							Log.error(exc);
-						}
-					}
-				}
-			} else {
-				pathingTextureImage = null;
-			}
-			if (pathingTextureImage != null) {
-				// blit out terrain cells under this TerrainDoodad
-				final int textureWidth = pathingTextureImage.getWidth();
-				final int textureHeight = pathingTextureImage.getHeight();
-				final int textureWidthTerrainCells = textureWidth / 4;
-				final int textureHeightTerrainCells = textureHeight / 4;
-				final int minCellX = (int) doodad.getLocation()[0];
-				final int minCellY = (int) doodad.getLocation()[1];
-				final int maxCellX = (minCellX + textureWidthTerrainCells) - 1;
-				final int maxCellY = (minCellY + textureHeightTerrainCells) - 1;
-				for (int j = minCellY; j <= maxCellY; j++) {
-					for (int i = minCellX; i <= maxCellX; i++) {
-						viewer.terrain.removeTerrainCellWithoutFlush(i, j);
-						viewer.simulation.getTerrainData().hideCell(i, j);
-					}
-				}
-				viewer.terrain.flushRemovedTerrainCells();
-				viewer.simulation.getTerrainData().flushHiddenCells();
-			}
-
-			Log.info("Loading terrain doodad: " + file);
-			viewer.terrainDoodads.add(new TerrainDoodad(viewer, model, row, doodad, pathingTextureImage));
+			model = (MdxModel) viewer.load(file, viewer.mapPathSolver, viewer.solverParams);
 		}
 
-		viewer.doodadsReady = true;
-		viewer.anyReady = true;
+		final String pathingTexture = row.readSLKTag("pathTex");
+		ArgbImage pathingTextureImage;
+		if ((pathingTexture != null) && (pathingTexture.length() > 0) && !"_".equals(pathingTexture)) {
+
+			pathingTextureImage = viewer.filePathToPathingMap.get(pathingTexture.toLowerCase(Locale.ROOT));
+			if (pathingTextureImage == null) {
+				if (viewer.mapMpq.has(pathingTexture)) {
+					try {
+						pathingTextureImage = TgaFile.readTGAPixels(pathingTexture,
+								viewer.mapMpq.getResourceAsStream(pathingTexture));
+						viewer.filePathToPathingMap.put(pathingTexture.toLowerCase(Locale.ROOT), pathingTextureImage);
+					} catch (final Exception exc) {
+						Log.error(exc);
+					}
+				}
+			}
+		} else {
+			pathingTextureImage = null;
+		}
+		if (pathingTextureImage != null) {
+			// blit out terrain cells under this TerrainDoodad
+			final int textureWidth = pathingTextureImage.getWidth();
+			final int textureHeight = pathingTextureImage.getHeight();
+			final int textureWidthTerrainCells = textureWidth / 4;
+			final int textureHeightTerrainCells = textureHeight / 4;
+			final int minCellX = (int) doodad.getLocation()[0];
+			final int minCellY = (int) doodad.getLocation()[1];
+			final int maxCellX = (minCellX + textureWidthTerrainCells) - 1;
+			final int maxCellY = (minCellY + textureHeightTerrainCells) - 1;
+			for (int j = minCellY; j <= maxCellY; j++) {
+				for (int i = minCellX; i <= maxCellX; i++) {
+					viewer.terrain.removeTerrainCellWithoutFlush(i, j);
+					viewer.simulation.getTerrainData().hideCell(i, j);
+				}
+			}
+			viewer.terrain.flushRemovedTerrainCells();
+			viewer.simulation.getTerrainData().flushHiddenCells();
+		}
+
+		Log.info("Loading terrain doodad: " + file);
+		viewer.terrainDoodads.add(new TerrainDoodad(viewer, model, row, doodad, pathingTextureImage));
 	}
 
 	static void createDoodad(final War3MapViewer viewer, final GameObject row, final int doodadVariation, final float[] location,
@@ -264,6 +288,9 @@ final class MapViewerDoodads {
 	static MdxModel getDoodadModel(final War3MapViewer viewer, final int doodadVariation, final GameObject row) {
 		String file = row.readSLKTag("file");
 		final int numVar = row.readSLKTagInt("numVar");
+		if ((file == null) || MapViewerEffects.isNoModelPath(file)) {
+			return viewer.emptyModel();
+		}
 
 		if (file.endsWith(".mdx") || file.endsWith(".mdl")) {
 			file = file.substring(0, file.length() - 4);
@@ -345,6 +372,22 @@ final class MapViewerDoodads {
 	 */
 	static void setDoodadAnimation(final War3MapViewer viewer, final String doodadId, final Rectangle area, final float centerX,
 			final float centerY, final float radius, final boolean nearestOnly, final String animation) {
+		forDoodads(viewer, doodadId, area, centerX, centerY, radius, nearestOnly,
+				doodad -> doodad.playAnimation(animation));
+	}
+
+	/**
+	 * SetDoodadColor. Null area means every doodad of the type.
+	 */
+	static void setDoodadColor(final War3MapViewer viewer, final String doodadId, final Rectangle area, final float centerX,
+			final float centerY, final float radius, final boolean nearestOnly, final int playerColor) {
+		forDoodads(viewer, doodadId, area, centerX, centerY, radius, nearestOnly,
+				doodad -> doodad.setPlayerColor(playerColor));
+	}
+
+	private static void forDoodads(final War3MapViewer viewer, final String doodadId, final Rectangle area,
+			final float centerX, final float centerY, final float radius, final boolean nearestOnly,
+			final Consumer<RenderDoodad> action) {
 		RenderDoodad nearest = null;
 		float nearestDistance = Float.MAX_VALUE;
 		for (final RenderDoodad doodad : viewer.doodads) {
@@ -356,7 +399,7 @@ final class MapViewerDoodads {
 			final float distance = (dx * dx) + (dy * dy);
 			if (area != null) {
 				if (area.contains(doodad.getX(), doodad.getY())) {
-					doodad.playAnimation(animation);
+					action.accept(doodad);
 				}
 			}
 			else if (distance <= (radius * radius)) {
@@ -367,12 +410,12 @@ final class MapViewerDoodads {
 					}
 				}
 				else {
-					doodad.playAnimation(animation);
+					action.accept(doodad);
 				}
 			}
 		}
 		if (nearest != null) {
-			nearest.playAnimation(animation);
+			action.accept(nearest);
 		}
-	}
+	}
 }

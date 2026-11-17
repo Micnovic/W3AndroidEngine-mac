@@ -50,6 +50,11 @@ public abstract class ABActionDamageSplashBase implements ABAction {
 
 	protected abstract ABFloatCallback baseDamageCallback();
 
+	/** Radius that takes the full damage; the actions that have no reduced tiers name it differently. */
+	protected ABFloatCallback fullRadiusCallback() {
+		return fullDamageRadius;
+	}
+
 	protected abstract int tierCount();
 
 	protected abstract ABFloatCallback tierRadiusCallback(int tier);
@@ -85,8 +90,9 @@ public abstract class ABActionDamageSplashBase implements ABAction {
 			final float[] tierValue = new float[tiers];
 			float theMaxDamage = 0;
 			CUnit theSource = caster;
-			if (this.fullDamageRadius != null) {
-				pfullRad = this.fullDamageRadius.callback(game, caster, localStore, castId);
+			final ABFloatCallback fullRadiusValue = fullRadiusCallback();
+			if (fullRadiusValue != null) {
+				pfullRad = fullRadiusValue.callback(game, caster, localStore, castId);
 			}
 			for (int i = 0; i < tiers; i++) {
 				final ABFloatCallback radius = tierRadiusCallback(i);
@@ -133,21 +139,12 @@ public abstract class ABActionDamageSplashBase implements ABAction {
 						if (validTarget == null || validTarget.callback(game, caster, localStore, castId)) {
 							if (enumUnit.canReach(loc, fullRad)) {
 								fullhits.add(enumUnit);
-								if (unitSpecificDamageMod != null) {
-									counts.add(unitSpecificDamageMod.callback(game, caster, localStore, castId));
-								} else {
-									counts.add(1f);
-								}
+								counts.add(1f);
 							} else {
 								for (int i = 0; i < tiers; i++) {
 									if (enumUnit.canReach(loc, tierRad[i])) {
 										tierhits.get(i).add(enumUnit);
-										if (unitSpecificDamageMod != null) {
-											counts.add(ratio[i]
-													* unitSpecificDamageMod.callback(game, caster, localStore, castId));
-										} else {
-											counts.add(ratio[i]);
-										}
+										counts.add(ratio[i]);
 										break;
 									}
 								}
@@ -158,15 +155,12 @@ public abstract class ABActionDamageSplashBase implements ABAction {
 					}
 				});
 
+				// the maximum is shared by the units; a modifier such as a building's reduction applies after it
 				float count = 0;
 				for (float c : counts) {
 					count += c;
 				}
-				float hitWeight = fullhits.size();
-				for (int i = 0; i < tiers; i++) {
-					hitWeight += ratio[i] * tierhits.get(i).size();
-				}
-				final float damPerTar = baseDamage * count > theMaxDamage ? theMaxDamage / hitWeight : baseDamage;
+				final float damPerTar = baseDamage * count > theMaxDamage ? theMaxDamage / count : baseDamage;
 
 				for (CUnit hit : fullhits) {
 					localStore.put(ABLocalStoreKeys.ENUMUNIT + castId, hit);

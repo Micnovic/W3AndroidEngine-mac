@@ -58,24 +58,12 @@ public class CAbilityFactory extends CAbilityPassiveSpellBase {
 		}
 	}
 
-	public War3ID getSpawnUnitId() {
-		return spawnUnitId;
-	}
-
 	public void setSpawnUnitId(final War3ID spawnUnitId) {
 		this.spawnUnitId = spawnUnitId;
 	}
 
-	public float getLeashRange() {
-		return leashRange;
-	}
-
 	public void setLeashRange(final float leashRange) {
 		this.leashRange = leashRange;
-	}
-
-	public float getSpawnInterval() {
-		return spawnInterval;
 	}
 
 	public void setSpawnInterval(final float spawnInterval) {

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.SoftReference;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -94,7 +95,7 @@ public class DataSourceFDFParserBuilder implements FDFParserBuilder {
 					final int charPositionInLine, final String msg, final RecognitionException e) {
 				String sourceName = path;
 				if (!sourceName.isEmpty()) {
-					sourceName = String.format("%s:%d:%d: ", sourceName, line, charPositionInLine);
+					sourceName = String.format(Locale.ROOT, "%s:%d:%d: ", sourceName, line, charPositionInLine);
 				}
 
 				Log.warn(sourceName + "line " + line + ":" + charPositionInLine + " " + msg);

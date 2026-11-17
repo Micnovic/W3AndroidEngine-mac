@@ -69,10 +69,6 @@ public class CBuffAntiMagicShell extends CBuffTimed implements CUnitAttackFinalD
 		return previousDamage - absorbed;
 	}
 
-	public float getShieldLifeRemaining() {
-		return this.shieldLifeRemaining;
-	}
-
 	@Override
 	public boolean isTimedLifeBar() {
 		return false;

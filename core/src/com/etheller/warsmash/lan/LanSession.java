@@ -70,19 +70,23 @@ public final class LanSession {
 		if (store != null && c != null) {
 			final net.warsmash.lan.RejoinKey key = c.rejoinKey();
 			if (key != null) {
+				this.keptGameId = key.gameId;
+				this.keptKey = true;
 				store.save(key);
 			}
 		}
 	}
 
+	// The game of the key kept is remembered here: dropping it must not ask the client, whose loop may be stopped
+	// while the caller is the app's main thread.
+	private volatile long keptGameId;
+	private volatile boolean keptKey;
+
 	private void dropKey() {
 		final RejoinStore store = this.rejoinStore;
-		final LanClient c = this.client;
-		if (store != null && c != null) {
-			final net.warsmash.lan.RejoinKey key = c.rejoinKey();
-			if (key != null) {
-				store.clear(key.gameId);
-			}
+		if (store != null && this.keptKey) {
+			store.clear(this.keptGameId);
+			this.keptKey = false;
 		}
 	}
 

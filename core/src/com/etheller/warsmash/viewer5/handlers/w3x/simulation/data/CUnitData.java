@@ -1077,10 +1077,6 @@ public class CUnitData {
 		return attack;
 	}
 
-	public float getPropulsionWindow(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsFloat(PROPULSION_WINDOW, 0);
-	}
-
 	public int getFormationRank(final War3ID unitTypeId) {
 		final GameObject unitType = this.unitData.get(unitTypeId.asStringValue());
 		return unitType == null ? 0 : unitType.getFieldAsInteger("formation", 0);
@@ -1132,38 +1128,6 @@ public class CUnitData {
 
 	public int getDefense(final War3ID unitTypeId) {
 		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsInteger(DEFENSE, 0);
-	}
-
-	public int getA1ProjectileSpeed(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsInteger(ATTACK1_PROJECTILE_SPEED, 0);
-	}
-
-	public float getA1ProjectileArc(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsFloat(ATTACK1_PROJECTILE_ARC, 0);
-	}
-
-	public int getA2ProjectileSpeed(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsInteger(ATTACK2_PROJECTILE_SPEED, 0);
-	}
-
-	public float getA2ProjectileArc(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsFloat(ATTACK2_PROJECTILE_ARC, 0);
-	}
-
-	public String getA1MissileArt(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsString(ATTACK1_MISSILE_ART, 0);
-	}
-
-	public String getA2MissileArt(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsString(ATTACK2_MISSILE_ART, 0);
-	}
-
-	public float getA1Cooldown(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsFloat(ATTACK1_COOLDOWN, 0);
-	}
-
-	public float getA2Cooldown(final War3ID unitTypeId) {
-		return this.unitData.get(unitTypeId.asStringValue()).getFieldAsFloat(ATTACK2_COOLDOWN, 0);
 	}
 
 	public float getProjectileLaunchX(final War3ID unitTypeId) {

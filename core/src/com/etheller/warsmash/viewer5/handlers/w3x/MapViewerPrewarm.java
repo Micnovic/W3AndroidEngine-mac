@@ -5,8 +5,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,7 +57,7 @@ final class MapViewerPrewarm {
 
 		final String script = readMapScript(viewer);
 		// First, so that the decoding runs beside the model loading that follows.
-		loader.addLoadTask(() -> prefetchAmbientSounds(viewer, script));
+		loader.addLoadTask(() -> prefetchAmbientSounds(viewer, script, loader));
 
 		final Set<War3ID> placed = new LinkedHashSet<>();
 		final Set<War3ID> ownTypes = new LinkedHashSet<>();
@@ -78,12 +80,12 @@ final class MapViewerPrewarm {
 		}
 		started.removeAll(placed);
 		otherTypes.removeAll(ownTypes);
-		loader.addLoadTask(() -> prefetchUnitSounds(viewer, ownTypes, otherTypes));
+		loader.addLoadTask(() -> prefetchUnitSounds(viewer, ownTypes, otherTypes, loader));
 		for (final War3ID typeId : placed) {
-			loader.addLoadTask(() -> load(types, typeId));
+			loader.addLoadTask(loader.modelTask(() -> load(types, typeId)));
 		}
 		for (final War3ID typeId : started) {
-			loader.addLoadTask(() -> load(types, typeId));
+			loader.addLoadTask(loader.modelTask(() -> load(types, typeId)));
 		}
 		loader.addLoadTask(() -> queuePreloads(viewer, w3i, script, loader));
 	}
@@ -182,7 +184,7 @@ final class MapViewerPrewarm {
 		addPreloadedFiles(files, script);
 		if (!files.isEmpty()) {
 			final Deque<String> names = new ArrayDeque<>(files);
-			loader.addLoadTask(() -> loadPreloaded(viewer, names, loader));
+			loader.addLoadTask(loader.modelTask(() -> loadPreloaded(viewer, names, loader)));
 		}
 	}
 
@@ -201,7 +203,7 @@ final class MapViewerPrewarm {
 		}
 		while (!names.isEmpty() && (System.nanoTime() < end));
 		if (!names.isEmpty()) {
-			loader.addLoadTask(() -> loadPreloaded(viewer, names, loader));
+			loader.addLoadTask(loader.modelTask(() -> loadPreloaded(viewer, names, loader)));
 		}
 	}
 
@@ -224,13 +226,14 @@ final class MapViewerPrewarm {
 	 * Starts the decoding of the ambience the map's script names, which it starts in the first game step; where a
 	 * sound is decoded on the calling thread, that decoding held up the first frame for a second.
 	 */
-	private static void prefetchAmbientSounds(final War3MapViewer viewer, final String script) {
+	private static void prefetchAmbientSounds(final War3MapViewer viewer, final String script,
+			final MapLoader loader) throws IOException {
 		final Matcher matcher = SCRIPT_LABEL_SOUND.matcher(script);
 		final Set<String> labels = new LinkedHashSet<>();
 		while (matcher.find()) {
 			labels.add(matcher.group(1));
 		}
-		for (final String label : labels) {
+		loader.addSlices(labels.iterator(), label -> {
 			final UnitSound sound = viewer.uiSounds.getSound(label);
 			if (sound.getSoundCount() <= MAX_PREFETCHED_FILES) {
 				sound.prefetch();
@@ -239,7 +242,8 @@ final class MapViewerPrewarm {
 				// The script starts the day ambience in the first step, whose file is known from the step and the count.
 				sound.prefetch(CSoundFromLabel.variant(0, 0, sound.getSoundCount()));
 			}
-		}
+		}, () -> {
+		});
 	}
 
 	/**
@@ -247,36 +251,53 @@ final class MapViewerPrewarm {
 	 * map is going to start with, which is what that step finds.
 	 */
 	private static void prefetchUnitSounds(final War3MapViewer viewer, final Set<War3ID> own,
-			final Set<War3ID> others) {
+			final Set<War3ID> others, final MapLoader loader) throws IOException {
 		final Set<War3ID> made = new LinkedHashSet<>(own);
 		MapViewerLoading.addMadeUnitTypes(viewer, made);
 		made.removeAll(own);
 		others.removeAll(own);
-		prefetchSoundsOf(viewer, own, made, others);
+		loader.addSlices(soundPrefetches(viewer, own, made, others).iterator(), Runnable::run, () -> {
+		});
 	}
 
 	/** Starts the decoding of what the sound preload asks for of these unit types. */
 	static void prefetchSoundsOf(final War3MapViewer viewer, final Set<War3ID> own, final Set<War3ID> made,
 			final Set<War3ID> others) {
+		for (final Runnable prefetch : soundPrefetches(viewer, own, made, others)) {
+			prefetch.run();
+		}
+	}
+
+	/** One step for each unit type, which a copy of its sounds out of the game data makes take long. */
+	private static List<Runnable> soundPrefetches(final War3MapViewer viewer, final Set<War3ID> own,
+			final Set<War3ID> made, final Set<War3ID> others) {
+		final List<Runnable> prefetches = new ArrayList<>();
 		for (final War3ID typeId : own) {
-			final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
-			if (soundset != null) {
-				soundset.prefetch();
-			}
+			prefetches.add(() -> {
+				final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
+				if (soundset != null) {
+					soundset.prefetch();
+				}
+			});
 		}
 		for (final War3ID typeId : made) {
-			final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
-			if (soundset != null) {
-				soundset.ready.prefetch();
-				soundset.what.prefetch();
-			}
+			prefetches.add(() -> {
+				final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
+				if (soundset != null) {
+					soundset.ready.prefetch();
+					soundset.what.prefetch();
+				}
+			});
 		}
 		for (final War3ID typeId : others) {
-			final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
-			if (soundset != null) {
-				soundset.what.prefetch();
-			}
+			prefetches.add(() -> {
+				final UnitSoundset soundset = viewer.renderUnitTypeData.getSoundset(typeId);
+				if (soundset != null) {
+					soundset.what.prefetch();
+				}
+			});
 		}
+		return prefetches;
 	}
 
 	private static void load(final RenderUnitTypeData types, final War3ID typeId) {

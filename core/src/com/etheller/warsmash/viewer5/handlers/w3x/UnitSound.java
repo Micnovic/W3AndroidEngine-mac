@@ -31,6 +31,9 @@ public final class UnitSound {
 	// Finding the file a path plays is a lookup in every data source, so it is done once for a prefetch and its play.
 	private final List<FileHandle> handles = new ArrayList<>();
 	private final List<Float> durations = new ArrayList<>();
+	// The file names as the label has them: a duration is read from the data without graphics packages, so scripts
+	// wait the same time with every graphics set.
+	private final List<String> labelPaths = new ArrayList<>();
 	private final float volume;
 	private final float pitch;
 	private final float pitchVariance;
@@ -89,6 +92,7 @@ public final class UnitSound {
 				sound.sounds.add(null);
 				sound.handles.add(null);
 				sound.durations.add(null);
+				sound.labelPaths.add(directoryBase + fileName);
 			}
 			else if (!fileName.isEmpty()) {
 				Log.warn("Sound file not found: " + resolvedPath);
@@ -170,7 +174,8 @@ public final class UnitSound {
 	 * @return the length in seconds of the file a script's sound path plays, 0 when there is none
 	 */
 	public static float fileDuration(final DataSource dataSource, final String filePath) {
-		return SoundFileDuration.read(dataSource, resolveFilePath(dataSource, filePath));
+		final DataSource data = dataSource.graphicsIndependent();
+		return SoundFileDuration.read(data, resolveFilePath(data, filePath));
 	}
 
 	public static Sound createSound(final DataSource dataSource, final String filePath) {
@@ -309,7 +314,8 @@ public final class UnitSound {
 	public float getDuration(final int index) {
 		Float duration = this.durations.get(index);
 		if (duration == null) {
-			duration = SoundFileDuration.read(this.dataSource, this.soundPaths.get(index));
+			final DataSource data = this.dataSource.graphicsIndependent();
+			duration = SoundFileDuration.read(data, resolveSoundPath(data, this.labelPaths.get(index)));
 			this.durations.set(index, duration);
 		}
 		return duration;

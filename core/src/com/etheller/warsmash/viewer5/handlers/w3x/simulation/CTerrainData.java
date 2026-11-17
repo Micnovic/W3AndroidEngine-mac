@@ -295,6 +295,15 @@ public final class CTerrainData {
 	 * and over water it reads the water surface.
 	 */
 	public float getLocationZ(final float x, final float y) {
+		return locationZ(x, y, true);
+	}
+
+	/** The height of the ground alone, without any water above it. */
+	public float getGroundZ(final float x, final float y) {
+		return locationZ(x, y, false);
+	}
+
+	private float locationZ(final float x, final float y, final boolean overWater) {
 		final float userCellSpaceX = (x - this.centerOffsetX) / 128.0f;
 		final float userCellSpaceY = (y - this.centerOffsetY) / 128.0f;
 		final int cellX = (int) userCellSpaceX;
@@ -311,7 +320,7 @@ public final class CTerrainData {
 		final float bottom = bottomLeft + ((bottomRight - bottomLeft) * sqX);
 		final float top = topLeft + ((topRight - topLeft) * sqX);
 		final float ground = (bottom + ((top - bottom) * sqY)) * 128.0f;
-		if (this.corners[cellX][cellY].getWater() != 0) {
+		if (overWater && (this.corners[cellX][cellY].getWater() != 0)) {
 			return Math.max(ground, getWaterHeight(userCellSpaceX, userCellSpaceY, cellX, cellY));
 		}
 		return ground;

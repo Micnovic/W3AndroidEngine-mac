@@ -1,6 +1,10 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
+import com.badlogic.gdx.graphics.Color;
+import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3i;
 import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3iFlags;
+import com.etheller.warsmash.viewer5.FogSettings;
+import com.etheller.warsmash.viewer5.FogStyle;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPlayerFogOfWar;
@@ -144,6 +148,35 @@ final class MapViewerVision {
 		return (byte) ((prevValue + (appliedMagnitude * (delta < 0 ? -1 : 1))) & 0xFF);
 	}
 
+	/**
+	 * The terrain fog the map was saved with (Map Properties of the editor). A map script that sets its own fog
+	 * overrides it, and ResetTerrainFog returns to it.
+	 */
+	static void applyMapTerrainFog(final War3MapViewer viewer, final War3MapW3i mapInfo) {
+		final int style = mapInfo.getUseTerrainFog();
+		if ((style <= 0) || (style >= FogStyle.values().length)) {
+			return;
+		}
+		final short[] color = mapInfo.getFogColor();
+		final FogSettings fog = new FogSettings();
+		fog.setStyleByIndex(style);
+		fog.start = mapInfo.getFogHeight()[0];
+		fog.end = mapInfo.getFogHeight()[1];
+		// v39+ maps carry the distance range of the linear fog and a cap of the fog opacity next to the old z range;
+		// older maps leave both at 0, which has to keep the old behaviour.
+		final float[] linearRange = mapInfo.getFogLinearRange();
+		if ((style == FogStyle.LINEAR.ordinal()) && (linearRange[1] > linearRange[0]) && (linearRange[1] > 0)) {
+			fog.start = linearRange[0];
+			fog.end = linearRange[1];
+		}
+		final float maxOpacity = mapInfo.getFogMaxOpacity();
+		fog.maxOpacity = ((maxOpacity > 0) && (maxOpacity < 1)) ? maxOpacity : 1f;
+		fog.density = mapInfo.getFogDensity();
+		fog.color = new Color((color[0] & 0xFF) / 255f, (color[1] & 0xFF) / 255f, (color[2] & 0xFF) / 255f, 1f);
+		viewer.defaultFogSettings = fog;
+		resetTerrainFog(viewer);
+	}
+
 	static void resetTerrainFog(final War3MapViewer viewer) {
 		if (viewer.defaultFogSettings != null) {
 			viewer.worldScene.fogSettings.color = viewer.defaultFogSettings.color;
@@ -151,6 +184,7 @@ final class MapViewerVision {
 			viewer.worldScene.fogSettings.density = viewer.defaultFogSettings.density;
 			viewer.worldScene.fogSettings.start = viewer.defaultFogSettings.start;
 			viewer.worldScene.fogSettings.end = viewer.defaultFogSettings.end;
+			viewer.worldScene.fogSettings.maxOpacity = viewer.defaultFogSettings.maxOpacity;
 		}
 	}
 }

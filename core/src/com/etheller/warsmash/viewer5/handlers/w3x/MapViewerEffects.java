@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
+import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3i;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -47,6 +49,20 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRend
  */
 final class MapViewerEffects {
 	private MapViewerEffects() {
+	}
+
+	/**
+	 * The weather of the map's properties covers the whole map from the start. The w3i stores the id as four
+	 * characters, which read as a little endian int are the reverse of a script rawcode.
+	 */
+	static void applyMapGlobalWeather(final War3MapViewer viewer, final War3MapW3i mapInfo) {
+		final int stored = mapInfo.getGlobalWeather();
+		if (stored == 0) {
+			return;
+		}
+		final Rectangle map = viewer.terrain.getEntireMap();
+		createWeatherEffect(viewer, new War3ID(Integer.reverseBytes(stored)), map.x, map.y, map.x + map.width,
+				map.y + map.height).setEnabled(true);
 	}
 
 	static SimulationRenderComponentWeather createWeatherEffect(final War3MapViewer viewer, final War3ID weatherId, final float minX,
@@ -507,6 +523,16 @@ final class MapViewerEffects {
 		return null;
 	}
 
+	/** A model field with no file name, also once a caller has put the extension on it (".mdx", "_.mdl"). */
+	static boolean isNoModelPath(final String path) {
+		String name = path.trim();
+		final String lower = name.toLowerCase(java.util.Locale.ROOT);
+		if (lower.endsWith(".mdx") || lower.endsWith(".mdl")) {
+			name = name.substring(0, name.length() - 4);
+		}
+		return name.isEmpty() || "_".equals(name);
+	}
+
 	static MdxModel loadModelMdx(final War3MapViewer viewer, final String path) {
 		return loadModelMdx(viewer.dataSource, viewer, path, viewer.mapPathSolver, viewer.solverParams);
 	}
@@ -514,8 +540,7 @@ final class MapViewerEffects {
 	static MdxModel loadModelMdx(final DataSource dataSource, final ModelViewer modelViewer, final String path,
 			final PathSolver pathSolver, final Object solverParams) {
 		// "_" is the data's "no model" entry (e.g. empty art fields in the 1.29 SLKs).
-		if ("".equals(path) || "_".equals(path) || "_.mdl".equalsIgnoreCase(path)
-				|| "_.mdx".equalsIgnoreCase(path)) {
+		if ((path == null) || isNoModelPath(path)) {
 			return null;
 		}
 		final String mdxPath = War3MapViewer.mdx(path);
@@ -528,5 +553,6 @@ final class MapViewerEffects {
 			}
 		}
 		return (MdxModel) modelViewer.load(mdxPath, pathSolver, solverParams);
-	}
+	}
+
 }

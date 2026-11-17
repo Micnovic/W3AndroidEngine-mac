@@ -8,7 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.TimeUtils;
 import com.etheller.warsmash.input.touch.TouchInputRouter;
 import com.etheller.warsmash.parsers.fdf.GameUI;
@@ -101,6 +104,27 @@ final class MeleeUIControlGroups {
 				members.add(unit);
 			}
 		}
+	}
+
+	/** With the user interface disabled the hero buttons darken like the world behind them. */
+	void renderDisabledDim(final SpriteBatch batch, final Texture black, final float alpha) {
+		batch.setColor(1, 1, 1, alpha);
+		for (final HeroBarIcon icon : this.heroBarIcons) {
+			if ((icon != null) && icon.isVisible()) {
+				final Rectangle bounds = icon.getRenderBounds();
+				batch.draw(black, bounds.x, bounds.y, bounds.width, bounds.height);
+			}
+		}
+		final HeroBarIcon idle = this.ui.idleWorkerIcon;
+		if ((idle != null) && idle.isVisible()) {
+			final Rectangle bounds = idle.getRenderBounds();
+			batch.draw(black, bounds.x, bounds.y, bounds.width, bounds.height);
+		}
+		batch.setColor(1, 1, 1, 1);
+	}
+
+	HeroBarIcon getHeroBarIcon(final int index) {
+		return (index >= 0) && (index < HERO_BAR_SIZE) ? this.heroBarIcons[index] : null;
 	}
 
 	void createHeroBar() {
@@ -399,7 +423,7 @@ final class MeleeUIControlGroups {
 	 * touch screen, it selects all idle workers instead, as in the original game.
 	 */
 	void idleWorkerClicked(final boolean held) {
-		if (this.ui.idleWorkers.isEmpty()) {
+		if (this.ui.idleWorkers.isEmpty() || !this.ui.war3MapViewer.scriptUiState.isSelectionEnabled()) {
 			return;
 		}
 		if (held || MeleeUIInput.isControlDown()) {
@@ -445,6 +469,9 @@ final class MeleeUIControlGroups {
 			this.ui.commands.useActiveCommandOnUnit(MeleeUIInput.isShiftDown(), renderUnit);
 			return true;
 		}
+		if (!this.ui.war3MapViewer.scriptUiState.isSelectionEnabled()) {
+			return true;
+		}
 		final long now = TimeUtils.millis();
 		final boolean doublePress = (index == this.lastHeroBarPressed)
 				&& ((now - this.lastHeroBarPressMillis) < CONTROL_GROUP_DOUBLE_PRESS_MILLIS);
@@ -463,7 +490,7 @@ final class MeleeUIControlGroups {
 	 * Selects the units of a control group; pressing the same group again quickly also centers the camera on it.
 	 */
 	public boolean selectControlGroup(final int group) {
-		if (group >= this.ui.controlGroups.size()) {
+		if ((group >= this.ui.controlGroups.size()) || !this.ui.war3MapViewer.scriptUiState.isSelectionEnabled()) {
 			return false;
 		}
 		final List<RenderUnit> members = this.ui.controlGroups.get(group);

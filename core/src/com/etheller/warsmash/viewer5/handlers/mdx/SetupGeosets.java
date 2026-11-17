@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import com.badlogic.gdx.graphics.GL20;
-import com.etheller.warsmash.util.RenderMathUtils;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxGeoset;
 
 public class SetupGeosets {
@@ -196,46 +195,46 @@ public class SetupGeosets {
 
 					// Positions.
 					gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, positionOffset, positions.length * 4,
-							RenderMathUtils.wrap(positions));
+							uploadFloats(positions));
 					positionOffset += positions.length * 4;
 
 					// Normals.
 					gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, normalOffset, normals.length * 4,
-							RenderMathUtils.wrap(normals));
+							uploadFloats(normals));
 					normalOffset += normals.length * 4;
 
 					// Texture coordinates.
 					for (final float[] uvSet : uvSets) {
-						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, uvOffset, uvSet.length * 4, RenderMathUtils.wrap(uvSet));
+						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, uvOffset, uvSet.length * 4, uploadFloats(uvSet));
 						uvOffset += uvSet.length * 4;
 					}
 
 					if (tangents != null) {
 						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, tangentOffset, tangents.length * 4,
-								RenderMathUtils.wrap(tangents));
+								uploadFloats(tangents));
 						tangentOffset += tangents.length * 4;
 					}
 
 					// Skin.
 					if (wideSkin) {
 						final ByteBuffer wide = wideSkinBytes(skin);
-						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, wide.capacity(), wide);
-						skinOffset += wide.capacity();
+						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, wide.limit(), wide);
+						skinOffset += wide.limit();
 					}
 					else if (batchType == SkinningType.Skin) {
 						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, skin.length,
-								RenderMathUtils.wrapAsBytes(skin));
+								uploadBytes(skin));
 						skinOffset += skin.length;
 					}
 					else {
 						gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, skin.length * (bigNodeSpace ? 4 : 1),
-								bigNodeSpace ? RenderMathUtils.wrap(skin) : RenderMathUtils.wrapAsBytes(skin));
+								bigNodeSpace ? uploadInts(skin) : uploadBytes(skin));
 						skinOffset += skin.length * (bigNodeSpace ? 4 : 1);
 					}
 
 					// Faces.
 					gl.glBufferSubData(GL20.GL_ELEMENT_ARRAY_BUFFER, faceOffset, faces.length * 2,
-							RenderMathUtils.wrapFaces(faces));
+							uploadFaces(faces));
 					faceOffset += faces.length * 2;
 				}
 
@@ -266,8 +265,7 @@ public class SetupGeosets {
 	}
 
 	private static ByteBuffer wideSkinBytes(final int[] skin) {
-		final ByteBuffer buffer = ByteBuffer.allocateDirect((skin.length / 8) * WIDE_SKIN_STRIDE)
-				.order(ByteOrder.nativeOrder());
+		final ByteBuffer buffer = uploadScratch((skin.length / 8) * WIDE_SKIN_STRIDE);
 		for (int in = 0; in < skin.length; in += 8) {
 			for (int j = 0; j < 4; j++) {
 				buffer.putShort((short) skin[in + j]);
@@ -276,7 +274,55 @@ public class SetupGeosets {
 				buffer.put((byte) skin[in + j]);
 			}
 		}
+		buffer.flip();
+		return buffer;
+	}
+
+	// The geometry of every model went through its own native buffer, which only a collection frees; a model load
+	// then piled up as much native memory as the models' geometry came to. One buffer serves each upload in turn.
+	private static final int UPLOAD_SCRATCH_KEEP = 4 << 20;
+	private static final ThreadLocal<ByteBuffer> UPLOAD_SCRATCH = new ThreadLocal<>();
+
+	private static ByteBuffer uploadScratch(final int bytes) {
+		ByteBuffer buffer = UPLOAD_SCRATCH.get();
+		if ((buffer == null) || (buffer.capacity() < bytes)) {
+			buffer = ByteBuffer.allocateDirect(Math.max(bytes, 1 << 16)).order(ByteOrder.nativeOrder());
+			if (bytes <= UPLOAD_SCRATCH_KEEP) {
+				UPLOAD_SCRATCH.set(buffer);
+			}
+		}
 		buffer.clear();
+		buffer.limit(bytes);
+		return buffer;
+	}
+
+	private static ByteBuffer uploadFloats(final float[] values) {
+		final ByteBuffer buffer = uploadScratch(values.length * 4);
+		buffer.asFloatBuffer().put(values);
+		return buffer;
+	}
+
+	private static ByteBuffer uploadInts(final int[] values) {
+		final ByteBuffer buffer = uploadScratch(values.length * 4);
+		buffer.asIntBuffer().put(values);
+		return buffer;
+	}
+
+	private static ByteBuffer uploadBytes(final int[] values) {
+		final ByteBuffer buffer = uploadScratch(values.length);
+		for (final int value : values) {
+			buffer.put((byte) value);
+		}
+		buffer.flip();
+		return buffer;
+	}
+
+	private static ByteBuffer uploadFaces(final int[] faces) {
+		final ByteBuffer buffer = uploadScratch(faces.length * 2);
+		for (final int face : faces) {
+			buffer.putShort((short) face);
+		}
+		buffer.flip();
 		return buffer;
 	}
 

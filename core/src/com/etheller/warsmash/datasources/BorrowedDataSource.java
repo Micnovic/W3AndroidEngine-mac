@@ -16,6 +16,11 @@ public final class BorrowedDataSource implements DataSource {
 	}
 
 	@Override
+	public DataSource graphicsIndependent() {
+		return this.data.graphicsIndependent();
+	}
+
+	@Override
 	public InputStream getResourceAsStream(final String filepath) throws IOException {
 		return this.data.getResourceAsStream(filepath);
 	}

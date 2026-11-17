@@ -36,6 +36,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.etheller.warsmash.launcher.LauncherBoard;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.launcher.SmallCaps;
 
@@ -59,6 +60,13 @@ abstract class LauncherViews {
 
 	String getString(final int id, final Object... formatArgs) {
 		return this.activity.getString(id, formatArgs);
+	}
+
+	/** What a map's issue is told with: the sentence, or the few words that stand beside the map in a list. */
+	String issueText(final MapIssue issue, final boolean tag) {
+		final String name = tag ? issue.tag : issue.message;
+		return this.activity.getString(this.activity.getResources().getIdentifier(name, "string",
+				this.activity.getPackageName()));
 	}
 
 	int px(final float design) {

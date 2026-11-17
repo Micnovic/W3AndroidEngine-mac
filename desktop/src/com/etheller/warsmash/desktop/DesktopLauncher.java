@@ -32,6 +32,7 @@ import com.badlogic.gdx.backends.lwjgl.LwjglApplication;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl.LwjglNativesLoader;
 import com.badlogic.gdx.utils.TimeUtils;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.WarsmashGdxFDFTestRenderScreen;
 import com.etheller.warsmash.WarsmashGdxMenuScreen;
 import com.etheller.warsmash.WarsmashGdxMultiScreenGame;
@@ -48,6 +49,7 @@ import com.etheller.warsmash.launcher.CustomContent;
 import com.etheller.warsmash.launcher.CustomFolderChooser;
 import com.etheller.warsmash.launcher.LauncherKeys;
 import com.etheller.warsmash.launcher.MapListCache;
+import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.movie.GdxMoviePlayer;
 import com.etheller.warsmash.units.DataTable;
@@ -78,6 +80,7 @@ public class DesktopLauncher {
 
 	public static void main(final String[] arg) {
 		Log.info("Warsmash engine is starting...");
+		CCampaignProgress.setAllMissionsOpen(Boolean.getBoolean("warsmash.allMissions"));
 		final LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
 		config.useGL30 = true;
 		config.gles30ContextMajorVersion = 3;
@@ -258,6 +261,7 @@ public class DesktopLauncher {
 		MapListCache.setShared(new File(MAP_LIST_FILE));
 		CustomFolderChooser.Holder.install(
 				new com.etheller.warsmash.desktop.launcher.DesktopCustomFolder(iniPath != null ? new File(iniPath) : defaultIniFile));
+		RenderScaleStore.Holder.install(new com.etheller.warsmash.desktop.launcher.DesktopRenderScale());
 		CustomContent.apply(warsmashIni);
 		return warsmashIni;
 	}

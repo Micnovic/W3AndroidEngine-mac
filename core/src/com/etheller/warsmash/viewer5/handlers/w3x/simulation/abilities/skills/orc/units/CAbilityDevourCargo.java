@@ -49,10 +49,6 @@ public class CAbilityDevourCargo extends AbstractCAbilityPassiveNoOrders impleme
 		return this.devouredUnit == null;
 	}
 
-	public CUnit getDevouredUnit() {
-		return this.devouredUnit;
-	}
-
 	public int getMaximumCreepLevel() {
 		return this.maximumCreepLevel;
 	}

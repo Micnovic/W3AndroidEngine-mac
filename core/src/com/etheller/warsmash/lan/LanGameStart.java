@@ -47,6 +47,9 @@ public final class LanGameStart {
 	private Runnable restarter;
 	private boolean loadedSent;
 	private int reportedPercent = -5;
+	/** When the last progress went to the host; a long step still repeats its percent so the host sees it alive. */
+	private long reportedNanos = System.nanoTime();
+	private static final long PROGRESS_REPEAT_NANOS = 10_000_000_000L;
 	private LanCommandSender sender;
 	private LockstepTurnManager turns;
 	private LanPlay play;
@@ -183,9 +186,11 @@ public final class LanGameStart {
 			this.loadPercents.put(this.client.participantId(), percent);
 			return;
 		}
-		if (percent >= (this.reportedPercent + 5)) {
-			this.reportedPercent = percent;
-			this.client.loadProgress(percent);
+		final long now = System.nanoTime();
+		if ((percent >= (this.reportedPercent + 5)) || ((now - this.reportedNanos) >= PROGRESS_REPEAT_NANOS)) {
+			this.reportedPercent = Math.max(this.reportedPercent, percent);
+			this.reportedNanos = now;
+			this.client.loadProgress(this.reportedPercent);
 		}
 	}
 

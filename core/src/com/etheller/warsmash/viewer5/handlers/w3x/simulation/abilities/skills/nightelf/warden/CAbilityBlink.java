@@ -54,8 +54,8 @@ public class CAbilityBlink extends CAbilityPointTargetSpellBase {
 
 	/**
 	 * Measured (1.29): a point beyond the maximum range is taken at 4/5 of that range in its direction, and a point
-	 * on ground the caster cannot stand on (deep water, cliffs) is taken at the nearest place it can; the spell events
-	 * see that point. A point blocked only by a destructable (trees) cannot be targeted: null.
+	 * on ground the caster cannot stand on (deep water, cliffs, trees) is taken at the nearest place it can; the spell
+	 * events see that point.
 	 */
 	private AbilityPointTarget blinkPoint(final CSimulation game, final CUnit unit, final AbilityPointTarget target) {
 		float x = target.getX();
@@ -68,9 +68,6 @@ public class CAbilityBlink extends CAbilityPointTargetSpellBase {
 		}
 		final PathingGrid pathingGrid = game.getPathingGrid();
 		if (!pathingGrid.isPathable(x, y, unit.getMovementType())) {
-			if (unit.getMovementType().isPathable(pathingGrid.getTerrainPathing(x, y))) {
-				return null;
-			}
 			final float[] free = unit.findFreePoint(x, y, game);
 			x = free[0];
 			y = free[1];

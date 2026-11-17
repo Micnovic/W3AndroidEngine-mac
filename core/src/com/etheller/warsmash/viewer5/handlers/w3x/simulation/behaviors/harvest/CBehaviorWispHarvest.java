@@ -90,7 +90,7 @@ public class CBehaviorWispHarvest extends CAbstractRangedBehavior {
 		if ((gameTurnTick - this.lastIncomeTick) >= this.abilityWispHarvest.getPeriodicIntervalLengthTicks()) {
 			this.lastIncomeTick = gameTurnTick;
 			final CPlayer player = simulation.getPlayer(this.unit.getPlayerIndex());
-			player.setLumber(player.getLumber() + this.abilityWispHarvest.getLumberPerInterval());
+			player.addHarvestedLumber(simulation, this.abilityWispHarvest.getLumberPerInterval());
 			simulation.unitGainResourceEvent(this.unit, player.getId(), ResourceType.LUMBER,
 					abilityWispHarvest.getLumberPerInterval());
 			this.unit.fireBehaviorChangeEvent(simulation, this, true);

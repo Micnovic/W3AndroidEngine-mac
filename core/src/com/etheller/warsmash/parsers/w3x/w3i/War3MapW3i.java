@@ -77,7 +77,7 @@ public class War3MapW3i {
 		this.saves = stream.readInt();
 		this.editorVersion = stream.readInt();
 
-		if (this.version > 27) {
+		if (this.version >= 27) {
 			this.gameVersionMajor = stream.readInt();
 			this.gameVersionMinor = stream.readInt();
 			this.gameVersionPatch = stream.readInt();
@@ -227,7 +227,7 @@ public class War3MapW3i {
 		stream.writeInt(this.saves);
 		stream.writeInt(this.editorVersion);
 
-		if (this.version > 27) {
+		if (this.version >= 27) {
 			stream.writeInt(this.gameVersionMajor);
 			stream.writeInt(this.gameVersionMinor);
 			stream.writeInt(this.gameVersionPatch);
@@ -267,6 +267,12 @@ public class War3MapW3i {
 			ParseUtils.writeFloatArray(stream, this.fogHeight);
 			stream.writeFloat(this.fogDensity);
 			ParseUtils.writeUInt8Array(stream, this.fogColor);
+			if (this.version >= 39) {
+				ParseUtils.writeFloatArray(stream, this.fogHeightRange);
+				ParseUtils.writeFloatArray(stream, this.fogLinearRange);
+				stream.writeFloat(this.fogMaxOpacity);
+				stream.writeInt(this.fogDrawOverSky);
+			}
 			stream.writeInt(this.globalWeather); // TODO War3ID???
 			ParseUtils.writeWithNullTerminator(stream, this.soundEnvironment);
 			stream.write((byte) this.lightEnvironmentTileset);
@@ -458,6 +464,14 @@ public class War3MapW3i {
 
 	public float getFogDensity() {
 		return this.fogDensity;
+	}
+
+	public float[] getFogLinearRange() {
+		return this.fogLinearRange;
+	}
+
+	public float getFogMaxOpacity() {
+		return this.fogMaxOpacity;
 	}
 
 	public short[] getFogColor() {

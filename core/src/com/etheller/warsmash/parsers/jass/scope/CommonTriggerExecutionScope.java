@@ -73,6 +73,10 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 	private CPlayerJass changingUnitPrevOwner;
 	private CUnit manipulatingUnit;
 	private CItem manipulatedItem;
+	private CItem absorbingItem;
+	private CItem stackingItemSource;
+	private CItem stackingItemTarget;
+	private int stackingItemTargetPreviousCharges;
 	private CUnit orderedUnit;
 	private int issuedOrderId;
 	private float orderPointX;
@@ -183,6 +187,10 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 		this.changingUnitPrevOwner = parentScope.changingUnitPrevOwner;
 		this.manipulatingUnit = parentScope.manipulatingUnit;
 		this.manipulatedItem = parentScope.manipulatedItem;
+		this.absorbingItem = parentScope.absorbingItem;
+		this.stackingItemSource = parentScope.stackingItemSource;
+		this.stackingItemTarget = parentScope.stackingItemTarget;
+		this.stackingItemTargetPreviousCharges = parentScope.stackingItemTargetPreviousCharges;
 		this.orderedUnit = parentScope.orderedUnit;
 		this.issuedOrderId = parentScope.issuedOrderId;
 		this.orderPointX = parentScope.orderPointX;
@@ -408,6 +416,22 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 
 	public CItem getManipulatedItem() {
 		return this.manipulatedItem;
+	}
+
+	public CItem getAbsorbingItem() {
+		return this.absorbingItem;
+	}
+
+	public CItem getStackingItemSource() {
+		return this.stackingItemSource;
+	}
+
+	public CItem getStackingItemTarget() {
+		return this.stackingItemTarget;
+	}
+
+	public int getStackingItemTargetPreviousCharges() {
+		return this.stackingItemTargetPreviousCharges;
 	}
 
 	public CUnit getOrderedUnit() {
@@ -932,6 +956,23 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 		scope.triggerEventId = triggerEventId;
 		scope.manipulatedItem = whichItem;
 		scope.manipulatingUnit = orderedUnit;
+		return scope;
+	}
+
+	public static CommonTriggerExecutionScope unitPickupItemScope(final JassGameEventsWar3 triggerEventId,
+			final Trigger trigger, final CUnit orderedUnit, final CItem whichItem, final CItem absorbingItem) {
+		final CommonTriggerExecutionScope scope = unitPickupItemScope(triggerEventId, trigger, orderedUnit, whichItem);
+		scope.absorbingItem = absorbingItem;
+		return scope;
+	}
+
+	public static CommonTriggerExecutionScope unitStackItemScope(final JassGameEventsWar3 triggerEventId,
+			final Trigger trigger, final CUnit stackingUnit, final CItem source, final CItem target,
+			final int targetPreviousCharges) {
+		final CommonTriggerExecutionScope scope = unitPickupItemScope(triggerEventId, trigger, stackingUnit, source);
+		scope.stackingItemSource = source;
+		scope.stackingItemTarget = target;
+		scope.stackingItemTargetPreviousCharges = targetPreviousCharges;
 		return scope;
 	}
 

@@ -111,16 +111,8 @@ public final class CImage implements CHandle {
 		this.shown = shown;
 	}
 
-	public boolean isRender() {
-		return this.render;
-	}
-
 	public void setRender(final boolean render) {
 		this.render = render;
-	}
-
-	public boolean isRenderAlways() {
-		return this.renderAlways;
 	}
 
 	public void setRenderAlways(final boolean renderAlways) {
@@ -147,10 +139,6 @@ public final class CImage implements CHandle {
 
 	public boolean isAboveWater() {
 		return this.aboveWater;
-	}
-
-	public boolean isUseWaterAlpha() {
-		return this.useWaterAlpha;
 	}
 
 	public void setAboveWater(final boolean aboveWater, final boolean useWaterAlpha) {

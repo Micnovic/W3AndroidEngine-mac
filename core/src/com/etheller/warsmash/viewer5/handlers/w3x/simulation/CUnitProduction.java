@@ -482,8 +482,9 @@ final class CUnitProduction {
 		self.setLife(game, self.getMaximumLife());
 		game.takeShadowPoolIds(self);
 		final CGameplayConstants gameplayConstants = game.getGameplayConstants();
-		self.setMana((self.getMaximumMana() * gameplayConstants.getHeroReviveManaFactor())
-				+ (gameplayConstants.getHeroReviveManaStart() * self.unitType.getManaInitial()));
+		self.setMana(Math.min(self.getMaximumMana(),
+				(self.getMaximumMana() * gameplayConstants.getHeroReviveManaFactor())
+						+ (gameplayConstants.getHeroReviveManaStart() * self.unitType.getManaInitial())));
 		// Measured on 1.29: a hero revived by script uses its food again at once.
 		game.getPlayer(self.playerIndex).setUnitFoodUsed(self, self.unitType.getFoodUsed());
 		game.unitRepositioned(self);

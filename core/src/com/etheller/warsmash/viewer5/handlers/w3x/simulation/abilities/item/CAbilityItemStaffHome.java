@@ -5,6 +5,7 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitClassification;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityCategory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityTargetSpellBase;
@@ -50,17 +51,31 @@ public class CAbilityItemStaffHome extends CAbilityTargetSpellBase {
 		return this.sanctuary ? OrderIds.sanctuary : OrderIds.preservation;
 	}
 
-	/** The highest level town hall of the player; of several, the one nearest to the point. */
+	/** How many hall upgrades are still available for the type: 0 for the top tier. */
+	private static int upgradesLeft(final CSimulation game, final CUnitType type, final int guard) {
+		int left = 0;
+		if (guard > 0) {
+			for (final War3ID id : type.getUpgradesTo()) {
+				final CUnitType next = game.getUnitData().getUnitType(id);
+				if (next != null) {
+					left = Math.max(left, 1 + upgradesLeft(game, next, guard - 1));
+				}
+			}
+		}
+		return left;
+	}
+
+	/** The highest tier town hall of the player; of several, the one made last (the list is in creation order). */
 	private static CUnit findTownHall(final CSimulation game, final int playerIndex, final float x, final float y) {
 		CUnit best = null;
-		for (final CUnit unit : game.getUnits()) {
+		int bestLeft = 0;
+		for (final CUnit unit : game.getUnitsIncludingNew()) {
 			if ((unit.getPlayerIndex() == playerIndex) && !unit.isDead() && !unit.isConstructingOrUpgrading()
 					&& unit.getClassifications().contains(CUnitClassification.TOWNHALL)) {
-				final int level = unit.getUnitType().getLevel();
-				if ((best == null) || (level > best.getUnitType().getLevel())
-						|| ((level == best.getUnitType().getLevel())
-								&& (unit.distanceSquaredNoCollision(x, y) < best.distanceSquaredNoCollision(x, y)))) {
+				final int left = upgradesLeft(game, unit.getUnitType(), 4);
+				if ((best == null) || (left <= bestLeft)) {
 					best = unit;
+					bestLeft = left;
 				}
 			}
 		}

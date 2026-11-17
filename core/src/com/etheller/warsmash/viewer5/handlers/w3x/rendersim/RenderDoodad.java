@@ -1,8 +1,12 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
+import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
+
 import com.badlogic.gdx.math.Quaternion;
 import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.RenderMathUtils;
+import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
@@ -26,12 +30,22 @@ public class RenderDoodad {
 	protected float x;
 	protected float y;
 	protected float selectionScale;
+	// The map's own record of this doodad (war3map.doo), as the Blz doodad natives read it.
+	private final float z;
+	private final float[] scale;
+	private final float yaw;
+	private float pitch;
+	private float roll;
+	private final int variation;
 
 	private static final String DOODAD_COLOR_RED = "vertR"; // replaced from 'dvr1'
 	private static final String DOODAD_COLOR_GREEN = "vertG"; // replaced from 'dvg1'
 	private static final String DOODAD_COLOR_BLUE = "vertB"; // replaced from 'dvb1'
 
 	private CFogState fogState;
+	/** Whether the doodad keeps animating and emitting while its place is not in sight (data field animInFog). */
+	private final boolean animatesInFog;
+	private boolean fogFrozen;
 	private byte lastFogStateColor;
 	private final float[] vertexColorBase;
 
@@ -57,12 +71,82 @@ public class RenderDoodad {
 		return this.y;
 	}
 
+	public float getZ() {
+		return this.z;
+	}
+
+	public float getScaleX() {
+		return this.scale[0];
+	}
+
+	public float getScaleY() {
+		return this.scale[1];
+	}
+
+	public float getScaleZ() {
+		return this.scale[2];
+	}
+
+	public float getYaw() {
+		return this.yaw;
+	}
+
+	public float getPitch() {
+		return this.pitch;
+	}
+
+	public float getRoll() {
+		return this.roll;
+	}
+
+	public int getVariation() {
+		return this.variation;
+	}
+
+	public int getTypeId() {
+		return War3ID.fromString(this.row.getId()).getValue();
+	}
+
+	public void setPlayerColor(final int ordinal) {
+		if (this.instance instanceof MdxComplexInstance) {
+			((MdxComplexInstance) this.instance).setTeamColor(ordinal);
+		}
+	}
+
+	/** An animation by name; random picks one of the sequences that share the name (Stand, Stand - 2, ...). */
+	public void playAnimation(final String animation, final boolean random) {
+		if (!random || !(this.instance instanceof MdxComplexInstance)) {
+			playAnimation(animation);
+			return;
+		}
+		final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+		final Sequence[] sequences = ((MdxModel) mdxInstance.model).getSequences().toArray(new Sequence[0]);
+		final String prefix = animation.toLowerCase(Locale.ROOT);
+		int matches = 0;
+		for (final Sequence sequence : sequences) {
+			if (sequence.getName().toLowerCase(Locale.ROOT).startsWith(prefix)) {
+				matches++;
+			}
+		}
+		if (matches == 0) {
+			return;
+		}
+		int pick = ThreadLocalRandom.current().nextInt(matches);
+		for (int i = 0; i < sequences.length; i++) {
+			if (sequences[i].getName().toLowerCase(Locale.ROOT).startsWith(prefix) && (pick-- == 0)) {
+				mdxInstance.setSequence(i);
+				this.holdsScriptedEnd = sequences[i].getFlags() != 0;
+				return;
+			}
+		}
+	}
+
 	public void playAnimation(final String animation) {
 		if (this.instance instanceof MdxComplexInstance) {
 			final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
 			final Sequence[] sequences = ((MdxModel) mdxInstance.model).getSequences().toArray(new Sequence[0]);
 			for (int i = 0; i < sequences.length; i++) {
-				if (sequences[i].getName().toLowerCase().startsWith(animation.toLowerCase())) {
+				if (sequences[i].getName().toLowerCase(Locale.ROOT).startsWith(animation.toLowerCase(Locale.ROOT))) {
 					mdxInstance.setSequence(i);
 					this.holdsScriptedEnd = sequences[i].getFlags() != 0;
 					return;
@@ -76,6 +160,11 @@ public class RenderDoodad {
 			final float selectionScale, final int doodadVariation) {
 		this.maxPitch = maxPitch;
 		this.maxRoll = maxRoll;
+		this.z = location3D[2];
+		this.scale = scale3D.clone();
+		this.yaw = facingRadians;
+		this.variation = doodadVariation;
+		this.animatesInFog = !usesAnimInFog() || row.readSLKTagBoolean("animInFog");
 		final boolean isSimple = row.readSLKTagBoolean("lightweight");
 		ModelInstance instance;
 
@@ -125,6 +214,8 @@ public class RenderDoodad {
 		final float rollSampleGroundHeight2 = map.terrain.getGroundHeight(rollSampleForwardX, rollSampleForwardY);
 		roll = Math.max(-maxRoll, Math.min(maxRoll,
 				(float) Math.atan2(rollSampleGroundHeight2 - rollSampleGroundHeight1, SAMPLE_RADIUS * 2)));
+		this.pitch = pitch;
+		this.roll = roll;
 		instance.rotate(new Quaternion().setFromAxisRad(RenderMathUtils.VEC3_UNIT_Z, facingRadians));
 		instance.rotate(new Quaternion().setFromAxisRad(RenderMathUtils.VEC3_UNIT_Y, -pitch));
 		instance.rotate(new Quaternion().setFromAxisRad(RenderMathUtils.VEC3_UNIT_X, roll));
@@ -146,7 +237,26 @@ public class RenderDoodad {
 			VERTEX_COLOR_HEAP[i] = (this.vertexColorBase[i] * (255 - (this.lastFogStateColor & 0xFF))) / 255f;
 		}
 		((MdxComplexInstance) this.instance).setVertexColor(VERTEX_COLOR_HEAP);
+		applyFogAnimation();
+	}
 
+	/** Destructable data has no animInFog field; they keep animating wherever they stand. */
+	protected boolean usesAnimInFog() {
+		return true;
+	}
+
+	/**
+	 * A doodad that does not animate in fog stands still and stops emitting particles and ribbons while its place is
+	 * out of sight; particles already in the air die out on their own.
+	 */
+	private void applyFogAnimation() {
+		final boolean freeze = !this.animatesInFog && !CFogState.VISIBLE.equals(this.fogState);
+		if (freeze != this.fogFrozen) {
+			this.fogFrozen = freeze;
+			final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+			mdxInstance.setAnimationSpeed(freeze ? 0f : 1f);
+			mdxInstance.emittersSuppressed = freeze;
+		}
 	}
 
 	public void applyColor(final GameObject row, final int doodadVariation, final ModelInstance instance) {
@@ -186,6 +296,7 @@ public class RenderDoodad {
 		final CFogState newFogState = fogOfWar.getFogState(war3MapViewer.simulation,
 				pathingGrid.getFogOfWarIndexX(this.x), pathingGrid.getFogOfWarIndexY(this.y));
 		this.fogState = newFogState;
+		applyFogAnimation();
 		final byte shade = shadeByState[newFogState.ordinal()];
 		if (shade != this.lastFogStateColor) {
 			this.lastFogStateColor = War3MapViewer.fadeLineOfSightColor(this.lastFogStateColor, shade);

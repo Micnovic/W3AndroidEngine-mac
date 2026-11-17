@@ -14,7 +14,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractGenericNoIconAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.SingleOrderAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.CAbilityItemSpellBook;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.shop.CAbilityShopPurhaseItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
@@ -265,6 +264,10 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 		return false;
 	}
 
+	public boolean isCanGetItems() {
+		return this.canGetItems;
+	}
+
 	public boolean isDropItemsOnDeath() {
 		return this.dropItemsOnDeath;
 	}
@@ -385,15 +388,8 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					final CUnit hero = (CUnit) target;
 					if (game.getPlayer(hero.getPlayerIndex()).hasAlliance(unit.getPlayerIndex(), CAllianceType.PASSIVE)
 							&& (hero != unit)) {
-						if (hero.getInventoryData() != null) {
-							receiver.targetOk(target);
-						}
-						else if (hero.getFirstAbilityOfType(CAbilityShopPurhaseItem.class) != null) {
-							receiver.targetOk(target);
-						}
-						else {
-							receiver.orderIdNotAccepted();
-						}
+						// Measured on 1.29: a unit with neither inventory nor shop is accepted too, the item lands at its feet.
+						receiver.targetOk(target);
 					}
 					else {
 						receiver.orderIdNotAccepted();
@@ -567,7 +563,7 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 
 					// TODO when we give unit ability here, then use ability
 					final List<CAbility> addedAbilities = new ArrayList<>();
-					for (final War3ID abilityId : item.getItemType().getAbilityList()) {
+					for (final War3ID abilityId : item.getAbilityIds()) {
 						final CAbilityType<?> abilityType = simulation.getAbilityData().getAbilityType(abilityId);
 						if (abilityType != null) {
 							final CAbility abilityFromItem = abilityType
@@ -629,7 +625,7 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 						hero.remove(simulation, ability);
 					}
 				}
-				else if (itemType.getAbilityList().isEmpty()) {
+				else if (item.getAbilityIds().isEmpty()) {
 					// Measured on 1.29: a power up with no ability is picked up (the event sees it alive and not
 					// held) and then dies; UnitAddItem returns true.
 					hero.onPickUpItem(simulation, item, true);
@@ -637,22 +633,22 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 				}
 			}
 			else {
+				final int stackedSlot = stackCharges(simulation, hero, item);
+				if (stackedSlot != -1) {
+					return stackedSlot;
+				}
 				for (int i = 0; i < this.itemsHeld.length; i++) {
 					final int itemIndex = (i + slotPreference) % this.itemsHeld.length;
 					if (this.itemsHeld[itemIndex] == null) {
 						this.itemsHeld[itemIndex] = item;
 						item.setHidden(true);
 						item.setContainedInventory(this, hero);
+						item.setGroundAbilities(null);
 						if (this.canUseItems) {
-							for (final War3ID abilityId : item.getItemType().getAbilityList()) {
-								final CAbilityType<?> abilityType = simulation.getAbilityData()
-										.getAbilityType(abilityId);
-								if (abilityType != null) {
-									final CAbility abilityFromItem = abilityType
-											.createAbility(simulation.getHandleIdAllocator().createId());
-									abilityFromItem.setIconShowing(false);
-									abilityFromItem.setItemAbility(item, itemIndex);
-									hero.add(simulation, abilityFromItem);
+							for (final War3ID abilityId : item.getAbilityIds()) {
+								final CAbility abilityFromItem = createItemAbility(simulation, hero, item, abilityId,
+										itemIndex);
+								if (abilityFromItem != null) {
 									this.itemsHeldAbilities[itemIndex].add(abilityFromItem);
 								}
 							}
@@ -668,6 +664,90 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 			}
 		}
 		return -1;
+	}
+
+	private CAbility createItemAbility(final CSimulation simulation, final CUnit hero, final CItem item,
+			final War3ID abilityId, final int slot) {
+		final CAbilityType<?> abilityType = simulation.getAbilityData().getAbilityType(abilityId);
+		if (abilityType == null) {
+			return null;
+		}
+		final CAbility abilityFromItem = abilityType.createAbility(simulation.getHandleIdAllocator().createId());
+		abilityFromItem.setIconShowing(false);
+		abilityFromItem.setItemAbility(item, slot);
+		hero.add(simulation, abilityFromItem);
+		return abilityFromItem;
+	}
+
+	/**
+	 * Takes the charges of a picked up item into the held items of its type that have room (stackMax), in slot
+	 * order. An item whose charges all went is absorbed: it is picked up into the stack that took the last of it, and
+	 * then removed. Returns that slot, or -1 when the item still has charges and goes to a free slot as usual.
+	 */
+	private int stackCharges(final CSimulation simulation, final CUnit hero, final CItem item) {
+		final int stackMax = item.getStackMax();
+		if ((stackMax <= 0) || (item.getCharges() <= 0)) {
+			return -1;
+		}
+		int lastSlot = -1;
+		for (int i = 0; (i < this.itemsHeld.length) && (item.getCharges() > 0); i++) {
+			final CItem target = this.itemsHeld[i];
+			if ((target == null) || (target == item) || !target.getTypeId().equals(item.getTypeId())) {
+				continue;
+			}
+			final int previousCharges = target.getCharges();
+			final int moved = Math.min(stackMax - previousCharges, item.getCharges());
+			if (moved <= 0) {
+				continue;
+			}
+			target.setCharges(previousCharges + moved);
+			item.setCharges(item.getCharges() - moved);
+			lastSlot = i;
+			hero.fireStackItemEvents(simulation, item, target, previousCharges);
+			if (item.getCharges() <= 0) {
+				hero.onPickUpItem(simulation, item, true, target);
+				simulation.removeItem(item);
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** The abilities a held item gives its carrier, in the order they were added. */
+	public List<CAbility> getItemAbilities(final CItem item) {
+		final int slot = getSlot(item);
+		return (slot < 0) ? new ArrayList<>() : new ArrayList<>(this.itemsHeldAbilities[slot]);
+	}
+
+	/** Gives the hero an ability through a held item; the item has it from then on. */
+	public CAbility addItemAbility(final CSimulation simulation, final CUnit hero, final CItem item,
+			final War3ID abilityId) {
+		final int slot = getSlot(item);
+		if ((slot < 0) || !this.canUseItems) {
+			return null;
+		}
+		final CAbility ability = createItemAbility(simulation, hero, item, abilityId, slot);
+		if (ability != null) {
+			this.itemsHeldAbilities[slot].add(ability);
+		}
+		return ability;
+	}
+
+	public void removeItemAbility(final CSimulation simulation, final CUnit hero, final CItem item,
+			final War3ID abilityId) {
+		final int slot = getSlot(item);
+		if (slot < 0) {
+			return;
+		}
+		final List<CAbility> slotAbilities = this.itemsHeldAbilities[slot];
+		for (int i = 0; i < slotAbilities.size(); i++) {
+			final CAbility ability = slotAbilities.get(i);
+			if (abilityId.equals(ability.getAlias())) {
+				slotAbilities.remove(i);
+				hero.remove(simulation, ability);
+				return;
+			}
+		}
 	}
 
 	public void dropItem(final CSimulation simulation, final CUnit hero, final int slotIndex, final float x,

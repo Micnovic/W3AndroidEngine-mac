@@ -1,5 +1,7 @@
 package com.etheller.warsmash.units;
 
+import java.util.Locale;
+
 /**
  * A hashable wrapper object for a String that can be used as the key in a
  * hashtable, but which disregards case as a key -- except that it will remember
@@ -39,7 +41,7 @@ public final class StringKey {
 		for (int i = 0, n = string.length(); i < n; i++) {
 			char c = string.charAt(i);
 			if (c >= 128) {
-				return string.toLowerCase().hashCode();
+				return string.toLowerCase(Locale.ROOT).hashCode();
 			}
 			if ((c >= 'A') && (c <= 'Z')) {
 				c += 'a' - 'A';

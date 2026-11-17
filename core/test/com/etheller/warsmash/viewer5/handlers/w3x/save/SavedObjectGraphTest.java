@@ -494,6 +494,48 @@ class SavedObjectGraphTest {
 	}
 
 	@Test
+	void takenBytesFollowTheOnesBeforeAndReleaseWhileWritten() throws IOException {
+		final java.util.Random random = new java.util.Random(11);
+		final byte[] first = new byte[70000];
+		final byte[] second = new byte[1500000];
+		final byte[] third = new byte[123];
+		random.nextBytes(first);
+		random.nextBytes(second);
+		random.nextBytes(third);
+		final SavedObjectGraph.Bytes head = new SavedObjectGraph.Bytes(16);
+		head.write(first, 0, first.length);
+		final SavedObjectGraph.Bytes other = new SavedObjectGraph.Bytes(1);
+		other.write(second, 0, second.length);
+		head.take(other);
+		assertEquals(0, other.size());
+		head.write(third, 0, third.length);
+		final ByteArrayOutputStream expected = new ByteArrayOutputStream();
+		expected.write(first);
+		expected.write(second);
+		expected.write(third);
+		assertEquals(expected.size(), head.size());
+		assertArrayEquals(expected.toByteArray(), head.toByteArray());
+		final ByteArrayOutputStream written = new ByteArrayOutputStream();
+		head.writeToAndRelease(written);
+		assertArrayEquals(expected.toByteArray(), written.toByteArray());
+		assertEquals(0, head.size());
+	}
+
+	@Test
+	void tableInChunksIsTheTableInOneArray() throws IOException {
+		final External external = new External("player0");
+		final Thing thing = sample(external);
+		final Rules rules = new Rules();
+		final SavedObjectGraph.Writer first = new SavedObjectGraph.Writer(rules,
+				new DataOutputStream(new ByteArrayOutputStream()));
+		first.writeRoot(thing);
+		final SavedObjectGraph.Writer second = new SavedObjectGraph.Writer(rules,
+				new DataOutputStream(new ByteArrayOutputStream()));
+		second.writeRoot(thing);
+		assertArrayEquals(first.finishTable(), second.finishTableBytes().toByteArray());
+	}
+
+	@Test
 	void savedBytesDoNotDependOnTheBodyStream() throws IOException {
 		final External external = new External("player0");
 		final Thing thing = sample(external);

@@ -12,12 +12,15 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.list
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitDeathReplacementResult;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitDeathReplacementStacking;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CUnitVisionFogModifier;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 
 /**
  * Soul Gem (Soul Trap): traps the soul of an enemy hero in the gem. Measured on 1.29: the hero is hidden at once,
  * still alive, unpaused and at full life, and the gem is used up; when the holder dies, the hero is shown again where
- * the holder fell.
+ * the holder fell. While the hero is trapped the holder is revealed to the hero's owner: that player sees around the
+ * holder as far as the holder sees (also in the fog and where the hidden hero would not see).
  */
 public class CAbilitySoulTrap extends CAbilityTargetSpellBase {
 
@@ -42,22 +45,30 @@ public class CAbilitySoulTrap extends CAbilityTargetSpellBase {
 		}
 		simulation.createTemporarySpellEffectOnUnit(targetUnit, getAlias(), CEffectType.TARGET);
 		targetUnit.setHidden(true);
+		final CPlayer revealedTo = simulation.getPlayer(targetUnit.getPlayerIndex());
+		final CUnitVisionFogModifier reveal = new CUnitVisionFogModifier(caster, false);
+		revealedTo.addFogModifer(simulation, reveal, false);
 		caster.addDeathReplacementEffect(CUnitDeathReplacementEffectPriority.GENERALONDEATHACTIONS,
-				new SoulRelease(targetUnit));
+				new SoulRelease(targetUnit, revealedTo, reveal));
 		return false;
 	}
 
 	private static final class SoulRelease implements CUnitDeathReplacementEffect {
 		private final CUnit trapped;
+		private final CPlayer revealedTo;
+		private final CUnitVisionFogModifier reveal;
 
-		private SoulRelease(final CUnit trapped) {
+		private SoulRelease(final CUnit trapped, final CPlayer revealedTo, final CUnitVisionFogModifier reveal) {
 			this.trapped = trapped;
+			this.revealedTo = revealedTo;
+			this.reveal = reveal;
 		}
 
 		@Override
 		public CUnitDeathReplacementStacking onDeath(final CSimulation simulation, final CUnit holder,
 				final CUnit killer, final CUnitDeathReplacementResult result) {
 			holder.removeDeathReplacementEffect(CUnitDeathReplacementEffectPriority.GENERALONDEATHACTIONS, this);
+			this.revealedTo.removeFogModifer(simulation, this.reveal);
 			if (!this.trapped.isDead() && this.trapped.isHidden()) {
 				this.trapped.setPointAndCheckUnstuck(holder.getX(), holder.getY(), simulation);
 				this.trapped.setHidden(false);

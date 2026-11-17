@@ -94,5 +94,15 @@ public interface DataSource {
 		return accepted;
 	}
 
+	/**
+	 * This data as the Classic game reads it, without the graphics packages laid over it. What the simulation reads
+	 * comes from here, so that players using other graphics sets (and a replay) simulate alike.
+	 *
+	 * @return this when no graphics package is part of it
+	 */
+	default DataSource graphicsIndependent() {
+		return this;
+	}
+
 	void close() throws IOException;
 }

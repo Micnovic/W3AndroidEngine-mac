@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 
@@ -331,7 +332,7 @@ public class AbilityDataUI {
 							uberTipParser(iconUberTip), '\0'), targetArt,
 					specialArt, effectArt, missileArt, lightningEffects, effectSound, effectSoundLooped);
 			this.rawcodeToBuffUI.put(War3ID.fromString(alias), buffUI);
-			this.lowerCaseRawcodeToBuffUI.put(alias.toLowerCase(), buffUI);
+			this.lowerCaseRawcodeToBuffUI.put(alias.toLowerCase(Locale.ROOT), buffUI);
 		}
 		for (final String alias : unitData.keySet()) {
 			final GameObject abilityTypeData = unitData.get(alias);
@@ -578,7 +579,7 @@ public class AbilityDataUI {
 		final BuffUI buffUI = this.rawcodeToBuffUI.get(rawcode);
 		if (buffUI == null) {
 			// Effects are named with differing case in the ability data (XEsn) and the buff table (Xesn).
-			return this.lowerCaseRawcodeToBuffUI.get(rawcode.asStringValue().toLowerCase());
+			return this.lowerCaseRawcodeToBuffUI.get(rawcode.asStringValue().toLowerCase(Locale.ROOT));
 		}
 		return buffUI;
 	}

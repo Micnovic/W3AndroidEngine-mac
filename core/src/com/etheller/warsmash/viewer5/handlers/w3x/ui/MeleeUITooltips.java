@@ -444,7 +444,7 @@ final class MeleeUITooltips {
 		case TIME_OF_DAY: {
 			final int minutes = (int) (simulation.getGameTimeOfDay() * 60);
 			final String time = String.format(Locale.ROOT, "%d:%02d", (minutes / 60) % 24, minutes % 60);
-			showTooltip(String.format(decorated("TIME_OF_DAY_TOOLTIP"), time), null,
+			showTooltip(String.format(Locale.ROOT, decorated("TIME_OF_DAY_TOOLTIP"), time), null,
 					decorated("TIME_OF_DAY_UBERTIP"));
 			return true;
 		}
@@ -475,11 +475,11 @@ final class MeleeUITooltips {
 			final String name = decorated(names[Math.min(level, names.length - 1)]);
 			final int goldKept = Math.round(100 * (1 - tax(goldTax, level)));
 			if (taxesLumber) {
-				text.append(String.format(decorated("RESOURCE_UBERTIP_UPKEEP_INFO_WOOD"), low, high, name, goldKept,
+				text.append(String.format(Locale.ROOT, decorated("RESOURCE_UBERTIP_UPKEEP_INFO_WOOD"), low, high, name, goldKept,
 						Math.round(100 * (1 - tax(lumberTax, level)))));
 			}
 			else {
-				text.append(String.format(decorated("RESOURCE_UBERTIP_UPKEEP_INFO"), low, high, name, goldKept));
+				text.append(String.format(Locale.ROOT, decorated("RESOURCE_UBERTIP_UPKEEP_INFO"), low, high, name, goldKept));
 			}
 			low = high + 1;
 		}
@@ -621,7 +621,7 @@ final class MeleeUITooltips {
 				continue;
 			}
 			return "|n" + decorated("COLON_UPGRADE") + " "
-					+ String.format(decorated("UPGRADE_TOOLTIP"), named.getName(), level);
+					+ String.format(Locale.ROOT, decorated("UPGRADE_TOOLTIP"), named.getName(), level);
 		}
 		return "";
 	}
@@ -648,7 +648,7 @@ final class MeleeUITooltips {
 		final StringBuilder text = new StringBuilder();
 		attribute(text, "COLON_STRENGTH", primary == CPrimaryAttribute.STRENGTH, constants);
 		text.append("|n")
-				.append(String.format(decorated("BONUS_HITPOINTS"), Math.round(constants.getStrHitPointBonus())));
+				.append(String.format(Locale.ROOT, decorated("BONUS_HITPOINTS"), Math.round(constants.getStrHitPointBonus())));
 		text.append("|n").append(decorated("BONUS_HPREGEN"));
 		text.append("|n");
 		attribute(text, "COLON_AGILITY", primary == CPrimaryAttribute.AGILITY, constants);
@@ -656,16 +656,16 @@ final class MeleeUITooltips {
 		if (agilityDefense > 0) {
 			text.append("|n");
 			if (agilityDefense < 1) {
-				text.append(String.format(decorated("BONUS_DEFENSE_FIXED"), Math.round(1 / agilityDefense)));
+				text.append(String.format(Locale.ROOT, decorated("BONUS_DEFENSE_FIXED"), Math.round(1 / agilityDefense)));
 			}
 			else {
-				text.append(String.format(decorated("BONUS_DEFENSE"), 1, Math.round(agilityDefense)));
+				text.append(String.format(Locale.ROOT, decorated("BONUS_DEFENSE"), 1, Math.round(agilityDefense)));
 			}
 		}
 		text.append("|n").append(decorated("BONUS_ATTACK_SPEED"));
 		text.append("|n");
 		attribute(text, "COLON_INTELLECT", primary == CPrimaryAttribute.INTELLIGENCE, constants);
-		text.append("|n").append(String.format(decorated("BONUS_MANA"), Math.round(constants.getIntManaBonus())));
+		text.append("|n").append(String.format(Locale.ROOT, decorated("BONUS_MANA"), Math.round(constants.getIntManaBonus())));
 		text.append("|n").append(decorated("BONUS_MANAREGEN"));
 		showTooltip(decorated("COLON_HERO_ATTRIBUTES"), null, text.toString(), frame);
 	}
@@ -677,7 +677,7 @@ final class MeleeUITooltips {
 		if (primary) {
 			text.append("|n - ").append(decorated("PRIMARY_ATTRIBUTE"));
 			text.append("|n")
-					.append(String.format(decorated("BONUS_DAMAGE"), Math.round(constants.getStrAttackBonus())));
+					.append(String.format(Locale.ROOT, decorated("BONUS_DAMAGE"), Math.round(constants.getStrAttackBonus())));
 		}
 	}
 

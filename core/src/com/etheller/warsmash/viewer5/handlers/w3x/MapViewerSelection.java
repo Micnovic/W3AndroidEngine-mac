@@ -2,6 +2,7 @@ package com.etheller.warsmash.viewer5.handlers.w3x;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 import com.badlogic.gdx.Gdx;
@@ -119,7 +120,7 @@ final class MapViewerSelection {
 						break;
 					}
 				}
-				if (!path.toLowerCase().endsWith(".blp")) {
+				if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 					path += ".blp";
 				}
 				if (unit instanceof RenderUnit) {
@@ -241,7 +242,7 @@ final class MapViewerSelection {
 					break;
 				}
 			}
-			if (!path.toLowerCase().endsWith(".blp")) {
+			if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 				path += ".blp";
 			}
 			if (unit instanceof RenderUnit) {

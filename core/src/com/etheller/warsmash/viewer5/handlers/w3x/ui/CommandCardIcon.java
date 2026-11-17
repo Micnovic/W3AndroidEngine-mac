@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
+import java.util.Locale;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -315,7 +316,7 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 		if (tip == null) {
 			return null;
 		}
-		final boolean marked = tip.toLowerCase().contains(HOTKEY_COLOR);
+		final boolean marked = tip.toLowerCase(Locale.ROOT).contains(HOTKEY_COLOR);
 		if (touch) {
 			return marked ? tip.replaceAll("\\s*\\((?i:\\|cffffcc00)[^|]*\\|r\\)", "")
 					.replaceAll("(?i:\\|cffffcc00)([^|]*)\\|r", "$1") : tip;
@@ -324,7 +325,7 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 				: Character.isLetterOrDigit(hotkey) ? String.valueOf(Character.toUpperCase(hotkey))
 						: ((hotkey > ' ') && (hotkey < 0x7F) && (hotkey != 0x7C)) ? String.valueOf(hotkey) : null;
 		// A gold level, "[|cffffcc00Level 1|r]", is no mark of the key.
-		if ((key == null) || tip.toLowerCase().contains(HOTKEY_COLOR + key.toLowerCase() + "|r")) {
+		if ((key == null) || tip.toLowerCase(Locale.ROOT).contains(HOTKEY_COLOR + key.toLowerCase(Locale.ROOT) + "|r")) {
 			return tip;
 		}
 		final int level = tip.indexOf(" - [");

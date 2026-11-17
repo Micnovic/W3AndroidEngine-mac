@@ -60,8 +60,9 @@ public final class GameReplays {
 	/** -Dwarsmash.version=&lt;version&gt;: stands for the engine's own version; a replay of another one is refused. */
 	public static final String VERSION_PROPERTY = "warsmash.version";
 	/**
-	 * The game data files the game's rules come from. Text that only names and describes things (the *Strings files)
-	 * is left out, so a replay plays in every language.
+	 * The game data files the game's rules come from, read from the data without graphics packages (the simulation
+	 * reads those alone). Text that only names and describes things (the *Strings files) is left out, so a replay plays
+	 * in every language. The sound tables are in because the length of a sound is something scripts wait by.
 	 */
 	private static final String[] DATA_FILES = { "Scripts\\common.j", "Scripts\\Blizzard.j", "Scripts\\common.ai",
 			"Units\\UnitAbilities.slk", "Units\\UnitBalance.slk", "Units\\UnitData.slk", "Units\\UnitUI.slk",
@@ -77,7 +78,10 @@ public final class GameReplays {
 			"Units\\AbilityBuffSkin.txt", "Units\\CampaignUpgradeFunc.txt", "Units\\HumanUpgradeFunc.txt",
 			"Units\\NeutralUpgradeFunc.txt", "Units\\NightElfUpgradeFunc.txt", "Units\\OrcUpgradeFunc.txt",
 			"Units\\UndeadUpgradeFunc.txt", "Units\\UpgradeSkin.txt", "Units\\MiscData.txt", "Units\\MiscGame.txt",
-			"TerrainArt\\Terrain.slk", "TerrainArt\\CliffTypes.slk", "TerrainArt\\Water.slk" };
+			"TerrainArt\\Terrain.slk", "TerrainArt\\CliffTypes.slk", "TerrainArt\\Water.slk", "UI\\MiscData.txt",
+			"UI\\SoundInfo\\MiscData.txt", "UI\\SoundInfo\\UISounds.slk", "UI\\SoundInfo\\AbilitySounds.slk",
+			"UI\\SoundInfo\\AmbienceSounds.slk", "UI\\SoundInfo\\AmbientMusic.slk",
+			"UI\\SoundInfo\\UnitCombatSounds.slk", "UI\\SoundInfo\\AnimSounds.slk" };
 	/** Once a game second. */
 	public static final int CHECKSUM_INTERVAL = 20;
 
@@ -279,8 +283,12 @@ public final class GameReplays {
 				+ (BuildInfo.current().isOfficial() ? "an official" : "an unofficial") + " one";
 	}
 
-	/** The CRC-32 of the game data files, each with its name and size; a missing file counts as missing. */
-	public static int dataChecksum(final DataSource dataSource) throws IOException {
+	/**
+	 * The CRC-32 of the game data files, each with its name and size; a missing file counts as missing. It is the
+	 * same for the data of any graphics set: the simulation does not read the graphics packages.
+	 */
+	public static int dataChecksum(final DataSource gameData) throws IOException {
+		final DataSource dataSource = gameData.graphicsIndependent();
 		final CRC32 crc = new CRC32();
 		final byte[] buffer = new byte[1 << 16];
 		for (final String file : DATA_FILES) {

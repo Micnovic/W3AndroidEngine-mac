@@ -38,6 +38,7 @@ public class CItemData {
 	private static final String STOCK_REPLENISH_INTERVAL = "stockRegen"; // replaced from 'istr'
 	private static final String STOCK_START_DELAY = "stockStart"; // replaced from 'isst'
 	private static final String STOCK_INITIAL = "stockInitial"; // replaced from 'isit'
+	private static final String STACK_MAX = "stackMax"; // replaced from 'ista'
 	private static final String DEPENDENCY_EQUIVALENTS = "DependencyOr";
 
 	private static final String HIT_POINTS = "HP"; // replaced from 'ihtp'
@@ -162,6 +163,7 @@ public class CItemData {
 					droppedWhenCarrierDies, canBeDropped, validTargetForTransformation, includeAsRandomChoice,
 					itemClass, requirements);
 			itemTypeInstance.setStockInitial(itemType.getFieldAsInteger(STOCK_INITIAL, 0));
+			itemTypeInstance.setStackMax(itemType.getFieldAsInteger(STACK_MAX, 0));
 			this.itemIdToItemType.put(typeId, itemTypeInstance);
 
 			if (includeAsRandomChoice) {

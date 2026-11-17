@@ -115,7 +115,7 @@ final class MapViewerUnits {
 					viewer.widgets.add(renderItem);
 					viewer.itemToRenderPeer.put(simulationItem, renderItem);
 
-					renderItem.shadow = createUnitShadow(viewer, renderItemType.getRenderShadowType(), unitX, unitY);
+					renderItem.shadow = createBlobShadow(viewer, renderItemType.getRenderShadowType(), unitX, unitY);
 					return simulationItem;
 
 				} else {
@@ -188,6 +188,14 @@ final class MapViewerUnits {
 	}
 
 	static SplatMover createUnitShadow(final War3MapViewer viewer, final RenderShadowType renderShadowType, final float unitX, final float unitY) {
+		// A unit that casts the shape of its model has no blob under it.
+		if (viewer.dynamicShadowManager.isModelShadows()) {
+			return null;
+		}
+		return createBlobShadow(viewer, renderShadowType, unitX, unitY);
+	}
+
+	static SplatMover createBlobShadow(final War3MapViewer viewer, final RenderShadowType renderShadowType, final float unitX, final float unitY) {
 		if (renderShadowType != null) {
 			final float x = unitX - renderShadowType.getX();
 			final float y = unitY - renderShadowType.getY();
@@ -258,7 +266,7 @@ final class MapViewerUnits {
 			final RenderItem renderItem = new RenderItem(viewer, renderItemType, x, y, z, 0, item);
 			viewer.widgets.add(renderItem);
 			viewer.itemToRenderPeer.put(item, renderItem);
-			renderItem.shadow = createUnitShadow(viewer, renderItemType.getRenderShadowType(), x, y);
+			renderItem.shadow = createBlobShadow(viewer, renderItemType.getRenderShadowType(), x, y);
 		}
 	}
 

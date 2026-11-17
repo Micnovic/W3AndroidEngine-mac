@@ -39,14 +39,6 @@ public class CUnitDefaultThornsListener implements CUnitAttackDamageTakenListene
 		}
 	}
 
-	public boolean isPercentage() {
-		return percentage;
-	}
-
-	public void setPercentage(boolean percentage) {
-		this.percentage = percentage;
-	}
-
 	public float getAmount() {
 		return amount;
 	}

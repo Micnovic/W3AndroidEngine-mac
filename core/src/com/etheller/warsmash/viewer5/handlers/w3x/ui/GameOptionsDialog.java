@@ -7,12 +7,16 @@ import java.util.List;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.utils.viewport.Viewport;
+import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.input.touch.TouchInputRouter;
 import com.etheller.warsmash.launcher.CustomFolderChooser;
+import com.etheller.warsmash.launcher.LauncherOptions;
+import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.FrameClass;
 import com.etheller.warsmash.parsers.fdf.datamodel.FrameDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
+import com.etheller.warsmash.parsers.fdf.datamodel.MenuItem;
 import com.etheller.warsmash.parsers.fdf.datamodel.SetPointDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.fields.FloatFrameDefinitionField;
 import com.etheller.warsmash.parsers.fdf.datamodel.fields.StringFrameDefinitionField;
@@ -77,6 +81,10 @@ final class GameOptionsDialog {
 	private CheckBoxFrame vSync;
 	private int particles;
 	private int unitShadows;
+	private int renderScale;
+	private int frameCap;
+	private PopupMenuFrame renderScaleMenu;
+	private PopupMenuFrame frameCapMenu;
 
 	private CheckBoxFrame sound;
 	private ScrollBarFrame soundVolume;
@@ -314,14 +322,47 @@ final class GameOptionsDialog {
 	private void createVideoControls() {
 		this.gamma = (ScrollBarFrame) frame("GammaSlider");
 		this.vSync = (CheckBoxFrame) frame("VSyncCheckBox");
-		enable(this.vSync, GameOptions.isVSyncAdjustable());
+		if (GameOptions.isVSyncAdjustable()) {
+			enable(this.vSync, true);
+		}
+		else {
+			// The screen's own refresh always syncs here and the screen has one fixed mode, so these lines are left
+			// out and the ones below move up.
+			this.vSync = null;
+			hide("VSyncLabel", "VSyncCheckBox", "WindowModeLabel", "EscOptionsWindowModeMenu", "ResolutionLabel",
+					"EscOptionsResolutionMenu");
+			final UIFrame particlesLabel = frame("ParticlesLabel");
+			final UIFrame gammaLabel = frame("GammaLabel");
+			if ((particlesLabel != null) && (gammaLabel != null)) {
+				particlesLabel.addSetPoint(new SetPoint(FramePoint.TOPLEFT, gammaLabel, FramePoint.BOTTOMLEFT, 0,
+						GameUI.convertY(this.uiViewport, -0.03f)));
+			}
+		}
 		setUpPopup("EscOptionsParticlesMenu", index -> this.particles = index);
 		setUpPopup("EscOptionsShadowsMenu", index -> this.unitShadows = index);
-		disablePopup("EscOptionsWindowModeMenu", this.rootFrame.getTemplates().getDecoratedString(
-				Gdx.graphics.isFullscreen() ? "WINDOW_MODE_FULLSCREEN" : "WINDOW_MODE_WINDOWED"));
-		disablePopup("EscOptionsResolutionMenu", Gdx.graphics.getWidth() + " x " + Gdx.graphics.getHeight());
-		disablePopup("EscOptionsLightsMenu", "");
-		disablePopup("EscOptionsOcclusionMenu", "");
+		if (GameOptions.isVSyncAdjustable()) {
+			disablePopup("EscOptionsWindowModeMenu", this.rootFrame.getTemplates().getDecoratedString(
+					Gdx.graphics.isFullscreen() ? "WINDOW_MODE_FULLSCREEN" : "WINDOW_MODE_WINDOWED"));
+			disablePopup("EscOptionsResolutionMenu", Gdx.graphics.getWidth() + " x " + Gdx.graphics.getHeight());
+		}
+		// The panel has no lines for these two; the lights and occlusion lines, which no setting backs, make room.
+		final List<String> scales = new ArrayList<>();
+		for (final int percent : GraphicsSettings.RENDER_SCALES) {
+			scales.add(percent + "%");
+		}
+		if (RenderScaleStore.Holder.get() != null) {
+			this.renderScaleMenu = reuseLine("EscOptionsLightsMenu", "LightsLabel", "Render scale:", scales,
+					index -> this.renderScale = index);
+		}
+		else {
+			disablePopup("EscOptionsLightsMenu", "");
+		}
+		final List<String> caps = new ArrayList<>();
+		for (final int fps : LauncherOptions.FRAME_CAPS) {
+			caps.add(fps == 0 ? "No limit" : fps + " FPS");
+		}
+		this.frameCapMenu = reuseLine("EscOptionsOcclusionMenu", "OcclusionLabel", "Frame rate limit:", caps,
+				index -> this.frameCap = index);
 		hide("ModelDetailLabel", "ModelDetailValue", "AnimQualityLabel", "AnimQualityValue", "TextureQualityLabel",
 				"TextureQualityValue", "ResolutionLabel", "ResolutionValue", "SpellFilterLabel", "SpellFilterValue",
 				"SpellDetailLabel", "SpellDetailValue", "GammaValue");
@@ -423,6 +464,26 @@ final class GameOptionsDialog {
 		this.rootFrame.setText((StringFrame) ((GlueTextButtonFrame) popup.getPopupTitleFrame()).getButtonText(), text);
 	}
 
+	/** A line of the panel that offers no choice, turned into one with these values; null when the data lacks it. */
+	private PopupMenuFrame reuseLine(final String popupName, final String labelName, final String label,
+			final List<String> values, final IndexListener listener) {
+		final PopupMenuFrame popup = (PopupMenuFrame) frame(popupName);
+		if ((popup == null) || !(popup.getPopupMenuFrame() instanceof MenuFrame)) {
+			return null;
+		}
+		final UIFrame labelFrame = frame(labelName);
+		if (labelFrame instanceof StringFrame) {
+			this.rootFrame.setText((StringFrame) labelFrame, label);
+		}
+		final List<MenuItem> items = new ArrayList<>();
+		for (final String value : values) {
+			items.add(new MenuItem(value, -2));
+		}
+		((MenuFrame) popup.getPopupMenuFrame()).setItems(this.uiViewport, items);
+		setUpPopup(popupName, listener);
+		return popup;
+	}
+
 	private void disablePopup(final String name, final String shownValue) {
 		final PopupMenuFrame popup = (PopupMenuFrame) frame(name);
 		if (popup == null) {
@@ -503,6 +564,15 @@ final class GameOptionsDialog {
 		this.unitShadows = options.isUnitShadows() ? 1 : 0;
 		showPopupValue((PopupMenuFrame) frame("EscOptionsParticlesMenu"), this.particles);
 		showPopupValue((PopupMenuFrame) frame("EscOptionsShadowsMenu"), this.unitShadows);
+		final RenderScaleStore store = RenderScaleStore.Holder.get();
+		if ((store != null) && (this.renderScaleMenu != null)) {
+			this.renderScale = GraphicsSettings.renderScaleChoice(store.percent());
+			showPopupValue(this.renderScaleMenu, this.renderScale);
+		}
+		if (this.frameCapMenu != null) {
+			this.frameCap = LauncherOptions.frameCapChoice(options.getFrameCap());
+			showPopupValue(this.frameCapMenu, this.frameCap);
+		}
 	}
 
 	private void writeVideo() {
@@ -511,6 +581,16 @@ final class GameOptionsDialog {
 		options.setVSync(checked(this.vSync, options.isVSync()));
 		options.setParticles(this.particles);
 		options.setUnitShadows(this.unitShadows != 0);
+		final RenderScaleStore store = RenderScaleStore.Holder.get();
+		if ((store != null) && (this.renderScaleMenu != null)) {
+			final int percent = GraphicsSettings.RENDER_SCALES[this.renderScale];
+			if (percent != GraphicsSettings.RENDER_SCALES[GraphicsSettings.renderScaleChoice(store.percent())]) {
+				store.set(percent);
+			}
+		}
+		if (this.frameCapMenu != null) {
+			options.setFrameCap(LauncherOptions.FRAME_CAPS[this.frameCap]);
+		}
 	}
 
 	private void readSound() {

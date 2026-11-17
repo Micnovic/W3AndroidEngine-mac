@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.IntFunction;
 
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.units.DataTable;
@@ -97,6 +99,23 @@ public final class CampaignCatalog {
 	}
 
 	/**
+	 * The campaign file the skin names for a game version (0 Reign of Chaos, 1 The Frozen Throne): the data of these
+	 * versions list their campaigns apart. When the data lacks that version's file the other version's is taken, and
+	 * data with neither (the combined list of later versions) keeps the field as it is.
+	 *
+	 * @param skinField the skin's CampaignFile field for a game version
+	 */
+	public static String campaignFile(final DataSource dataSource, final IntFunction<String> skinField,
+			final int version) {
+		final String file = skinField.apply(version);
+		if (dataSource.has(file)) {
+			return file;
+		}
+		final String other = skinField.apply(1 - version);
+		return dataSource.has(other) ? other : file;
+	}
+
+	/**
 	 * @param campaignFile the skin's CampaignFile field
 	 */
 	public static CampaignCatalog load(final DataSource dataSource, final String campaignFile) throws IOException {
@@ -105,7 +124,7 @@ public final class CampaignCatalog {
 			try (InputStream stream = dataSource.getResourceAsStream(campaignFile)) {
 				strings.readTXT(stream, true);
 			}
-			final boolean classicList = !campaignFile.toLowerCase().contains("_exp");
+			final boolean classicList = !campaignFile.toLowerCase(Locale.ROOT).contains("_exp");
 			return new CampaignCatalog(strings, classicList ? CCampaignProgress.CampaignList.REIGN_OF_CHAOS
 					: CCampaignProgress.CampaignList.FROZEN_THRONE, classicList, false).withReforged(dataSource);
 		}

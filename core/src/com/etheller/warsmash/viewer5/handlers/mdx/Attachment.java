@@ -14,7 +14,7 @@ public class Attachment extends GenericObject {
 	public Attachment(final MdxModel model, final MdlxAttachment attachment, final int index) {
 		super(model, attachment, index);
 
-		final String path = attachment.getPath().toLowerCase().replace(".mdl", ".mdx");
+		final String path = attachment.getPath().toLowerCase(Locale.ROOT).replace(".mdl", ".mdx");
 
 		this.name = attachment.getName().toLowerCase(Locale.US);
 		this.path = path;

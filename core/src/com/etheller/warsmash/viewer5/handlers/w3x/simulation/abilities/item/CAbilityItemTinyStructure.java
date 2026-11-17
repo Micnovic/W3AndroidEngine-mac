@@ -121,7 +121,7 @@ public class CAbilityItemTinyStructure extends CAbilityPointTargetSpellBase {
 		if (structure == null) {
 			return false;
 		}
-		AbstractCAbilityBuild.moveControlledUnitsAside(simulation, structure, caster, true);
+		AbstractCAbilityBuild.moveControlledUnitsAside(simulation, structure, caster, false);
 		structure.setBuildTimeOverride(this.buildTime);
 		final CAbilityBuildInProgress buildInProgress = new CAbilityBuildInProgress(
 				simulation.getHandleIdAllocator().createId());

@@ -23,6 +23,7 @@ import com.etheller.interpreter.ast.execution.JassThread;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.GlobalScopeAssignable;
 import com.etheller.interpreter.ast.value.CodeJassValue;
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.parsers.jass.JassAIEnvironment;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -54,12 +55,15 @@ public final class SavedGame {
 	 * Raised only when the file layout itself changes. Classes gaining or losing fields need no new version: the class
 	 * table lets older saves load (see SavedObjectGraph). 3 added the table of script functions to the header, 4 the
 	 * types of the saved globals, 5 the game's random seed, 6 came with the handle table (the map's destructables,
-	 * which are found again by id, are numbered differently), 7 the campaign and difficulty the game is played in; 2 is
+	 * which are found again by id, are numbered differently), 7 the campaign and difficulty the game is played in, 8 the
+	 * authorship line closing the header; 2 is
 	 * still read, its script positions then need the very same scripts.
 	 */
-	private static final int FORMAT_VERSION = 7;
+	private static final int FORMAT_VERSION = 8;
 	/** The first format whose header says the campaign and difficulty of the game. */
 	public static final int CAMPAIGN_FORMAT_VERSION = 7;
+	/** The first format whose header closes with the authorship line. */
+	private static final int AUTHORSHIP_FORMAT_VERSION = 8;
 	/** Every game used this seed before the seed was saved. */
 	private static final int SEED_BEFORE_FORMAT_5 = 1337;
 	private static final int OLDEST_FORMAT_VERSION = 2;
@@ -92,7 +96,7 @@ public final class SavedGame {
 		/** The functions saved script positions are in; null in format 2. */
 		SavedScriptPositions.Table positions;
 
-		private void write(final DataOutputStream out) throws IOException {
+		void write(final DataOutputStream out) throws IOException {
 			out.writeInt(MAGIC);
 			out.writeInt(FORMAT_VERSION);
 			out.writeUTF(this.mapFile);
@@ -123,9 +127,10 @@ public final class SavedGame {
 				created.write(out);
 			}
 			this.positions.write(out);
+			out.writeUTF(ProjectInfo.AUTHORSHIP);
 		}
 
-		private static Header read(final DataInputStream in) throws IOException {
+		static Header read(final DataInputStream in) throws IOException {
 			if (in.readInt() != MAGIC) {
 				throw new IOException("Not a saved game of this engine");
 			}
@@ -171,6 +176,10 @@ public final class SavedGame {
 			}
 			if (version >= 3) {
 				header.positions = SavedScriptPositions.Table.read(in, version >= 4);
+			}
+			if (version >= AUTHORSHIP_FORMAT_VERSION) {
+				// Who made the build; kept for people reading the file, loading never needs it.
+				in.readUTF();
 			}
 			return header;
 		}
@@ -470,14 +479,16 @@ public final class SavedGame {
 			}
 			header.positions = rules.getPositions();
 			header.positions.recordGlobals(scopes);
-			final byte[] table = writer.finishTable();
+			final SavedObjectGraph.Bytes table = writer.finishTableBytes();
+			final int tableSize = table.size();
+			final int bodySize = bodyBytes.size();
 			final ByteArrayOutputStream headerBytes = new ByteArrayOutputStream(1 << 16);
 			try (DataOutputStream out = new DataOutputStream(headerBytes)) {
 				header.write(out);
 			}
 			CSaveStorage.writeInBackground(file, out -> {
-				final ByteArrayOutputStream tableBytes = gzip(table.length, gzipped -> gzipped.write(table));
-				final ByteArrayOutputStream compressedBodies = gzip(bodyBytes.size(), bodyBytes::writeTo);
+				final SavedObjectGraph.Bytes tableBytes = gzip(table::writeToAndRelease);
+				final SavedObjectGraph.Bytes compressedBodies = gzip(bodyBytes::writeToAndRelease);
 				headerBytes.writeTo(out);
 				out.writeInt(tableBytes.size());
 				tableBytes.writeTo(out);
@@ -486,7 +497,7 @@ public final class SavedGame {
 			});
 			final StringBuilder report = new StringBuilder("Saved game ").append(file.name()).append(": ")
 					.append(writer.objectCount()).append(" objects, ")
-					.append(bodyBytes.size() + table.length).append(" bytes before compression, ")
+					.append(bodySize + tableSize).append(" bytes before compression, ")
 					.append(root.effects.size()).append(" effects, ").append(root.lightnings.size()).append(" lightnings");
 			for (final Map.Entry<String, Integer> dropped : rules.getDroppedReport().entrySet()) {
 				report.append("\n  left out ").append(dropped.getKey()).append(" x").append(dropped.getValue());
@@ -504,8 +515,9 @@ public final class SavedGame {
 		void writeTo(OutputStream out) throws IOException;
 	}
 
-	private static ByteArrayOutputStream gzip(final int length, final Content content) throws IOException {
-		final ByteArrayOutputStream compressed = new ByteArrayOutputStream(Math.max(1 << 12, length / 4));
+	/** Compressed into chunks: growing one array copied the result again at each doubling. */
+	private static SavedObjectGraph.Bytes gzip(final Content content) throws IOException {
+		final SavedObjectGraph.Bytes compressed = new SavedObjectGraph.Bytes(1 << 16);
 		try (GZIPOutputStream out = new GZIPOutputStream(compressed, 1 << 16)) {
 			content.writeTo(out);
 		}

@@ -25,6 +25,7 @@ import android.widget.TextView;
 import com.etheller.warsmash.launcher.CampaignChoice;
 import com.etheller.warsmash.launcher.CustomGame;
 import com.etheller.warsmash.launcher.LauncherBoard;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.MapListCache;
 import com.etheller.warsmash.launcher.MapSections;
 import com.etheller.warsmash.launcher.SkinArt;
@@ -199,12 +200,23 @@ final class CustomGamePage extends LauncherViews {
 		mark.addView(players, new FrameLayout.LayoutParams(MATCH, MATCH));
 		row.addView(mark, new LinearLayout.LayoutParams(px(icon), px(icon)));
 		final CharSequence name = LauncherKit.glueText(entry.label);
-		final TextView title = text(name, line * 0.56f, this.activity.art.text());
+		final boolean playable = entry.issue == MapIssue.NONE;
+		// A map the engine cannot play stays in the list, greyed, with the reason beside its name; a long name is cut
+		// before the reason is.
+		final TextView title = text(name, line * 0.56f, playable ? this.activity.art.text() : this.activity.art.text2());
 		final LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0,
 				ViewGroup.LayoutParams.WRAP_CONTENT, 1);
 		titleParams.leftMargin = px(18);
 		row.addView(title, titleParams);
-		row.setContentDescription(name);
+		if (!playable) {
+			final TextView reason = text("\u00b7 " + issueText(entry.issue, true), line * 0.44f,
+					this.activity.art.text2());
+			final LinearLayout.LayoutParams reasonParams = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			reasonParams.leftMargin = px(10);
+			row.addView(reason, reasonParams);
+		}
+		row.setContentDescription(playable ? name : name + ", " + issueText(entry.issue, false));
 		return row;
 	}
 
@@ -449,6 +461,10 @@ final class CustomGamePage extends LauncherViews {
 	private void startCustom() {
 		final GameCatalog.MapDetails details = this.mapDetails;
 		if (details == null) {
+			return;
+		}
+		if (details.issue != MapIssue.NONE) {
+			this.activity.dialogs.showMessage(getString(R.string.game_not_started), issueText(details.issue, false));
 			return;
 		}
 		this.activity.preferences.edit().putInt(KEY_LAUNCH_RACE, this.lobby.playerRace()).apply();

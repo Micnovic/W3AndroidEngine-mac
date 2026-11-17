@@ -99,10 +99,9 @@ public class BatchGroup extends GenericGroup {
 			shader.setUniformi("u_emissiveMap", 3);
 			shader.setUniformi("u_teamColorMap", 4);
 			shader.setUniformi("u_environmentMap", 5);
-			shader.setUniformf("u_fogColor", scene.fogSettings.color);
-			shader.setUniformf("u_fogParams", scene.fogSettings.style.ordinal(), scene.fogSettings.start,
-					scene.fogSettings.end, scene.fogSettings.density);
+			scene.fogSettings.uploadUniforms(shader);
 			shader.setUniformf("u_iblParams", HD_IBL_STRENGTH, HD_NIGHT_AMBIENT);
+			shader.setUniform4fv("u_vertexColor", instance.vertexColor, 0, instance.vertexColor.length);
 
 			gl.glEnable(GL20.GL_BLEND);
 			gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -198,7 +197,12 @@ public class BatchGroup extends GenericGroup {
 					webGL.bindTexture(teamColorTexture, 4);
 					webGL.bindTexture(environmentMapTexture, 5);
 
-					diffuseLayer.bind(shader);
+					if (instance.vertexColor[3] < 1.0f) {
+						diffuseLayer.bindBlended(shader);
+					}
+					else {
+						diffuseLayer.bind(shader);
+					}
 
 					geoset.bindHd(shader, batch.skinningType, diffuseLayer.coordId);
 					geoset.render();
@@ -233,9 +237,7 @@ public class BatchGroup extends GenericGroup {
 					shader.setUniformf("u_layerAlpha", layerAlpha);
 					shader.setUniformi("u_unshaded", layer.unshaded != 0 ? 1 : 0);
 					shader.setUniformi("u_unfogged", layer.unfogged != 0 ? 1 : 0);
-					shader.setUniformf("u_fogColor", scene.fogSettings.color);
-					shader.setUniformf("u_fogParams", scene.fogSettings.style.ordinal(), scene.fogSettings.start,
-							scene.fogSettings.end, scene.fogSettings.density);
+					scene.fogSettings.uploadUniforms(shader);
 
 					shader.setUniform2fv("u_uvTrans", uvAnim, 0, 2);
 					shader.setUniform2fv("u_uvRot", uvAnim, 2, 2);
@@ -283,5 +285,72 @@ public class BatchGroup extends GenericGroup {
 			}
 		}
 
+	}
+
+	/**
+	 * Draws the opaque and cut-out layers of this group into a ground shadow mask with the bound shader: no lighting,
+	 * only the shape of the model.
+	 */
+	void renderShadow(final MdxComplexInstance instance, final ShaderProgram shader) {
+		if (!instance.bindBones(shader)) {
+			return;
+		}
+		final MdxModel model = this.model;
+		final List<Texture> textures = model.getTextures();
+		final List<Batch> batches = model.batches;
+		final List<Integer> replaceables = model.replaceables;
+		final ModelViewer viewer = model.viewer;
+		final GL20 gl = viewer.gl;
+		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, model.arrayBuffer);
+		gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, model.elementBuffer);
+		for (final int index : getObjectArray()) {
+			final Batch batch = batches.get(index);
+			final Geoset geoset = batch.geoset;
+			final Layer layer = this.hd ? batch.material.layers.get(0) : batch.layer;
+			// Additive glows, modulated layers and the like are light, not matter.
+			if (layer.filterMode > 2) {
+				continue;
+			}
+			if ((instance.geosetColors[geoset.index][3] <= 0.01f) || (instance.layerAlphas[layer.index] <= 0.01f)) {
+				continue;
+			}
+			final boolean cutout = layer.filterMode != 0;
+			shader.setUniformi("u_cutout", cutout ? 1 : 0);
+			if (cutout) {
+				final int textureId = Math.max(0, instance.layerTextures[layer.index]);
+				final Integer replaceable = replaceables.get(textureId);
+				Texture texture = null;
+				if ((replaceable > 0) && (replaceable < WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT)) {
+					if (this.hd) {
+						if (instance.replaceableTextures_diffuse != null) {
+							texture = instance.replaceableTextures_diffuse[replaceable];
+						}
+					}
+					else {
+						texture = instance.replaceableTextures[replaceable];
+					}
+				}
+				if (texture == null) {
+					texture = textures.get(textureId);
+					if (!this.hd) {
+						final Texture mapped = instance.textureMapper.get(texture);
+						if (mapped != null) {
+							texture = mapped;
+						}
+					}
+				}
+				viewer.webGL.bindTexture(texture, 0);
+			}
+			if (this.hd) {
+				geoset.bindHd(shader, batch.skinningType, layer.coordId);
+			}
+			else if (this.skinningType == SkinningType.ExtendedVertexGroups) {
+				geoset.bindExtended(shader, layer.coordId);
+			}
+			else {
+				geoset.bind(shader, layer.coordId);
+			}
+			geoset.render();
+		}
 	}
 }

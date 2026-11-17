@@ -69,11 +69,23 @@ public class GameCatalog {
 		public final CCampaignProgress.Snapshot progress;
 		/** The campaign cinematics whose first movie is in the game data, in lower case. */
 		public final Set<String> movies;
+		/** The campaign maps the game cannot play, by file name in lower case; the others are not in it. */
+		private final Map<String, MapIssue> mapIssues;
 
-		Campaigns(final CampaignCatalog catalog, final CCampaignProgress.Snapshot progress, final Set<String> movies) {
+		Campaigns(final CampaignCatalog catalog, final CCampaignProgress.Snapshot progress, final Set<String> movies,
+				final Map<String, MapIssue> mapIssues) {
 			this.catalog = catalog;
 			this.progress = progress;
 			this.movies = movies;
+			this.mapIssues = mapIssues;
+		}
+
+		/** Why a mission cannot be played on the campaign maps the profile has chosen; NONE when it can. */
+		public MapIssue issue(final CampaignCatalog.Entry entry, final int mission, final String campaignMaps) {
+			final String file = this.catalog.missionMapFilename(entry, mission,
+					LaunchRequest.CAMPAIGN_MAPS_REFORGED.equals(campaignMaps));
+			final MapIssue issue = file == null ? null : this.mapIssues.get(file.toLowerCase(Locale.ROOT));
+			return issue != null ? issue : MapIssue.NONE;
 		}
 
 		public boolean hasMovie(final CampaignMission cinematic) {
@@ -88,14 +100,22 @@ public class GameCatalog {
 		public final int players;
 		public final String name;
 		public final boolean melee;
+		/** Why the engine cannot play the map; {@link MapIssue#NONE} when it can. */
+		public final MapIssue issue;
 		/** The name in the list; maps of the same name and players also say where they lie. */
 		public String label;
 
 		MapEntry(final String path, final int players, final String name, final boolean melee) {
+			this(path, players, name, melee, MapIssue.NONE);
+		}
+
+		MapEntry(final String path, final int players, final String name, final boolean melee,
+				final MapIssue issue) {
 			this.path = path;
 			this.players = players;
 			this.name = name;
 			this.melee = melee;
+			this.issue = issue;
 			this.label = name;
 		}
 	}
@@ -126,6 +146,7 @@ public class GameCatalog {
 		public String size = "";
 		public String tileset = "";
 		public boolean melee;
+		public MapIssue issue = MapIssue.NONE;
 		public boolean fixedSettings;
 		public boolean customForces;
 		public final List<Slot> slots = new ArrayList<>();
@@ -259,8 +280,10 @@ public class GameCatalog {
 		return thread;
 	});
 	private DataSource data;
-	private CampaignCatalog campaignCatalog;
-	private Set<String> campaignMovies;
+	/** The campaign lists read so far, by the game version whose list it is; the data lists them per edition. */
+	private final Map<Integer, CampaignCatalog> campaignCatalogs = new HashMap<>();
+	private final Map<CampaignCatalog, Set<String>> campaignMovies = new HashMap<>();
+	private volatile String edition;
 	private volatile List<MapEntry> maps;
 	private volatile String mapsHeader;
 	private volatile List<MapListCache.Skipped> skipped = Collections.emptyList();
@@ -393,21 +416,77 @@ public class GameCatalog {
 		}, done);
 	}
 
+	/**
+	 * The edition the campaign list follows, {@link LauncherKeys#EDITION_ROC} or EDITION_TFT: game data that list
+	 * their campaigns per edition give the Reign of Chaos or the Frozen Throne ones, as the game started in that
+	 * edition does. Not told (null), or for data with one list, it is the engine's game version. Asked answers that
+	 * follow the edition are to be asked again.
+	 */
+	public void setEdition(final String edition) {
+		this.edition = edition;
+	}
+
 	/** null when the game data cannot be read */
 	public void campaigns(final Consumer<Campaigns> done) {
+		final String asked = this.edition;
 		run(() -> {
-			if (this.campaignCatalog == null) {
-				final DataSource data = data();
-				final String file = GameUI.trySkinField(
-						GameUI.loadSkin(data, WarsmashConstants.GAME_VERSION).getSkin(), "CampaignFile");
-				this.campaignCatalog = CampaignCatalog.load(data, file);
+			final CampaignCatalog catalog = campaignCatalog(asked);
+			Set<String> movies = this.campaignMovies.get(catalog);
+			if (movies == null) {
+				movies = findMovies(data(), catalog);
+				this.campaignMovies.put(catalog, movies);
 			}
-			if (this.campaignMovies == null) {
-				this.campaignMovies = findMovies(data(), this.campaignCatalog);
-			}
-			return new Campaigns(this.campaignCatalog, readProgress(this.campaignCatalog.getList()),
-					this.campaignMovies);
+			return new Campaigns(catalog, readProgress(catalog.getList()), movies, findMapIssues(data(), catalog));
 		}, done);
+	}
+
+	private CampaignCatalog campaignCatalog(final String edition) throws IOException {
+		final DataSource data = data();
+		final int version = LauncherKeys.editionGameVersion(edition, WarsmashConstants.GAME_VERSION);
+		CampaignCatalog catalog = this.campaignCatalogs.get(version);
+		if (catalog == null) {
+			final Element skin = GameUI.loadSkin(data, WarsmashConstants.GAME_VERSION).getSkin();
+			catalog = CampaignCatalog.load(data, CampaignCatalog.campaignFile(data,
+					v -> GameUI.trySkinField(skin, "CampaignFile", v), version));
+			this.campaignCatalogs.put(version, catalog);
+		}
+		return catalog;
+	}
+
+	/**
+	 * What the game data lacks of the scripts, the campaign maps and the melee maps; empty for complete data, null
+	 * when the data cannot be read.
+	 */
+	public void dataContent(final Consumer<List<DataContentCheck.Problem>> done) {
+		final String asked = this.edition;
+		run(() -> {
+			CampaignCatalog catalog = null;
+			try {
+				catalog = campaignCatalog(asked);
+			}
+			catch (final IOException | RuntimeException e) {
+				LauncherLog.w("No campaign list in the game data", e);
+			}
+			return DataContentCheck.check(data(), catalog);
+		}, done);
+	}
+
+	/** The missions' maps that the game data lacks or keeps encrypted, for both versions of the campaign maps. */
+	private static Map<String, MapIssue> findMapIssues(final DataSource data, final CampaignCatalog catalog) {
+		final Map<String, MapIssue> found = new HashMap<>();
+		for (final CampaignCatalog.Entry entry : catalog.getEntries()) {
+			final int count = entry.getData().getMissions().size();
+			for (int mission = 0; mission < count; mission++) {
+				for (final boolean reforged : new boolean[] { false, true }) {
+					final String file = catalog.missionMapFilename(entry, mission, reforged);
+					final MapIssue issue = MapIssue.ofData(data, file);
+					if ((issue != MapIssue.NONE) && (file != null)) {
+						found.put(file.toLowerCase(Locale.ROOT), issue);
+					}
+				}
+			}
+		}
+		return found;
 	}
 
 	private static Set<String> findMovies(final DataSource data, final CampaignCatalog catalog) {
@@ -433,13 +512,16 @@ public class GameCatalog {
 
 	/** The campaigns and the progress of each profile folder given, in their order; null when unreadable. */
 	public void progress(final List<File> folders, final Consumer<List<CCampaignProgress.Snapshot>> done) {
+		final String asked = this.edition;
 		run(() -> {
-			if (this.campaignCatalog == null) {
+			final CampaignCatalog catalog = this.campaignCatalogs
+					.get(LauncherKeys.editionGameVersion(asked, WarsmashConstants.GAME_VERSION));
+			if (catalog == null) {
 				return null;
 			}
 			final List<CCampaignProgress.Snapshot> snapshots = new ArrayList<>();
 			for (final File folder : folders) {
-				snapshots.add(readProgress(this.campaignCatalog.getList(), folder));
+				snapshots.add(readProgress(catalog.getList(), folder));
 			}
 			return snapshots;
 		}, done);
@@ -680,6 +762,7 @@ public class GameCatalog {
 			details.size = size[0] + " x " + size[1];
 			details.tileset = tilesetName(info.getTileset());
 			details.melee = info.hasFlag(War3MapW3iFlags.MELEE_MAP);
+			details.issue = MapIssue.of(map);
 			details.fixedSettings = info.hasFlag(War3MapW3iFlags.FIXED_PLAYER_SETTINGS_FOR_CUSTOM_FORCES);
 			details.customForces = info.hasFlag(War3MapW3iFlags.USE_CUSTOM_FORCES);
 			for (final Force force : info.getForces()) {

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.fdfparser;
 
+import java.util.Locale;
 import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Recognizer;
@@ -26,7 +27,7 @@ public class Main {
 
 					String sourceName = recognizer.getInputStream().getSourceName();
 					if (!sourceName.isEmpty()) {
-						sourceName = String.format("%s:%d:%d: ", sourceName, line, charPositionInLine);
+						sourceName = String.format(Locale.ROOT, "%s:%d:%d: ", sourceName, line, charPositionInLine);
 					}
 
 					System.err.println(sourceName + "line " + line + ":" + charPositionInLine + " " + msg);

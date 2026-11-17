@@ -3,6 +3,7 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.badlogic.gdx.Gdx;
@@ -198,7 +199,7 @@ public final class SavedGameDialog {
 		if ((letter == null) || letter.isEmpty() || letter.equals(key)) {
 			return Input.Keys.UNKNOWN;
 		}
-		final int keycode = Input.Keys.valueOf(letter.substring(0, 1).toUpperCase());
+		final int keycode = Input.Keys.valueOf(letter.substring(0, 1).toUpperCase(Locale.ROOT));
 		return keycode < 0 ? Input.Keys.UNKNOWN : keycode;
 	}
 

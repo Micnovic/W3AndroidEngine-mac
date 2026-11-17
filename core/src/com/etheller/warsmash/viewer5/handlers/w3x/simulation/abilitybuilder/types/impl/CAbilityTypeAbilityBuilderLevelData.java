@@ -91,11 +91,4 @@ public class CAbilityTypeAbilityBuilderLevelData extends CAbilityTypeLevelData {
 		return requirements;
 	}
 
-	/**
-	 * @param requirements the requirements to set
-	 */
-	public void setRequirements(List<CUnitTypeRequirement> requirements) {
-		this.requirements = requirements;
-	}
-
 }

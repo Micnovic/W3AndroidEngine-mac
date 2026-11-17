@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -25,7 +26,7 @@ public final class ObjectMap implements Iterable<Map.Entry<War3ID, ObjectDataCha
 	}
 
 	public ObjectDataChangeEntry remove(final War3ID key) {
-		this.lowerCaseKeySet.remove(War3ID.fromString(key.toString().toLowerCase()));
+		this.lowerCaseKeySet.remove(War3ID.fromString(key.toString().toLowerCase(Locale.ROOT)));
 		return this.idToDataChangeEntry.remove(key);
 	}
 
@@ -34,7 +35,7 @@ public final class ObjectMap implements Iterable<Map.Entry<War3ID, ObjectDataCha
 	}
 
 	public ObjectDataChangeEntry put(final War3ID key, final ObjectDataChangeEntry value) {
-		this.lowerCaseKeySet.add(War3ID.fromString(key.toString().toLowerCase()));
+		this.lowerCaseKeySet.add(War3ID.fromString(key.toString().toLowerCase(Locale.ROOT)));
 		return this.idToDataChangeEntry.put(key, value);
 	}
 
@@ -51,7 +52,7 @@ public final class ObjectMap implements Iterable<Map.Entry<War3ID, ObjectDataCha
 	}
 
 	public boolean containsKeyCaseInsensitive(final War3ID key) {
-		return this.lowerCaseKeySet.contains(War3ID.fromString(key.toString().toLowerCase()));
+		return this.lowerCaseKeySet.contains(War3ID.fromString(key.toString().toLowerCase(Locale.ROOT)));
 	}
 
 	public boolean containsValue(final ObjectDataChangeEntry value) {

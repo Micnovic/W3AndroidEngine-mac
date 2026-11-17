@@ -91,10 +91,27 @@ public class NativeJassFunction {
 			// Measured (1.29): a native given an enum value the game has no constant for reads
 			// it as 0 or false and changes nothing.
 			if (!hasUnknownEnum(arguments)) {
-				throw e;
+				if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR || !hasHandle(arguments)) {
+					throw e;
+				}
+				// A handle of another kind than the native reads (kept in an integer table and read back as the
+				// wrong type) counts as none, so the script goes on.
+				if (this.reportedNullFailure.compareAndSet(false, true)) {
+					Log.error("Native " + this.name + " got a handle of the wrong kind; ignored:");
+					Log.error(e);
+				}
 			}
 			return this.returnType.getNullValue();
 		}
+	}
+
+	private static boolean hasHandle(final List<JassValue> arguments) {
+		for (final JassValue argument : arguments) {
+			if ((argument instanceof HandleJassValue) && (((HandleJassValue) argument).getJavaValue() != null)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static boolean hasUnknownEnum(final List<JassValue> arguments) {

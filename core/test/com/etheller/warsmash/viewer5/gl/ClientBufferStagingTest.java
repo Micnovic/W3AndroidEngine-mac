@@ -56,4 +56,19 @@ class ClientBufferStagingTest {
 		buffer.reserve(1200);
 		assertTrue(buffer.staging.length >= 300);
 	}
+
+	@Test
+	void commitAtABaseLeavesTheEarlierObjectsAlone() {
+		final ClientBuffer buffer = new ClientBuffer(noGl());
+		buffer.reserve(2 * GeometryEmitterFuncs.BYTES_PER_OBJECT);
+		final int perObject = GeometryEmitterFuncs.FLOATS_PER_OBJECT;
+
+		buffer.staging[GeometryEmitterFuncs.FLOAT_OFFSET_HEALTH] = 1f;
+		buffer.commitStaging(0, perObject);
+		buffer.staging[perObject + GeometryEmitterFuncs.FLOAT_OFFSET_HEALTH] = 2f;
+		buffer.commitStaging(perObject, perObject);
+
+		assertEquals(1f, buffer.floatView.get(GeometryEmitterFuncs.FLOAT_OFFSET_HEALTH));
+		assertEquals(2f, buffer.floatView.get(perObject + GeometryEmitterFuncs.FLOAT_OFFSET_HEALTH));
+	}
 }

@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.io.IOUtils;
+import com.etheller.warsmash.util.StreamBytes;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.etheller.warsmash.util.Log;
@@ -140,7 +140,7 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 				reportedStreamConversion = true;
 				Log.warn("Wasting memory with conversion from InputStream to buffer in MdxModel (reported once)");
 			}
-			parser = new MdlxModel(ByteBuffer.wrap(IOUtils.toByteArray((InputStream) bufferOrParser)));
+			parser = new MdlxModel(ByteBuffer.wrap(StreamBytes.readAll((InputStream) bufferOrParser)));
 		}
 
 		final ModelViewer viewer = this.viewer;

@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.util.Locale;
 
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
@@ -330,7 +331,7 @@ public class GlueBackdropRenderer implements ApplicationListener, CanvasProvider
 			instance.setScene(layer.scene);
 			int birth = 0;
 			for (int i = 0; i < model.getSequences().size(); i++) {
-				if (model.getSequences().get(i).getName().toLowerCase().startsWith("birth")) {
+				if (model.getSequences().get(i).getName().toLowerCase(Locale.ROOT).startsWith("birth")) {
 					birth = i;
 					break;
 				}

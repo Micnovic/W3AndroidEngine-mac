@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons;
 
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Texture;
@@ -766,7 +767,7 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 				if (abilityUI != null) {
 					final int nextLevel = this.unit.getAbilityLevel(unitType) + 1;
 					final IconUI learnIconUI = abilityUI.getLearnIconUI();
-					addCommandButton(ability, learnIconUI, String.format(learnIconUI.getToolTip(), nextLevel),
+					addCommandButton(ability, learnIconUI, String.format(Locale.ROOT, learnIconUI.getToolTip(), nextLevel),
 							learnIconUI.getButtonPositionX(), learnIconUI.getButtonPositionY(), ability.getHandleId(),
 							unitType.getValue(), 0, false, false, 0, 0, 0, 0, nextLevel);
 				}

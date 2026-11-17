@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputProcessor;
@@ -267,7 +268,7 @@ public class WarsmashGdxFDFTestRenderScreen implements InputProcessor, Screen, S
 
 		int animIndex = 0;
 		for (final Sequence s : model2.getSequences()) {
-			if (s.getName().toLowerCase().startsWith("stand work")) {
+			if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 				animIndex = model2.getSequences().indexOf(s);
 			}
 		}
@@ -290,7 +291,7 @@ public class WarsmashGdxFDFTestRenderScreen implements InputProcessor, Screen, S
 
 		int animIndex = 0;
 		for (final Sequence s : model2.getSequences()) {
-			if (s.getName().toLowerCase().startsWith(animName)) {
+			if (s.getName().toLowerCase(Locale.ROOT).startsWith(animName)) {
 				animIndex = model2.getSequences().indexOf(s);
 				break;
 			}
@@ -356,7 +357,7 @@ public class WarsmashGdxFDFTestRenderScreen implements InputProcessor, Screen, S
 
 			int animIndex = i % acolyteModel.getSequences().size();
 			for (final Sequence s : acolyteModel.getSequences()) {
-				if (s.getName().toLowerCase().startsWith("stand work")) {
+				if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 					animIndex = acolyteModel.getSequences().indexOf(s);
 				}
 			}
@@ -420,7 +421,7 @@ public class WarsmashGdxFDFTestRenderScreen implements InputProcessor, Screen, S
 
 			int animIndex = i % acolyteModel.getSequences().size();
 			for (final Sequence s : acolyteModel.getSequences()) {
-				if (s.getName().toLowerCase().startsWith("stand work")) {
+				if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 					animIndex = acolyteModel.getSequences().indexOf(s);
 				}
 			}

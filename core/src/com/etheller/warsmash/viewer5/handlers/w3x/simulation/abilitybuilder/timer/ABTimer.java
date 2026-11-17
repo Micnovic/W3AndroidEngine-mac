@@ -17,13 +17,25 @@ public class ABTimer extends CTimer {
 	
 	private int castId = 0;
 	private boolean alive = true;
+	private final boolean exactTiming;
 
 	public ABTimer(CUnit caster, Map<String, Object> localStore, List<ABAction> actions, final int castId) {
+		this(caster, localStore, actions, castId, false);
+	}
+
+	public ABTimer(CUnit caster, Map<String, Object> localStore, List<ABAction> actions, final int castId,
+			final boolean exactTiming) {
 		super();
 		this.caster = caster;
 		this.localStore = localStore;
 		this.actions = actions;
 		this.castId = castId;
+		this.exactTiming = exactTiming;
+	}
+
+	@Override
+	protected boolean isExactTiming() {
+		return this.exactTiming;
 	}
 
 	public void kill(CSimulation simulation) {

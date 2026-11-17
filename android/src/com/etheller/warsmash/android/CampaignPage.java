@@ -33,6 +33,7 @@ import com.etheller.warsmash.launcher.CampaignResult;
 import com.etheller.warsmash.launcher.GameResult;
 import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.LauncherBoard;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.ResultMotion;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
@@ -118,6 +119,12 @@ final class CampaignPage extends LauncherViews {
 	/** A row of the campaign screens: the arrow button, the small gold header and the name. */
 	private View campaignRow(final String header, final String name, final boolean chosen,
 			final View.OnClickListener listener) {
+		return campaignRow(header, name, chosen, listener, MapIssue.NONE);
+	}
+
+	/** A mission whose map the game cannot play shows the reason in the header's place and is greyed out. */
+	private View campaignRow(final String header, final String name, final boolean chosen,
+			final View.OnClickListener listener, final MapIssue issue) {
 		final float rowH = campaignRowH();
 		final float w = campaignListW();
 		final FrameLayout row = new FrameLayout(this.activity);
@@ -144,7 +151,8 @@ final class CampaignPage extends LauncherViews {
 		final float textX = arrow + (rowH * 0.14f);
 		final float headerSize = rowH * 0.27f;
 		final float nameSize = rowH * 0.42f;
-		final CharSequence headerText = reforged ? upper(glueLabel(header, header)) : glueLabel(header, header);
+		final CharSequence headerText = issue != MapIssue.NONE ? issueText(issue, true)
+				: reforged ? upper(glueLabel(header, header)) : glueLabel(header, header);
 		final CharSequence nameText = reforged ? upper(glueLabel(name, name)) : glueLabel(name, name);
 		place(row, text(headerText, headerSize, chosen ? this.activity.art.text() : this.activity.art.gold()), textX,
 				(rowH * 0.04f) + (headerSize * 0.15f), w - textX - 8, -1);
@@ -156,19 +164,23 @@ final class CampaignPage extends LauncherViews {
 		if (listener != null) {
 			onTap(row, false, listener);
 		}
-		else {
-			// A campaign still to come: without colour, darker and half seen, not tappable.
-			final ColorMatrix muted = new ColorMatrix();
-			muted.setSaturation(0);
-			muted.postConcat(new ColorMatrix(new float[] { 0.8f, 0, 0, 0, 0, 0, 0.8f, 0, 0, 0, 0, 0, 0.8f, 0, 0, 0,
-				0, 0, 1, 0 }));
-			final Paint paint = new Paint();
-			paint.setColorFilter(new ColorMatrixColorFilter(muted));
-			row.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
-			row.setAlpha(0.5f);
+		if ((listener == null) || (issue != MapIssue.NONE)) {
+			// A campaign still to come or a mission without a playable map: without colour, darker and half seen.
+			mute(row);
 		}
 		row.setContentDescription(headerText + " " + nameText);
 		return row;
+	}
+
+	private static void mute(final View row) {
+		final ColorMatrix muted = new ColorMatrix();
+		muted.setSaturation(0);
+		muted.postConcat(new ColorMatrix(new float[] { 0.8f, 0, 0, 0, 0, 0, 0.8f, 0, 0, 0, 0, 0, 0.8f, 0, 0, 0,
+			0, 0, 1, 0 }));
+		final Paint paint = new Paint();
+		paint.setColorFilter(new ColorMatrixColorFilter(muted));
+		row.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
+		row.setAlpha(0.5f);
 	}
 
 	/**
@@ -412,6 +424,7 @@ final class CampaignPage extends LauncherViews {
 		for (int i = 0; i < shown.size(); i++) {
 			final CampaignMission mission = shown.get(i);
 			final int number = numbers.get(i);
+			final MapIssue issue = number < 0 ? MapIssue.NONE : missionIssue(entry, number);
 			final View.OnClickListener tap = number < 0 ? v -> playMovies(mission.getMovies())
 					: v -> launchMission(entry, number, LauncherActivity.PAGE_MISSIONS);
 			final View row;
@@ -420,10 +433,10 @@ final class CampaignPage extends LauncherViews {
 				row = chapterRow(mission, number == chosen,
 						number < 0 ? SkinArt.CHAPTER_CINEMATIC
 								: CampaignResult.chapterIcon(won, progress.getMissionWonDifficulty(entry.getNumber(), number)),
-						tap);
+						tap, issue);
 			}
 			else {
-				row = campaignRow(mission.getHeader(), mission.getMissionName(), number == chosen, tap);
+				row = campaignRow(mission.getHeader(), mission.getMissionName(), number == chosen, tap, issue);
 			}
 			rows.addView(row, new LinearLayout.LayoutParams(MATCH, px(rowH)));
 			if (number == chosen) {
@@ -793,7 +806,7 @@ final class CampaignPage extends LauncherViews {
 
 	/** A Reforged chapter row: its icon (cinematic, won or not yet), the chapter's kind in gold and its name. */
 	private View chapterRow(final CampaignMission mission, final boolean chosen, final String icon,
-			final View.OnClickListener listener) {
+			final View.OnClickListener listener, final MapIssue issue) {
 		final float rowH = chapterRowH();
 		final float w = campaignListW();
 		final FrameLayout row = new FrameLayout(this.activity);
@@ -802,18 +815,32 @@ final class CampaignPage extends LauncherViews {
 		final float textX = (rowH * 0.24f) + a;
 		final float headerSize = rowH * 0.22f;
 		final float nameSize = rowH * 0.32f;
-		final CharSequence headerText = glueLabel(mission.getHeader(), mission.getHeader());
+		final CharSequence headerText = issue != MapIssue.NONE ? issueText(issue, true)
+				: glueLabel(mission.getHeader(), mission.getHeader());
 		final CharSequence nameText = glueLabel(mission.getMissionName(), mission.getMissionName());
 		place(row, text(headerText, headerSize, this.activity.art.gold()), textX,
 				(rowH * 0.1f) + (headerSize * 0.15f), w - textX - 8, -1);
 		final TextView title = text(nameText, nameSize, chosen ? this.activity.art.gold() : this.activity.art.text());
 		place(row, title, textX, (rowH * 0.42f) + (nameSize * 0.15f), w - textX - 8, -1);
 		onTap(row, false, listener);
+		if (issue != MapIssue.NONE) {
+			mute(row);
+		}
 		row.setContentDescription(headerText + " " + nameText);
 		return row;
 	}
 
+	private MapIssue missionIssue(final CampaignCatalog.Entry entry, final int mission) {
+		return this.activity.campaigns.issue(entry, mission,
+				this.activity.profiles.campaignMaps(this.activity.profiles.current()));
+	}
+
 	void launchMission(final CampaignCatalog.Entry entry, final int mission, final int returnPage) {
+		final MapIssue issue = missionIssue(entry, mission);
+		if (issue != MapIssue.NONE) {
+			this.activity.dialogs.showMessage(getString(R.string.game_not_started), issueText(issue, false));
+			return;
+		}
 		this.activity.preferences.edit().putInt(KEY_CAMPAIGN, entry.getNumber()).putInt(KEY_MISSION, mission).apply();
 		this.activity.launchGame(LaunchRequest.mission(this.activity.campaigns.catalog, entry, mission,
 				this.activity.profiles.campaignMaps(this.activity.profiles.current()),

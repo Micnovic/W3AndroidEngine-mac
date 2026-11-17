@@ -2,6 +2,7 @@ package com.etheller.warsmash.viewer5.handlers.mdx;
 
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import com.etheller.warsmash.viewer5.Bounds;
@@ -46,7 +47,7 @@ public class Sequence {
 		primaryTags.clear();
 		secondaryTags.clear();
 		for (final String token : name.split("\\s+|,")) {
-			final String upperCaseToken = token.toUpperCase();
+			final String upperCaseToken = token.toUpperCase(Locale.ROOT);
 			final PrimaryTag primaryTag = PRIMARY_TAGS.get(upperCaseToken);
 			if (primaryTag != null) {
 				primaryTags.add(primaryTag);

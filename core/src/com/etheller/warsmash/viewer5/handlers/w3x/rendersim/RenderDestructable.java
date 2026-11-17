@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
 import java.util.EnumSet;
+import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.math.Rectangle;
@@ -74,6 +75,11 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		this.selectable = row.readSLKTagBoolean("selectable");
 		this.unitAnimationListenerImpl.setActivityObserver(this::wake);
 		((MdxComplexInstance) this.instance).sequenceEndObserver = this::wake;
+	}
+
+	@Override
+	protected boolean usesAnimInFog() {
+		return false;
 	}
 
 	/**
@@ -281,7 +287,7 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		PrimaryTag bestPrimaryTag = null;
 		final EnumSet<SecondaryTag> secondaryTags = EnumSet.noneOf(SecondaryTag.class);
 		TokenLoop: for (final String token : sequence.split("\\s+")) {
-			final String upperCaseToken = token.toUpperCase();
+			final String upperCaseToken = token.toUpperCase(Locale.ROOT);
 			for (final PrimaryTag primaryTag : PrimaryTag.values()) {
 				if (upperCaseToken.equals(primaryTag.name())) {
 					primaryTags.add(primaryTag);

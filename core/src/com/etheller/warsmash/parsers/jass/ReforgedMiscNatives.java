@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -7,8 +8,12 @@ import java.util.regex.Pattern;
 import com.badlogic.gdx.graphics.Color;
 import com.etheller.interpreter.ast.function.ConvertedConstant;
 import com.etheller.interpreter.ast.function.JassFunction;
+import com.etheller.interpreter.ast.scope.GlobalScope;
+import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
 import com.etheller.interpreter.ast.util.JassProgram;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
+import com.etheller.interpreter.ast.value.HandleJassType;
+import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.JassValue;
 import com.etheller.interpreter.ast.value.RealJassValue;
@@ -18,6 +23,7 @@ import com.etheller.interpreter.ast.value.visitor.IntegerJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.ObjectJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.RealJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
+import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -27,7 +33,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityDisableType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CAbilityAuraBase;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.template.AbstractCAbilityAbilityBuilderAuraTemplate;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass;
@@ -58,6 +66,7 @@ final class ReforgedMiscNatives {
 		natives.registerUnits();
 		natives.registerCooldowns();
 		natives.registerSkins();
+		natives.registerItems();
 		natives.registerText();
 		natives.registerEnvironment();
 		natives.registerClientOnly();
@@ -107,8 +116,7 @@ final class ReforgedMiscNatives {
 			if (unit == null) {
 				return RealJassValue.ZERO;
 			}
-			final float ground = this.viewer.terrain == null ? 0
-					: this.viewer.terrain.getGroundHeight(unit.getX(), unit.getY());
+			final float ground = this.simulation.getTerrainData().getGroundZ(unit.getX(), unit.getY());
 			return RealJassValue.of(ground + unit.getFlyHeight());
 		});
 		add("BlzPauseUnitEx", (arguments, globalScope, triggerScope) -> {
@@ -223,12 +231,14 @@ final class ReforgedMiscNatives {
 			final War3ID skin = unit.getScriptSkinId();
 			return IntegerJassValue.of((skin != null ? skin : unit.getTypeId()).getValue());
 		});
-		// A unit keeps the skin it is given and reads it back; the engine draws one model per unit type, so the
-		// picture of a unit does not change.
+		// The unit keeps its type and every rule of it; only the drawn model, selection size and sounds are those of the
+		// skin's unit type. An id that is no unit type keeps the skin on record without redrawing.
 		add("BlzSetUnitSkin", (arguments, globalScope, triggerScope) -> {
 			final CUnit unit = inGame(object(arguments, 0));
 			if (unit != null) {
-				unit.setScriptSkinId(new War3ID(integer(arguments, 1)));
+				final War3ID skin = new War3ID(integer(arguments, 1));
+				unit.setScriptSkinId(skin);
+				this.viewer.setUnitSkin(unit, skin);
 			}
 			return null;
 		});
@@ -245,6 +255,130 @@ final class ReforgedMiscNatives {
 				}
 			}
 			return null;
+		});
+	}
+
+	private static CommonTriggerExecutionScope eventScope(final TriggerExecutionScope scope) {
+		return (scope instanceof CommonTriggerExecutionScope) ? (CommonTriggerExecutionScope) scope : null;
+	}
+
+	private static JassValue itemValue(final GlobalScope globalScope,
+			final CItem item) {
+		final HandleJassType type = globalScope.getHandleType("item");
+		return item == null ? type.getNullValue() : new HandleJassValue(type, item);
+	}
+
+	/** The abilities of an item lying on the ground are made when a script first asks; a carried item's are the carrier's. */
+	private List<CAbility> itemAbilities(final CItem item) {
+		final CAbilityInventory inventory = item.getContainedInventory();
+		if (inventory != null) {
+			return inventory.getItemAbilities(item);
+		}
+		if (item.getGroundAbilities() == null) {
+			final List<CAbility> made = new ArrayList<>();
+			for (final War3ID abilityId : item.getAbilityIds()) {
+				final CAbility ability = createGroundAbility(item, abilityId);
+				if (ability != null) {
+					made.add(ability);
+				}
+			}
+			item.setGroundAbilities(made);
+		}
+		return item.getGroundAbilities();
+	}
+
+	private CAbility createGroundAbility(final CItem item, final War3ID abilityId) {
+		final CAbilityType<?> type = this.simulation.getAbilityData().getAbilityType(abilityId);
+		if (type == null) {
+			return null;
+		}
+		final CAbility ability = type.createAbility(this.simulation.getHandleIdAllocator().createId());
+		ability.setIconShowing(false);
+		ability.setItemAbility(item, -1);
+		return ability;
+	}
+
+	private void registerItems() {
+		final JassFunction itemAbilityByIndex = (arguments, globalScope, triggerScope) -> {
+			final HandleJassType abilityType = globalScope.getHandleType("ability");
+			final CItem item = object(arguments, 0);
+			final int index = integer(arguments, 1);
+			if (item == null) {
+				return abilityType.getNullValue();
+			}
+			final List<CAbility> abilities = itemAbilities(item);
+			return ((index < 0) || (index >= abilities.size())) ? abilityType.getNullValue()
+					: new HandleJassValue(abilityType, abilities.get(index));
+		};
+		add("BlzGetItemAbilityByIndex", itemAbilityByIndex);
+		add("BlzGetItemAbility", (arguments, globalScope, triggerScope) -> {
+			final HandleJassType abilityType = globalScope.getHandleType("ability");
+			final CItem item = object(arguments, 0);
+			if (item != null) {
+				final War3ID abilityId = new War3ID(integer(arguments, 1));
+				for (final CAbility ability : itemAbilities(item)) {
+					if (abilityId.equals(ability.getAlias())) {
+						return new HandleJassValue(abilityType, ability);
+					}
+				}
+			}
+			return abilityType.getNullValue();
+		});
+		add("BlzItemAddAbility", (arguments, globalScope, triggerScope) -> {
+			final CItem item = object(arguments, 0);
+			final War3ID abilityId = new War3ID(integer(arguments, 1));
+			if ((item == null) || (this.simulation.getAbilityData().getAbilityType(abilityId) == null)
+					|| !item.addAbilityId(abilityId)) {
+				return BooleanJassValue.FALSE;
+			}
+			final CAbilityInventory inventory = item.getContainedInventory();
+			if (inventory != null) {
+				inventory.addItemAbility(this.simulation, item.getContainedUnit(), item, abilityId);
+			}
+			else if (item.getGroundAbilities() != null) {
+				final CAbility ability = createGroundAbility(item, abilityId);
+				if (ability != null) {
+					item.getGroundAbilities().add(ability);
+				}
+			}
+			return BooleanJassValue.TRUE;
+		});
+		add("BlzItemRemoveAbility", (arguments, globalScope, triggerScope) -> {
+			final CItem item = object(arguments, 0);
+			final War3ID abilityId = new War3ID(integer(arguments, 1));
+			if ((item == null) || !item.removeAbilityId(abilityId)) {
+				return BooleanJassValue.FALSE;
+			}
+			final CAbilityInventory inventory = item.getContainedInventory();
+			if (inventory != null) {
+				inventory.removeItemAbility(this.simulation, item.getContainedUnit(), item, abilityId);
+			}
+			else if (item.getGroundAbilities() != null) {
+				item.getGroundAbilities().removeIf(ability -> abilityId.equals(ability.getAlias()));
+			}
+			return BooleanJassValue.TRUE;
+		});
+		// Read in a pickup event: the held item that took in every charge of the picked up one, null when it was not
+		// absorbed.
+		add("BlzGetAbsorbingItem", (arguments, globalScope, triggerScope) -> {
+			final CommonTriggerExecutionScope scope = eventScope(triggerScope);
+			return itemValue(globalScope, scope == null ? null : scope.getAbsorbingItem());
+		});
+		add("BlzGetManipulatedItemWasAbsorbed", (arguments, globalScope, triggerScope) -> {
+			final CommonTriggerExecutionScope scope = eventScope(triggerScope);
+			return BooleanJassValue.of((scope != null) && (scope.getAbsorbingItem() != null));
+		});
+		add("BlzGetStackingItemSource", (arguments, globalScope, triggerScope) -> {
+			final CommonTriggerExecutionScope scope = eventScope(triggerScope);
+			return itemValue(globalScope, scope == null ? null : scope.getStackingItemSource());
+		});
+		add("BlzGetStackingItemTarget", (arguments, globalScope, triggerScope) -> {
+			final CommonTriggerExecutionScope scope = eventScope(triggerScope);
+			return itemValue(globalScope, scope == null ? null : scope.getStackingItemTarget());
+		});
+		add("BlzGetStackingItemTargetPreviousCharges", (arguments, globalScope, triggerScope) -> {
+			final CommonTriggerExecutionScope scope = eventScope(triggerScope);
+			return IntegerJassValue.of(scope == null ? 0 : scope.getStackingItemTargetPreviousCharges());
 		});
 	}
 

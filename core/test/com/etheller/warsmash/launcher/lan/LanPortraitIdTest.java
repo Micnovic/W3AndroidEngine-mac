@@ -2,6 +2,7 @@ package com.etheller.warsmash.launcher.lan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -40,9 +41,9 @@ class LanPortraitIdTest {
 
 	@Test
 	void theOtherSkinsPortraitIsNotShownAsSomethingElse() {
-		assertEquals(-1, LanPortraitId.decode(LanPortraitId.encode(3, false), true));
+		assertEquals(-1, LanPortraitId.decode(LanPortraitId.encode(0, false), true));
 		assertEquals(-1, LanPortraitId.decode(LanPortraitId.encode(3, true), false));
-		assertNotEquals("", LanPortraitId.encode(3, false));
+		assertNotEquals("", LanPortraitId.encode(0, false));
 	}
 
 	@Test
@@ -60,6 +61,18 @@ class LanPortraitIdTest {
 			assertNotEquals(-1, reforged, pairs[i] + " is not a Reforged portrait");
 			assertEquals(reforged, LanPortraitId.decode("c:" + pairs[i + 1], true));
 		}
+	}
+
+	@Test
+	void theTableCoversThePortraitsTheOtherSkinCanShow() {
+		assertTrue(LanPortraitTable.pairs().length >= 80);
+		assertEquals("BTNJaina", LanPortraitTable.classicFor(93));
+		assertEquals(93, LanPortraitTable.reforgedFor("BTNJaina"));
+		assertNull(LanPortraitTable.classicFor(1));
+		assertEquals(0, LanPortraitTable.reforgedFor("BTNNoSuchButton"));
+		final int jainaClassic = LanPortraitId.decode("c:BTNJaina", false);
+		assertEquals(92, LanPortraitId.decode("c:BTNJaina", true));
+		assertEquals(jainaClassic, LanPortraitId.decode("r:93", false));
 	}
 
 	@Test
@@ -104,11 +117,11 @@ class LanPortraitIdTest {
 			slot.name = "P" + i;
 			s.slots.add(slot);
 		}
-		s.portraits.put(0, LanPortraitId.encode(1, false));
+		s.portraits.put(0, LanPortraitId.encode(0, false));
 		s.portraits.put(1, LanPortraitId.encode(40, true));
 		s.portraits.put(2, "5");
 		final LanLobbyView classic = LanLobbyView.of(s, 0, null, -1, false);
-		assertEquals(1, classic.rows.get(0).portrait);
+		assertEquals(0, classic.rows.get(0).portrait);
 		assertEquals(-1, classic.rows.get(1).portrait);
 		assertEquals(5, classic.rows.get(2).portrait);
 		final LanLobbyView reforged = LanLobbyView.of(s, 0, null, -1, true);

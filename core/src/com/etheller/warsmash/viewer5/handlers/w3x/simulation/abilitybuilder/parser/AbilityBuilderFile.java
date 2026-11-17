@@ -9,7 +9,4 @@ public class AbilityBuilderFile {
 		return abilityList;
 	}
 
-	public void setAbilityList(List<AbilityBuilderParser> abilityList) {
-		this.abilityList = abilityList;
-	}
 }

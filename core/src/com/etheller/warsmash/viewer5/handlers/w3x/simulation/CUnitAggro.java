@@ -340,7 +340,8 @@ final class CUnitAggro {
 	static void resolveSpellAnswer(final CUnit self, final CSimulation simulation) {
 		final CUnit caster = self.aggro.pendingSpellAnswerSource;
 		self.aggro.pendingSpellAnswerSource = null;
-		if (caster.isDead() || caster.isHidden() || caster.isRemovedFromGame()) {
+		// Measured on 1.29: a unit hidden by the spell (a Soul Gem's victim) answers nobody.
+		if (self.isHidden() || caster.isDead() || caster.isHidden() || caster.isRemovedFromGame()) {
 			return;
 		}
 		if (isIdleForAttack(self) || isReturningFromLostTarget(self)) {

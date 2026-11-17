@@ -3,9 +3,11 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.warsmash.launcher.CampaignResult;
+import com.etheller.warsmash.launcher.LauncherKeys;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.datamodel.MenuItem;
@@ -51,6 +53,7 @@ final class MenuCampaigns {
 	private UIFrame campaignSelectFrame;
 	private DataTable campaignStrings;
 	private CampaignCatalog campaignCatalog;
+	private String edition;
 	private boolean classicCampaignList = false;
 	private SpriteFrame campaignWarcraftIIILogo;
 	private CampaignMenuData currentCampaign;
@@ -66,12 +69,22 @@ final class MenuCampaigns {
 		this.menu = menu;
 	}
 
+	/**
+	 * The edition a launcher started the game in, whose campaign list this menu numbers the campaigns by; null for
+	 * the game version the engine runs as.
+	 */
+	void setEdition(final String edition) {
+		this.edition = edition;
+	}
+
 	/** The game data's campaign list, which the campaign progress numbers its campaigns by. */
 	void loadCatalog() {
 		final CampaignCatalog campaignCatalog;
 		try {
-			campaignCatalog = CampaignCatalog.load(this.menu.dataSource,
-					this.menu.rootFrame.trySkinField("CampaignFile"));
+			final GameUI rootFrame = this.menu.rootFrame;
+			final int version = LauncherKeys.editionGameVersion(this.edition, WarsmashConstants.GAME_VERSION);
+			campaignCatalog = CampaignCatalog.load(this.menu.dataSource, CampaignCatalog
+					.campaignFile(this.menu.dataSource, v -> rootFrame.trySkinField("CampaignFile", v), version));
 		}
 		catch (final IOException e) {
 			throw new RuntimeException(e);
@@ -265,6 +278,9 @@ final class MenuCampaigns {
 	 * @return false when the mission's map cannot be started; the campaign screens then stay as they are
 	 */
 	private boolean startMission(final int campaignNumber, final CampaignMission mission, final boolean reforged) {
+		if (mission.isModel()) {
+			return startModelMission(campaignNumber, mission, reforged);
+		}
 		if (!this.menu.mapStart.prepareMapConfigs(mission.getMapFilename())) {
 			return false;
 		}
@@ -289,6 +305,25 @@ final class MenuCampaigns {
 		beginGameInformation.gameMapLookup = new CurrentNetGameMapLookupPath(mission.getMapFilename());
 		beginGameInformation.localPlayerIndex = localPlayerIndex;
 		this.menu.mapStart.setCampaign(campaignNumber, reforged);
+		return true;
+	}
+
+	/**
+	 * A mission that is a model plays as a full screen cinematic in the menu's own scene and counts as won when it has
+	 * played to its end or the player has skipped it.
+	 *
+	 * @return false when the model cannot be played; the campaign screens then stay as they are
+	 */
+	private boolean startModelMission(final int campaignNumber, final CampaignMission mission, final boolean reforged) {
+		this.menu.mapStart.setCampaign(campaignNumber, reforged);
+		final String name = this.menu.rootFrame.getTemplates().getDecoratedString(mission.getMissionName());
+		if (!this.menu.menuScreen.playModelMission(mission.getMapFilename(), campaignNumber, name,
+				this.campaignDifficulty.name().toLowerCase(Locale.ROOT))) {
+			return false;
+		}
+		hideScreens();
+		setMissionSelectMenuVisible(false);
+		this.difficultySelect.getPopupMenuFrame().setVisible(false);
 		return true;
 	}
 

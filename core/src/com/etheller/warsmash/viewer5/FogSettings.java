@@ -3,14 +3,26 @@ package com.etheller.warsmash.viewer5;
 import java.util.List;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.etheller.warsmash.units.Element;
 
 public class FogSettings {
+	/** The map density (0 to 1, the editor slider) is not per world unit; the exponential styles read it per 1000. */
+	private static final float EXP_DENSITY_SCALE = 0.001f;
+
 	public FogStyle style = FogStyle.NONE;
 	public Color color = Color.BLACK;
 	public float density;
 	public float start;
 	public float end;
+	/** Largest share of the fog colour that fog may reach (w3i v39+); 1 is the classic unlimited fog. */
+	public float maxOpacity = 1f;
+
+	/** The fog alpha is not a colour for the shaders; they read it as the opacity cap. */
+	public void uploadUniforms(final ShaderProgram shader) {
+		shader.setUniformf("u_fogColor", this.color.r, this.color.g, this.color.b, this.maxOpacity);
+		shader.setUniformf("u_fogParams", this.style.ordinal(), this.start, this.end, this.density * EXP_DENSITY_SCALE);
+	}
 
 	public void setStyleByIndex(final int styleValue) {
 		this.style = ((styleValue >= 0) && (styleValue < FogStyle.values().length)) ? FogStyle.values()[styleValue]

@@ -31,14 +31,6 @@ public class War3MapConfigStartLoc {
 		return this.y;
 	}
 
-	public int[] getOtherStartIndices() {
-		return this.otherStartIndices;
-	}
-
-	public CStartLocPrio[] getOtherStartLocPriorities() {
-		return this.otherStartLocPriorities;
-	}
-
 	public int getStartLocPrioSlot(final int prioSlotIndex) {
 		return slotOther(this.otherStartIndices, prioSlotIndex);
 	}
@@ -57,18 +49,6 @@ public class War3MapConfigStartLoc {
 			this.otherStartIndices[prioSlotIndex] = otherStartLocIndex;
 			this.otherStartLocPriorities[prioSlotIndex] = priority;
 		}
-	}
-
-	/**
-	 * Start locations an enemy of this location's player should (or should not) get, as the map editor's enemy
-	 * priorities; the ally priorities above are those for allied players.
-	 */
-	public int[] getEnemyStartIndices() {
-		return this.enemyStartIndices;
-	}
-
-	public CStartLocPrio[] getEnemyStartLocPriorities() {
-		return this.enemyStartLocPriorities;
 	}
 
 	public void setEnemyStartLocPrioCount(final int startLocPrioCount) {

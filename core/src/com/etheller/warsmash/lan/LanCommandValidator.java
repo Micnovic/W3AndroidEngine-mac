@@ -12,6 +12,8 @@ import net.warsmash.lan.protocol.LanProtocol;
  * saving). Ownership of the units is the executor's check, on every machine alike.
  */
 public final class LanCommandValidator implements LanHost.CommandValidator {
+	/** BlzSendSyncData takes no longer prefix or data; a command carrying more came from no engine. */
+	private static final int MAX_SYNC_BYTES = 255;
 	/** Orders for more units than a selection can hold are no player's. */
 	private static final int MAX_UNITS = 1024;
 
@@ -195,6 +197,10 @@ public final class LanCommandValidator implements LanHost.CommandValidator {
 		@Override
 		public void syncData(final String prefix, final String data) {
 			notForReferee();
+			if ((prefix == null) || prefix.isEmpty() || (utf8Length(prefix) > MAX_SYNC_BYTES) || (data == null)
+					|| (utf8Length(data) > MAX_SYNC_BYTES)) {
+				this.valid = false;
+			}
 		}
 
 		@Override
@@ -210,5 +216,9 @@ public final class LanCommandValidator implements LanHost.CommandValidator {
 				this.valid = false;
 			}
 		}
+	}
+
+	private static int utf8Length(final String text) {
+		return text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
 	}
 }

@@ -86,7 +86,7 @@ class MapListCacheTest {
 
 		// Put a map into the kept list as a scan would have, with the header the current files give.
 		final String header = Files.readAllLines(list.toPath()).get(0);
-		Files.write(list.toPath(), (header + "\nMaps/Download/a.w3x\t2\tKept\t0\n").getBytes(StandardCharsets.UTF_8));
+		Files.write(list.toPath(), (header + "\nMaps/Download/a.w3x\t2\tKept\t0\tNONE\n").getBytes(StandardCharsets.UTF_8));
 		final List<GameCatalog.MapEntry> kept = maps(ini, data, list);
 		assertEquals(1, kept.size());
 		assertEquals("Kept", kept.get(0).name);

@@ -138,44 +138,80 @@ public final class Warcraft3MapRuntimeObjectData {
 
 	public static Warcraft3MapRuntimeObjectData load(final DataSource dataSource, final boolean inlineWTS,
 			final WTS wts, final WTS campaignWTS, final GraphicsSet graphics) throws IOException {
+		final Loading loading = loadInSteps(dataSource, inlineWTS, wts, campaignWTS, graphics);
+		for (final Step step : loading.getSteps()) {
+			step.run();
+		}
+		return loading.getResult();
+	}
 
+	/** A part of the loading, small enough to run in a frame of its own. */
+	public interface Step {
+		void run() throws IOException;
+	}
+
+	/** The loading in the order its steps are to run; the result is there once the last one has. */
+	public static final class Loading {
+		private final List<Step> steps = new ArrayList<>();
+		private Warcraft3MapRuntimeObjectData result;
+
+		public List<Step> getSteps() {
+			return this.steps;
+		}
+
+		public Warcraft3MapRuntimeObjectData getResult() {
+			return this.result;
+		}
+	}
+
+	public static Loading loadInSteps(final DataSource dataSource, final boolean inlineWTS, final WTS wts,
+			final WTS campaignWTS, final GraphicsSet graphics) {
+		final Loading loading = new Loading();
 		final StandardObjectData standardObjectData = new StandardObjectData(dataSource, graphics);
-		final WarcraftData standardUnits = standardObjectData.getStandardUnits();
-		final WarcraftData standardItems = standardObjectData.getStandardItems();
-		final WarcraftData standardDoodads = standardObjectData.getStandardDoodads();
-		final WarcraftData standardDestructables = standardObjectData.getStandardDestructables();
-		final WarcraftData abilities = standardObjectData.getStandardAbilities();
-		final WarcraftData standardAbilityBuffs = standardObjectData.getStandardAbilityBuffs();
-		final WarcraftData standardUpgrades = standardObjectData.getStandardUpgrades();
+		final WarcraftData[] standard = new WarcraftData[7];
+		final DataTable[] meta = new DataTable[7];
+		final MapObjectChangesets[] changesets = new MapObjectChangesets[1];
 
-		final DataTable standardUnitMeta = standardObjectData.getStandardUnitMeta();
-		final DataTable standardDoodadMeta = standardObjectData.getStandardDoodadMeta();
-		final DataTable standardDestructableMeta = standardObjectData.getStandardDestructableMeta();
-		final DataTable abilityMeta = standardObjectData.getStandardAbilityMeta();
-		final DataTable standardAbilityBuffMeta = standardObjectData.getStandardAbilityBuffMeta();
-		final DataTable standardUpgradeMeta = standardObjectData.getStandardUpgradeMeta();
-		final DataTable standardUpgradeEffectMeta = standardObjectData.getStandardUpgradeEffectMeta();
-
-		final MapObjectChangesets changesets = MapObjectChangesets.read(dataSource, inlineWTS, wts, campaignWTS,
-				standardUnits, standardItems);
+		loading.steps.add(() -> standard[0] = standardObjectData.getStandardUnits());
+		loading.steps.add(() -> {
+			standard[1] = standardObjectData.getStandardItems();
+			standard[2] = standardObjectData.getStandardDoodads();
+			standard[3] = standardObjectData.getStandardDestructables();
+		});
+		loading.steps.add(() -> standard[4] = standardObjectData.getStandardAbilities());
+		loading.steps.add(() -> {
+			standard[5] = standardObjectData.getStandardAbilityBuffs();
+			standard[6] = standardObjectData.getStandardUpgrades();
+		});
+		loading.steps.add(() -> {
+			meta[0] = standardObjectData.getStandardUnitMeta();
+			meta[1] = standardObjectData.getStandardDoodadMeta();
+			meta[2] = standardObjectData.getStandardDestructableMeta();
+			meta[3] = standardObjectData.getStandardAbilityMeta();
+			meta[4] = standardObjectData.getStandardAbilityBuffMeta();
+			meta[5] = standardObjectData.getStandardUpgradeMeta();
+			meta[6] = standardObjectData.getStandardUpgradeEffectMeta();
+		});
+		loading.steps.add(() -> changesets[0] = MapObjectChangesets.read(dataSource, inlineWTS, wts, campaignWTS,
+				standard[0], standard[1]));
 
 		final WorldEditStrings worldEditStrings = standardObjectData.getWorldEditStrings();
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.UNITS, standardUnits, standardUnitMeta,
-				changesets.units);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.ITEM, standardItems, standardUnitMeta,
-				changesets.items);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.DOODADS, standardDoodads, standardDoodadMeta,
-				changesets.doodads);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.DESTRUCTIBLES, standardDestructables,
-				standardDestructableMeta, changesets.destructables);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.ABILITIES, abilities, abilityMeta,
-				changesets.abilities);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.BUFFS_EFFECTS, standardAbilityBuffs,
-				standardAbilityBuffMeta, changesets.buffs);
-		CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.UPGRADES, standardUpgrades, standardUpgradeMeta,
-				changesets.upgrades);
-
-		return new Warcraft3MapRuntimeObjectData(standardUnits, standardItems, standardDestructables, standardDoodads,
-				abilities, standardAbilityBuffs, standardUpgrades, standardUpgradeEffectMeta, wts);
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.UNITS, standard[0],
+				meta[0], changesets[0].units));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.ITEM, standard[1],
+				meta[0], changesets[0].items));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.DOODADS, standard[2],
+				meta[1], changesets[0].doodads));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.DESTRUCTIBLES,
+				standard[3], meta[2], changesets[0].destructables));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.ABILITIES, standard[4],
+				meta[3], changesets[0].abilities));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.BUFFS_EFFECTS,
+				standard[5], meta[4], changesets[0].buffs));
+		loading.steps.add(() -> CollapsedObjectData.apply(worldEditStrings, WorldEditorDataType.UPGRADES, standard[6],
+				meta[5], changesets[0].upgrades));
+		loading.steps.add(() -> loading.result = new Warcraft3MapRuntimeObjectData(standard[0], standard[1],
+				standard[3], standard[2], standard[4], standard[5], standard[6], meta[6], wts));
+		return loading;
 	}
 }

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
+import java.util.Locale;
 import com.badlogic.gdx.Input;
 import com.etheller.warsmash.parsers.fdf.frames.GlueTextButtonFrame;
 import com.etheller.warsmash.parsers.fdf.frames.StringFrame;
@@ -27,11 +28,11 @@ final class MenuHotkey {
 		if (label == null) {
 			return Input.Keys.UNKNOWN;
 		}
-		final int at = label.toLowerCase().indexOf(WHITE);
+		final int at = label.toLowerCase(Locale.ROOT).indexOf(WHITE);
 		if ((at < 0) || ((at + WHITE.length()) >= label.length())) {
 			return Input.Keys.UNKNOWN;
 		}
-		final String letter = label.substring(at + WHITE.length(), at + WHITE.length() + 1).toUpperCase();
+		final String letter = label.substring(at + WHITE.length(), at + WHITE.length() + 1).toUpperCase(Locale.ROOT);
 		final int keycode = Input.Keys.valueOf(letter);
 		return keycode < 0 ? Input.Keys.UNKNOWN : keycode;
 	}

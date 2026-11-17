@@ -1,6 +1,7 @@
 package com.etheller.warsmash.parsers.fdf.frames;
 
 import java.util.EnumSet;
+import java.util.Locale;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -129,7 +130,7 @@ public class SpriteFrame extends AbstractUIFrame {
 
 	public void setSequence(final String animationName) {
 		if (this.instance != null) {
-			SequenceUtils.randomSequence(this.instance, animationName.toLowerCase());
+			SequenceUtils.randomSequence(this.instance, animationName.toLowerCase(Locale.ROOT));
 		}
 	}
 

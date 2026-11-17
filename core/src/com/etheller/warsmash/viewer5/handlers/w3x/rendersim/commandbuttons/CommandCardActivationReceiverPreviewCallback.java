@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons;
 
+import java.util.Locale;
 import com.etheller.warsmash.parsers.fdf.datamodel.FrameTemplateEnvironment;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
@@ -87,7 +88,7 @@ public final class CommandCardActivationReceiverPreviewCallback implements Abili
 	@Override
 	public void missingHeroLevelRequirement(final int level) {
 		missingRequirement(
-				String.format(this.templates.getDecoratedString("INFOPANEL_LEVEL").replace("%u", "%d"), level));
+				String.format(Locale.ROOT, this.templates.getDecoratedString("INFOPANEL_LEVEL").replace("%u", "%d"), level));
 	}
 
 	public void missingRequirement(final String requirementString) {

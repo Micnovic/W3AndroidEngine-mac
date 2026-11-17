@@ -7,12 +7,14 @@ import static com.etheller.warsmash.launcher.LauncherKeys.KEY_MUSIC;
 import java.io.File;
 import java.util.List;
 
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -22,9 +24,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.etheller.warsmash.BuildInfo;
+import com.etheller.warsmash.launcher.BuildOrigin;
 import com.etheller.warsmash.launcher.CampaignChoice;
 import com.etheller.warsmash.launcher.DataFolderCheck;
 import com.etheller.warsmash.launcher.LauncherBoard;
+import com.etheller.warsmash.launcher.LauncherKeys;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.viewer5.FogSettings;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
@@ -122,7 +126,12 @@ final class HomePage extends LauncherViews {
 		logo.setContentDescription(getString(home ? R.string.launcher_logo_edition : R.string.launcher_logo_home));
 		onTap(logo, false, v -> {
 			if (home) {
-				this.activity.preferences.edit().putString(KEY_EDITION, roc ? "tft" : "roc").apply();
+				final String edition = roc ? LauncherKeys.EDITION_TFT : LauncherKeys.EDITION_ROC;
+				this.activity.preferences.edit().putString(KEY_EDITION, edition).apply();
+				// The campaigns follow the edition in game data that list them per edition.
+				this.activity.catalog.setEdition(edition);
+				this.activity.campaigns = null;
+				this.activity.profilePage.editionChanged();
 			}
 			showHome();
 		});
@@ -148,6 +157,9 @@ final class HomePage extends LauncherViews {
 			addFooter(view);
 		}
 		addProfile(view, home);
+		if (home) {
+			addBuildBadge(view);
+		}
 		if (!b.tablet) {
 			// On the phone the logo sits in the top bar, over everything (on Home also over the banner).
 			place(view, logo, b.logoX, b.logoY, b.logoW, b.logoH);
@@ -548,7 +560,7 @@ final class HomePage extends LauncherViews {
 		final TextView version = text(buildLine() + dataVersion(), 24, LauncherKit.CAPTION);
 		version.setPadding(px(20), 0, 0, 0);
 		version.setShadowLayer(0, 0, 0, 0);
-		place(parent, version, 24, 1730, 592, 48);
+		place(parent, version, 24, WarsmashApplication.originLabel(this.activity).isEmpty() ? 1730 : 1766, 592, 48);
 	}
 
 	private View indicator(final String label, final boolean present) {
@@ -571,8 +583,41 @@ final class HomePage extends LauncherViews {
 
 	/** Such as "v0.3.12 (abc1234)", with a marker when the build is not an official one. */
 	String buildLine() {
+		final String origin = WarsmashApplication.originLabel(this.activity);
+		if (!origin.isEmpty()) {
+			return BuildInfo.current().displayVersion() + " - " + origin;
+		}
 		return BuildInfo.current().displayVersion()
 				+ (BuildInfo.current().isOfficial() ? "" : " - " + getString(R.string.build_unofficial));
+	}
+
+	/** A small label on Home for a build that is not signed with the project's key; the About page says it too. */
+	private void addBuildBadge(final FrameLayout parent) {
+		final String origin = WarsmashApplication.originLabel(this.activity);
+		if (origin.isEmpty()) {
+			return;
+		}
+		final LauncherBoard b = this.activity.board;
+		final String notice = BuildOrigin.UNOFFICIAL.equals(origin) ? BuildOrigin.UNOFFICIAL_NOTICE : origin;
+		final TextView badge = text(notice, b.tablet ? 24 : 18, LauncherKit.GOLD);
+		badge.setSingleLine(false);
+		badge.setMaxLines(2);
+		onTap(badge, false, v -> {
+			try {
+				this.activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(ProjectLink.url())));
+			}
+			catch (final RuntimeException e) {
+				// No browser on the device; the address stays readable on Home.
+			}
+		});
+		if (b.tablet) {
+			place(parent, badge, 48, 1694, 560, 68);
+		}
+		else {
+			// Under the logo, which is the top corner nothing else of Home's phone layout uses.
+			badge.setGravity(Gravity.END);
+			place(parent, badge, b.logoX, b.logoY + b.logoH - 6, b.logoW, 28);
+		}
 	}
 
 	String versionName() {

@@ -270,6 +270,11 @@ final class MeleeUIInput {
 		if ((this.ui.replayPanel != null) && this.ui.replayPanel.keyDown(keycode)) {
 			return true;
 		}
+		if (this.ui.menus.isUpperBarLocked()
+				&& ((keycode == Input.Keys.F9) || (keycode == Input.Keys.F10) || (keycode == Input.Keys.F11)
+						|| (keycode == Input.Keys.F12))) {
+			return true;
+		}
 		if (keycode == Input.Keys.F10) {
 			this.ui.openMenuAction.run();
 			return true;
@@ -458,6 +463,9 @@ final class MeleeUIInput {
 	}
 
 	public boolean scrolled(final float amountX, final float amountY) {
+		if ((this.ui.frameEvents != null) && (this.ui.mouseOverUIFrame != null)) {
+			this.ui.frameEvents.mouseWheel(this.ui.mouseOverUIFrame, -amountY);
+		}
 		if (!this.ui.userControlEnabled) {
 			return false;
 		}
@@ -538,6 +546,24 @@ final class MeleeUIInput {
 		}
 	}
 
+	private void frameMouseDown(final ClickableFrame frame) {
+		if (this.ui.frameEvents != null) {
+			this.ui.frameEvents.mouseDown(frame);
+		}
+	}
+
+	private void frameMouseUp(final ClickableFrame frame) {
+		if (this.ui.frameEvents != null) {
+			this.ui.frameEvents.mouseUp(frame);
+		}
+	}
+
+	private void frameClick(final ClickableFrame frame) {
+		if (this.ui.frameEvents != null) {
+			this.ui.frameEvents.click(frame);
+		}
+	}
+
 	public boolean touchDown(final int screenX, final int screenY, final float worldScreenY, final int button) {
 		if (this.ui.scoreScreen.isVisible()) {
 			// The score screen ends the game, also a game ended in a cinematic that took the player's control away;
@@ -549,6 +575,7 @@ final class MeleeUIInput {
 			if (clickedUIFrame instanceof ClickableFrame) {
 				this.ui.mouseDownUIFrame = (ClickableFrame) clickedUIFrame;
 				this.ui.mouseDownUIFrame.mouseDown(this.ui.rootFrame, this.ui.uiViewport);
+				frameMouseDown(this.ui.mouseDownUIFrame);
 			}
 			return true;
 		}
@@ -893,6 +920,7 @@ final class MeleeUIInput {
 			if (clickedUIFrame instanceof ClickableFrame) {
 				this.ui.mouseDownUIFrame = (ClickableFrame) clickedUIFrame;
 				this.ui.mouseDownUIFrame.mouseDown(this.ui.rootFrame, this.ui.uiViewport);
+				frameMouseDown(this.ui.mouseDownUIFrame);
 			}
 		}
 		return false;
@@ -1217,7 +1245,9 @@ final class MeleeUIInput {
 					this.ui.war3MapViewer.getUiSounds().getSound(soundKey).play(this.ui.uiScene.audioContext, 0, 0, 0);
 				}
 				pressed.onClick(button);
+				frameClick(pressed);
 			}
+			frameMouseUp(pressed);
 			return true;
 		}
 		if (!this.ui.userControlEnabled) {
@@ -1228,14 +1258,17 @@ final class MeleeUIInput {
 		final UIFrame clickedUIFrame = this.ui.rootFrame.touchUp(MeleeUI.screenCoordsVector.x,
 				MeleeUI.screenCoordsVector.y, button);
 		if (this.ui.mouseDownUIFrame != null) {
-			if (clickedUIFrame == this.ui.mouseDownUIFrame) {
-				this.ui.mouseDownUIFrame.onClick(button);
-				final String soundKey = this.ui.mouseDownUIFrame.getSoundKey();
+			final ClickableFrame pressed = this.ui.mouseDownUIFrame;
+			if (clickedUIFrame == pressed) {
+				pressed.onClick(button);
+				frameClick(pressed);
+				final String soundKey = pressed.getSoundKey();
 				if (soundKey != null) {
 					this.ui.war3MapViewer.getUiSounds().getSound(soundKey).play(this.ui.uiScene.audioContext, 0, 0, 0);
 				}
 			}
-			this.ui.mouseDownUIFrame.mouseUp(this.ui.rootFrame, this.ui.uiViewport);
+			pressed.mouseUp(this.ui.rootFrame, this.ui.uiViewport);
+			frameMouseUp(pressed);
 		}
 		else {
 			if (this.ui.draggingMouseButton == Input.Buttons.LEFT) {
@@ -1501,8 +1534,12 @@ final class MeleeUIInput {
 
 	public void endTouchHover() {
 		if (this.ui.mouseOverUIFrame != null) {
-			this.ui.mouseOverUIFrame.mouseExit(this.ui.rootFrame, this.ui.uiViewport);
+			final ClickableFrame left = this.ui.mouseOverUIFrame;
+			left.mouseExit(this.ui.rootFrame, this.ui.uiViewport);
 			this.ui.mouseOverUIFrame = null;
+			if (this.ui.frameEvents != null) {
+				this.ui.frameEvents.mouseLeave(left);
+			}
 		}
 		this.ui.tooltipFrame.setVisible(false);
 		this.ui.hoveredPanelTip = -1;
@@ -1533,11 +1570,17 @@ final class MeleeUIInput {
 		if (mousedUIFrame != this.ui.mouseOverUIFrame) {
 			if (this.ui.mouseOverUIFrame != null) {
 				this.ui.mouseOverUIFrame.mouseExit(this.ui.rootFrame, this.ui.uiViewport);
+				if (this.ui.frameEvents != null) {
+					this.ui.frameEvents.mouseLeave(this.ui.mouseOverUIFrame);
+				}
 			}
 			if (mousedUIFrame instanceof ClickableFrame) {
 				this.ui.mouseOverUIFrame = (ClickableFrame) mousedUIFrame;
 				if (this.ui.mouseOverUIFrame != null) {
 					this.ui.mouseOverUIFrame.mouseEnter(this.ui.rootFrame, this.ui.uiViewport);
+					if (this.ui.frameEvents != null) {
+						this.ui.frameEvents.mouseEnter(this.ui.mouseOverUIFrame);
+					}
 				}
 				if (mousedUIFrame instanceof ClickableActionFrame) {
 					this.ui.tooltips.loadTooltip((ClickableActionFrame) mousedUIFrame);

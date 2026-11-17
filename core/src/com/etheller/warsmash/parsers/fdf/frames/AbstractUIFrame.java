@@ -74,7 +74,8 @@ public abstract class AbstractUIFrame extends AbstractRenderableFrame implements
 			final ListIterator<UIFrame> reverseIterator = this.childFrames.listIterator(this.childFrames.size());
 			while (reverseIterator.hasPrevious()) {
 				final UIFrame childFrame = reverseIterator.previous();
-				final UIFrame clickedChild = childFrame.touchDown(screenX, screenY, button);
+				final UIFrame clickedChild = childFrame.touchDown(AbstractRenderableFrame.localX(childFrame, screenX),
+						AbstractRenderableFrame.localY(childFrame, screenY), button);
 				if (clickedChild != null) {
 					return clickedChild;
 				}
@@ -92,7 +93,8 @@ public abstract class AbstractUIFrame extends AbstractRenderableFrame implements
 			final ListIterator<UIFrame> reverseIterator = this.childFrames.listIterator(this.childFrames.size());
 			while (reverseIterator.hasPrevious()) {
 				final UIFrame childFrame = reverseIterator.previous();
-				final UIFrame clickedChild = childFrame.touchUp(screenX, screenY, button);
+				final UIFrame clickedChild = childFrame.touchUp(AbstractRenderableFrame.localX(childFrame, screenX),
+						AbstractRenderableFrame.localY(childFrame, screenY), button);
 				if (clickedChild != null) {
 					return clickedChild;
 				}
@@ -110,7 +112,8 @@ public abstract class AbstractUIFrame extends AbstractRenderableFrame implements
 			final ListIterator<UIFrame> reverseIterator = this.childFrames.listIterator(this.childFrames.size());
 			while (reverseIterator.hasPrevious()) {
 				final UIFrame childFrame = reverseIterator.previous();
-				final UIFrame clickedChild = childFrame.getFrameChildUnderMouse(screenX, screenY);
+				final UIFrame clickedChild = childFrame.getFrameChildUnderMouse(AbstractRenderableFrame.localX(childFrame, screenX),
+						AbstractRenderableFrame.localY(childFrame, screenY));
 				if (clickedChild != null) {
 					return clickedChild;
 				}

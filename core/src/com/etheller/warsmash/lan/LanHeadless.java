@@ -109,6 +109,7 @@ public final class LanHeadless {
 	private int chatAt = -1;
 	private String chatText = "";
 	private boolean resultLogged;
+	private volatile long catchUpSince;
 
 	public static boolean requested() {
 		return (System.getProperty("warsmash.lan.host") != null) || (System.getProperty("warsmash.lan.join") != null);
@@ -202,6 +203,7 @@ public final class LanHeadless {
 		timings.lagAfterMs = Integer.getInteger("warsmash.lan.lagms", timings.lagAfterMs);
 		timings.hostGoneMs = Integer.getInteger("warsmash.lan.hostgonems", timings.hostGoneMs);
 		timings.migrateWaitMs = Integer.getInteger("warsmash.lan.migratems", timings.migrateWaitMs);
+		timings.loadTimeoutMs = Integer.getInteger("warsmash.lan.loadms", timings.loadTimeoutMs);
 		this.session = new LanSession(timings, LanSessions.network());
 		this.stopAt = Integer.getInteger("warsmash.lan.steps", -1);
 		final String pauses = System.getProperty("warsmash.lan.pauses", "");
@@ -385,6 +387,7 @@ public final class LanHeadless {
 		@Override
 		public void onRejoin(final LanGameSetup setup, final int from, final int total) {
 			Log.warn("LAN: rejoin, " + total + " turns to play through");
+			LanHeadless.this.catchUpSince = System.nanoTime();
 			if (LanHeadless.this.start == null) {
 				started(setup);
 			}
@@ -393,6 +396,11 @@ public final class LanHeadless {
 		@Override
 		public void onCaughtUp() {
 			Log.warn("LAN: caught up at step " + LanHeadless.this.ticks);
+			if (LanHeadless.this.catchUpSince != 0) {
+				Log.warn("LAN: caught up " + LanHeadless.this.ticks + " steps in "
+						+ ((System.nanoTime() - LanHeadless.this.catchUpSince) / 1000000L) + " ms");
+				LanHeadless.this.catchUpSince = 0;
+			}
 		}
 
 		@Override

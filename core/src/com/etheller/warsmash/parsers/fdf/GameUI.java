@@ -307,6 +307,11 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 		return trySkinField(this.skin, file, this.gameVersion);
 	}
 
+	/** The skin's field as another game version names it. */
+	public String trySkinField(final String file, final int gameVersion) {
+		return trySkinField(this.skin, file, gameVersion);
+	}
+
 	public static String trySkinField(final Element skin, String file) {
 		return trySkinField(skin, file, WarsmashConstants.GAME_VERSION);
 	}
@@ -447,6 +452,17 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 		}
 		final BitmapFont frameFont = this.fontGenerator.generateFont(this.fontParam);
 		return frameFont;
+	}
+
+	/** A font of the given file at the given FDF size; the interface's own font when the file is not in the data. */
+	public BitmapFont generateFont(final String fontFile, final float fdfFontSize) {
+		final FontGeneratorHolder generator = (fontFile == null) || fontFile.isEmpty() ? null
+				: this.dynamicFontGeneratorHolder.getFontGeneratorForFile(fontFile);
+		if (generator == null) {
+			return generateFont(fdfFontSize);
+		}
+		this.fontParam.size = Math.max(1, fontPixelSize(this.viewport, fdfFontSize));
+		return generator.generateFont(this.fontParam);
 	}
 
 	private UIFrame inflateButtonPart(final String templateName, final UIFrame button,

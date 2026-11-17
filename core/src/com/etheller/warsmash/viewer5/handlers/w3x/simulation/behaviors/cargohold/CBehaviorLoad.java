@@ -173,10 +173,6 @@ public class CBehaviorLoad implements CRangedBehavior {
 				.visit(this.stillAliveVisitor.reset(simulation, this.unit, this.unit.getCargoData().getTargetsAllowed()));
 	}
 
-	public CUnit getTargetUnit() {
-		return this.target;
-	}
-
 	@Override
 	public AbilityTarget getTarget() {
 		return this.target;

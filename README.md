@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Platform: Windows and Android" src="https://img.shields.io/badge/platform-Windows%20%7C%20Android%208.0%2B-3DDC84?logo=android&logoColor=white">
-  <img alt="Version 0.3.156" src="https://img.shields.io/badge/version-0.3.156-blue">
+  <img alt="Version 0.4.42" src="https://img.shields.io/badge/version-0.4.42-blue">
   <img alt="Licence: AGPL-3.0" src="https://img.shields.io/badge/licence-AGPL--3.0-orange">
   <img alt="Engine: Warsmash" src="https://img.shields.io/badge/engine-Warsmash-8a2be2">
   <img alt="Languages: Java 17, JASS2, GLSL" src="https://img.shields.io/badge/code-Java%2017%20%7C%20JASS2%20%7C%20GLSL-lightgrey">
@@ -97,7 +97,7 @@ Legend: **Working** — used in the regular test runs or played on real devices 
 | Rules | Unit behaviour, combat, spells, abilities and timings | In progress | Measured against the original and calibrated step by step |
 | Simulation | Determinism and replays | In progress | |
 | Performance | Frame rate on phones and tablets | In progress | |
-| Multiplayer | LAN | Working | Up to 12 players, observers and referees, map transfer, rejoin and host migration |
+| Multiplayer | LAN | Working | Up to 12 players, observers and referees, map transfer, rejoin and host migration; Classic and Reforged players and all graphics sets in one game |
 | Multiplayer | Online multiplayer | Not planned | Will never be implemented |
 
 ## Requirements
@@ -245,7 +245,7 @@ docs/images/            images used in this file
 
 ## Status and roadmap
 
-Current version: **v0.3.156**
+Current version: **v0.4.42**
 
 - **Custom games:** work end-to-end.
 - **Campaigns:** Reign of Chaos and The Frozen Throne can be completed to the end. Tweaking required.
@@ -257,8 +257,8 @@ Current version: **v0.3.156**
 - **LAN games:** hosting and joining over the local network between phones, tablets and PCs; players that drop out
   rejoin the running game, and the game moves to another host if the host leaves.
 
-Next: determinism and replays, then full melee AI for all four races, performance on phones and calibration of
-the remaining rules.
+Next: performance on phones, controls and graphics, importing your own maps, then full melee AI for all four races
+and calibration of the remaining rules.
 
 Known issues: Forsaken Kingdom campaigns cannot be played yet; movies on Windows need the x64 build of Java.
 

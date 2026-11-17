@@ -46,8 +46,18 @@ public class ClientBuffer {
 	}
 
 	public void commitStaging(final int floats) {
+		commitStaging(0, floats);
+	}
+
+	/** Copies staging floats [from, from + floats) to the same place in the buffer. */
+	public void commitStaging(final int from, final int floats) {
 		this.floatView.clear();
-		this.floatView.put(this.staging, 0, floats);
+		this.floatView.position(from);
+		this.floatView.put(this.staging, from, floats);
+	}
+
+	public void bind() {
+		this.gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.buffer);
 	}
 
 	public void dispose() {

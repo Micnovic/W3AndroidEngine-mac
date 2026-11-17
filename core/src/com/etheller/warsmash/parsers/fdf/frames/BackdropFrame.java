@@ -2,12 +2,14 @@ package com.etheller.warsmash.parsers.fdf.frames;
 
 import java.util.EnumSet;
 
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.etheller.warsmash.parsers.fdf.datamodel.BackdropCornerFlags;
 import com.etheller.warsmash.parsers.fdf.datamodel.Vector4Definition;
+import com.etheller.warsmash.util.SessionResources;
 
 public class BackdropFrame extends AbstractUIFrame {
 	private final boolean decorateFileNames;
@@ -23,6 +25,8 @@ public class BackdropFrame extends AbstractUIFrame {
 	private final float edgeFileHeight;
 	private final float edgeUVHeight;
 	private final boolean mirrored;
+	private boolean opaqueBacking;
+	private Texture solidBacking;
 
 	public BackdropFrame(final String name, final UIFrame parent, final boolean decorateFileNames,
 			final boolean tileBackground, final Texture background, final EnumSet<BackdropCornerFlags> cornerFlags,
@@ -46,8 +50,26 @@ public class BackdropFrame extends AbstractUIFrame {
 				+ backgroundInsets.getW()) / 2f;
 	}
 
+	/** The background texture is translucent; a black fill under it keeps what is behind the frame from showing. */
+	public void setOpaqueBacking(final boolean opaqueBacking) {
+		this.opaqueBacking = opaqueBacking;
+	}
+
 	@Override
 	protected void internalRender(final SpriteBatch batch, final BitmapFont baseFont, final GlyphLayout glyphLayout) {
+		if (this.opaqueBacking) {
+			if (this.solidBacking == null) {
+				final Pixmap pixmap = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+				pixmap.setColor(0f, 0f, 0f, 1f);
+				pixmap.fill();
+				this.solidBacking = SessionResources.track(new Texture(pixmap));
+				pixmap.dispose();
+			}
+			batch.draw(this.solidBacking, this.renderBounds.x + this.backgroundInsets.getX(),
+					this.renderBounds.y + this.backgroundInsets.getY(),
+					this.renderBounds.width - this.backgroundInsets.getX() - this.backgroundInsets.getZ(),
+					this.renderBounds.height - this.backgroundInsets.getY() - this.backgroundInsets.getW());
+		}
 		if (this.background != null) {
 			final float backgroundX = this.renderBounds.x + this.backgroundInsets.getX();
 			final float backgroundY = this.renderBounds.y + this.backgroundInsets.getY();

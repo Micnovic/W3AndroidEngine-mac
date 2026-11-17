@@ -61,6 +61,7 @@ class StaticStateTest {
 			// The player profile: its files, campaign progress and game caches as saved on disk.
 			"simulation.campaign.CSaveStorage#profile", "simulation.campaign.CSaveStorage#lastBackgroundWrite",
 			"simulation.campaign.CCampaignProgress#campaignList", "simulation.campaign.CCampaignProgress#loaded",
+			"simulation.campaign.CCampaignProgress#allMissionsOpen",
 			"simulation.campaign.CCampaignProgress#PROGRESS", "simulation.campaign.CGameCache#loadedFromDisk",
 			"simulation.campaign.CGameCache#FILES",
 			// Where the game caches are read from: the profile's file, or what a replay recorded.
@@ -143,7 +144,7 @@ class StaticStateTest {
 			// The data source the menu has selected: menus, lobby setup, launcher.
 			"MenuCampaigns.java", "MenuLoadingScreen.java", "MenuMapStart.java", "MenuSkirmish.java", "MenuUI.java",
 			"TestUI.java", "MapInfoPane.java", "PlayerSlotPane.java", "TeamSetupPane.java", "BattleNetUI.java",
-			"GlueBackdropRenderer.java", "GameCatalog.java", "HotkeyCatalog.java",
+			"GlueBackdropRenderer.java", "GameCatalog.java", "HotkeyCatalog.java", "DataContentCheck.java",
 			"WarsmashGdxFDFTestRenderScreen.java",
 			// Game launch: the script that configures the game before it exists.
 			"ConfigNatives.java",
@@ -156,11 +157,12 @@ class StaticStateTest {
 			"w3x.rendersim.RenderDoodad#VERTEX_COLOR_HEAP", "w3x.rendersim.RenderUnit#heapZ",
 			"w3x.SplatModel#scratchFloatBuffer", "w3x.SplatModel#scratchShortBuffer", "w3x.TerrainDoodad#locationHeap",
 			"w3x.War3MapViewer#rayHeap", "mdx.AttachmentInstance#visbilityHeap", "mdx.BatchGroup#tempFloat3Array",
-			"mdx.EventObjectEmitter#valueHeap", "mdx.GeometryEmitterFuncs#vectorTemp", "mdx.GeometryEmitterFuncs#vector3Heap",
+			"mdx.EventObjectEmitter#valueHeap", "mdx.GeometryEmitterFuncs#vectorTemp", "mdx.GeometryEmitterFuncs#vector3Heap", "mdx.GeometryEmitterFuncs#drawCounts",
 			"mdx.LightInstance#vectorHeap", "mdx.LightInstance#scalarHeap", "mdx.MdxComplexInstance#visibilityHeap",
 			"mdx.MdxComplexInstance#translationHeap", "mdx.MdxComplexInstance#rotationHeap",
 			"mdx.MdxComplexInstance#scaleHeap", "mdx.MdxComplexInstance#colorHeap", "mdx.MdxComplexInstance#alphaHeap",
-			"mdx.MdxComplexInstance#textureIdHeap", "mdx.MdxComplexInstance#attachingModels", "mdx.Particle#latitudeHeap",
+			"mdx.MdxComplexInstance#textureIdHeap", "mdx.MdxComplexInstance#attachingModels", "mdx.MdxComplexInstance#boneUploadScratch",
+			"mdx.Particle#latitudeHeap",
 			"mdx.Particle#lifeSpanHeap", "mdx.Particle#gravityHeap", "mdx.Particle#speedHeap", "mdx.Particle#tempVector",
 			"mdx.Particle2#widthHeap", "mdx.Particle2#lengthHeap", "mdx.Particle2#latitudeHeap", "mdx.Particle2#variationHeap",
 			"mdx.Particle2#speedHeap", "mdx.Particle2#gravityHeap", "mdx.ParticleEmitter#emissionRateHeap",
@@ -183,6 +185,7 @@ class StaticStateTest {
 			"w3x.ui.MeleeChat#PLAYER_TEXT_COLORS", "w3x.ui.MeleeScoreScreen#COLUMN_KEYS",
 			"w3x.ui.MeleeScoreScreen#BAR_FRAME_HEIGHT", "w3x.ui.MeleeScoreScreen#BAR_CENTER",
 			"w3x.ui.MeleeScoreScreen#SORT_COLUMN", "w3x.ui.MeleeUICinematics#REFORGED_GRAPHICS_PACKAGES",
+			"w3x.ui.MeleeUIOriginFrames#SYSTEM_BUTTONS", "w3x.ui.MeleeUIOriginFrames#MINIMAP_BUTTONS",
 			"w3x.ui.MeleeUITeamResources#UPKEEP_COLORS", "w3x.ui.menu.CampaignCatalog#FORSAKEN_KINGDOM_MAPS",
 			"w3x.ui.MenuCampaigns#CAMPAIGN_DIFFICULTIES", "w3x.ui.MenuCampaigns#CAMPAIGN_DIFFICULTY_KEYS",
 			"w3x.ui.ReforgedLoadingScreen#BACKGROUNDS", "w3x.ui.ReforgedLoadingScreen#RACE_CRESTS",
@@ -249,6 +252,8 @@ class StaticStateTest {
 			"core.launcher.LauncherLog#sink", "core.launcher.DataFolderCheck#DESCRIPTIONS",
 			// The platform's folder chooser, installed once at start.
 			"core.launcher.CustomFolderChooser$Holder#installed",
+			// Where the platform keeps the render scale the launcher and the game's Options menu share.
+			"core.launcher.RenderScaleStore$Holder#installed",
 			// Where the platform keeps the custom game list that the launcher and the engine's menu share.
 			"core.launcher.MapListCache#shared",
 			// Where the platform keeps the player's Save and Replay; set once at start, not a game's state.
@@ -276,8 +281,8 @@ class StaticStateTest {
 			"core.util.WarsmashConstants#ABILITY_COMPATIBILITY",
 			// Tables, arrays and sets filled once when the class loads and never written again (object data field lists,
 			// launcher menus and names, skin art, anchor priorities, decoder tables, lookup maps).
-			"core.datasources.AssetPathFallback#GRAPHICS_PACKAGES", "core.datasources.GraphicsSettings#TEXTURE_SIZES",
-			"core.datasources.GraphicsSettings#RENDER_SCALES", "core.datasources.GraphicsSettings#SOFTWARE_RENDERERS", "core.launcher.LauncherOptions#RENDER_SCALES",
+			"core.datasources.AssetPathFallback#GRAPHICS_PACKAGES", "core.datasources.GameLanguage#NAMES", "core.datasources.GraphicsSettings#TEXTURE_SIZES",
+			"core.datasources.GraphicsSettings#RENDER_SCALES", "core.datasources.GraphicsSettings#deviceMemoryMb", "core.datasources.GraphicsSettings#SOFTWARE_RENDERERS", "core.launcher.LauncherOptions#RENDER_SCALES",
 			"core.launcher.LauncherOptions#FRAME_CAPS", "core.launcher.LauncherOptions#FRAME_CAP_NAMES",
 			"core.datasources.LayeredDataSource#OTHER_PICTURES", "core.launcher.CampaignResult#ROWS",
 			"core.launcher.CustomGame#SLOT_TYPES", "core.launcher.CustomGame#RACES", "core.launcher.CustomGame#OPTION_NAMES",
@@ -286,7 +291,7 @@ class StaticStateTest {
 			"core.launcher.DataPackage#SET_FOLDERS", "core.launcher.CustomContent#FOLDERS", "core.launcher.EngineSettings#OWN_SECTIONS",
 			"core.launcher.HotkeyCatalog#HALLS", "core.launcher.HotkeyCatalog#RACE_NAMES", "core.launcher.HotkeyCatalog#BASE",
 			"core.launcher.LauncherKeys#DIFFICULTIES", "core.launcher.LauncherKeys#CAMPAIGN_MAPS",
-			"core.launcher.Profiles#FIELDS", "core.launcher.ProfileStorage#FOLDERS",
+			"core.launcher.Profiles#FIELDS", "core.launcher.ProfileStorage#FOLDERS", "core.launcher.DataContentCheck#SCRIPTS",
 			"core.launcher.LauncherOptions#GRAPHICS", "core.launcher.LauncherOptions#GRAPHICS_SETS",
 			"core.launcher.LauncherOptions#TEXTURE_SIZES", "core.launcher.LauncherOptions#SOUND",
 			"core.launcher.LauncherOptions#GAMEPLAY", "core.launcher.SkinArt#RACE_SYMBOLS", "core.launcher.SkinArt#SCENES",
@@ -306,7 +311,7 @@ class StaticStateTest {
 			"core.units.StandardObjectData#CLASSIC_FALLBACK_QUALITIES", "core.units.StandardObjectData#GRAPHICS_FIELDS",
 			"core.util.DataSourceFileHandle#SOUND_EXTENSIONS", "core.util.RenderMathUtils#EMPTY_FLOAT_ARRAY",
 			"core.util.RenderMathUtils#FLOAT_VEC3_ZERO", "core.util.RenderMathUtils#FLOAT_QUAT_DEFAULT",
-			"core.util.RenderMathUtils#FLOAT_VEC3_ONE", "core.viewer5.handlers.blp.JpegDecoder#ZIGZAG", "core.viewer5.handlers.blp.Etc2Encoder#COLOR_MODIFIERS", "core.viewer5.handlers.blp.Etc2Encoder#ALPHA_MODIFIERS", "core.viewer5.handlers.blp.TextureTranscoder#folder", "core.viewer5.handlers.blp.TextureTranscoder#folderTried",
+			"core.util.RenderMathUtils#FLOAT_VEC3_ONE", "core.viewer5.handlers.blp.JpegDecoder#ZIGZAG", "core.viewer5.handlers.blp.Etc2Encoder#COLOR_MODIFIERS", "core.viewer5.handlers.blp.Etc2Encoder#ALPHA_MODIFIERS", "core.viewer5.handlers.blp.Etc2Encoder$Nearest#INDEX", "core.viewer5.handlers.blp.Etc2Encoder$Nearest#SQUARED", "core.viewer5.handlers.blp.Etc2Encoder$Multipliers#OF", "core.viewer5.handlers.blp.Etc2Encoder$Classes#OF", "core.viewer5.handlers.blp.Etc2Encoder$Quantized#FIVE", "core.viewer5.handlers.blp.Etc2Encoder$Quantized#FOUR", "core.viewer5.handlers.blp.Etc2Encoder#SUBS", "core.viewer5.handlers.blp.TextureTranscoder#folder", "core.viewer5.handlers.blp.TextureTranscoder#folderTried",
 			"core.viewer5.handlers.blp.JpegDecoder#IDCT_COSINES", "core.WarsmashGdxMenuScreen#STARTUP_STEP_WEIGHTS",
 			"hive.lang.Hex#HEX_DIGITS", "hive.lang.Hex#CHAR_VALUES", "hive.rms.parsers.mdlx.AnimationMap#ID_TO_TAG"));
 

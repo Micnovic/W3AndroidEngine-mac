@@ -178,8 +178,19 @@ public class Shaders {
 			;
 		}
 		return firstLine + //
-				"        float fogAmount = clamp(((1.0 / gl_FragCoord.w) - u_fogParams.y) / (u_fogParams.z - u_fogParams.y), 0.0, 1.0);\r\n"
+				"        float fogDepth = 1.0 / gl_FragCoord.w;\r\n" + //
+				"        float fogAmount;\r\n" + //
+				"        if (u_fogParams.x < 1.5) {\r\n" + //
+				"          fogAmount = clamp((fogDepth - u_fogParams.y) / (u_fogParams.z - u_fogParams.y), 0.0, 1.0);\r\n"
 				+ //
+				"        } else if (u_fogParams.x < 2.5) {\r\n" + //
+				"          fogAmount = clamp(1.0 - exp(-u_fogParams.w * fogDepth), 0.0, 1.0);\r\n" + //
+				"        } else {\r\n" + //
+				"          float fogExponent = u_fogParams.w * fogDepth;\r\n" + //
+				"          fogAmount = clamp(1.0 - exp(-fogExponent * fogExponent), 0.0, 1.0);\r\n" + //
+				"        }\r\n"
+				+ //
+				"        fogAmount = min(fogAmount, u_fogColor.a);\r\n" + //
 				rgbModification + //
 				"      }\r\n";
 	}

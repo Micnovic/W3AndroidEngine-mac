@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import com.badlogic.gdx.Gdx;
@@ -44,6 +45,8 @@ public final class TextureTranscoder {
 		thread.setDaemon(true);
 		return thread;
 	});
+	private static final long MAX_PENDING_WRITE_BYTES = 8L << 20;
+	private static final AtomicLong PENDING_WRITE_BYTES = new AtomicLong();
 	private static File folder;
 	private static boolean folderTried;
 
@@ -80,7 +83,7 @@ public final class TextureTranscoder {
 			}
 			final CompressedMips blocks = encode(levels, normals);
 			if (cacheFile != null) {
-				WRITER.execute(() -> write(cacheFile, blocks));
+				queueWrite(cacheFile, blocks);
 			}
 			return blocks;
 		}
@@ -90,29 +93,54 @@ public final class TextureTranscoder {
 		}
 	}
 
+	/**
+	 * The queued blocks stay on the Java heap until they are written, and a map loads textures faster than a phone's
+	 * storage takes them, so past a limit the loading thread writes the file itself.
+	 */
+	private static void queueWrite(final File cacheFile, final CompressedMips blocks) {
+		final long bytes = blocks.byteCount();
+		if (PENDING_WRITE_BYTES.addAndGet(bytes) > MAX_PENDING_WRITE_BYTES) {
+			try {
+				write(cacheFile, blocks);
+			}
+			finally {
+				PENDING_WRITE_BYTES.addAndGet(-bytes);
+			}
+			return;
+		}
+		WRITER.execute(() -> {
+			try {
+				write(cacheFile, blocks);
+			}
+			finally {
+				PENDING_WRITE_BYTES.addAndGet(-bytes);
+			}
+		});
+	}
+
 	static CompressedMips encode(final MipLevels levels, final boolean normals) {
 		final int format = normals ? CompressedMips.FORMAT_RG11_EAC
 				: hasAlpha(levels.getRgba(0)) ? CompressedMips.FORMAT_RGBA8_ETC2_EAC
 						: CompressedMips.FORMAT_RGB8_ETC2;
 		final CompressedMips out = new CompressedMips(format);
-		for (int level = 0; level < levels.count(); level++) {
-			final int width = levels.getWidth(level);
-			final int height = levels.getHeight(level);
-			final ByteBuffer pixels = levels.getRgba(level).duplicate();
-			final byte[] rgba = new byte[width * height * 4];
-			pixels.position(0);
-			pixels.get(rgba);
-			final byte[] blocks;
-			if (format == CompressedMips.FORMAT_RG11_EAC) {
-				blocks = Etc2Encoder.encodeRg(rgba, width, height);
-			}
-			else if (format == CompressedMips.FORMAT_RGBA8_ETC2_EAC) {
-				blocks = Etc2Encoder.encodeRgba(rgba, width, height);
-			}
-			else {
-				blocks = Etc2Encoder.encodeRgb(rgba, width, height);
-			}
-			out.add(width, height, blocks);
+		final int count = levels.count();
+		final byte[][] pixels = new byte[count][];
+		final int[] widths = new int[count];
+		final int[] heights = new int[count];
+		for (int level = 0; level < count; level++) {
+			widths[level] = levels.getWidth(level);
+			heights[level] = levels.getHeight(level);
+			pixels[level] = new byte[widths[level] * heights[level] * 4];
+			final ByteBuffer source = levels.getRgba(level).duplicate();
+			source.position(0);
+			source.get(pixels[level], 0, pixels[level].length);
+		}
+		final int kind = format == CompressedMips.FORMAT_RG11_EAC ? Etc2Encoder.KIND_RG
+				: format == CompressedMips.FORMAT_RGBA8_ETC2_EAC ? Etc2Encoder.KIND_RGBA : Etc2Encoder.KIND_RGB;
+		final byte[][] blocks = Etc2Encoder.encodeLevels(pixels, widths, heights, kind == Etc2Encoder.KIND_RGB ? 8 : 16,
+				kind);
+		for (int level = 0; level < count; level++) {
+			out.add(widths[level], heights[level], blocks[level]);
 		}
 		return out;
 	}

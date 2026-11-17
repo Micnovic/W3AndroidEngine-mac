@@ -21,12 +21,15 @@ public class ABActionCreateTimer implements ABSingleAction {
 	private List<ABAction> actions;
 	private ABBooleanCallback startTimer;
 	private ABFloatCallback delay;
+	/** Fires at the exact time, not the step, so a period that is not a whole number of steps does not drift. */
+	private ABBooleanCallback exact;
 
 	@Override
 	public void runAction(final CSimulation game, final CUnit caster, final Map<String, Object> localStore,
 			final int castId) {
 
-		final CTimer timer = new ABTimer(caster, localStore, this.actions, castId);
+		final boolean exactTiming = (this.exact != null) && this.exact.callback(game, caster, localStore, castId);
+		final CTimer timer = new ABTimer(caster, localStore, this.actions, castId, exactTiming);
 		timer.setTimeoutTime(this.timeout.callback(game, caster, localStore, castId));
 		localStore.put(ABLocalStoreKeys.LASTCREATEDTIMER, timer);
 

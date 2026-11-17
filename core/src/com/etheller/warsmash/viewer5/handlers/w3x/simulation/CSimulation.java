@@ -211,6 +211,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	private final Set<CDestructable> ownedTreeSet = new HashSet<>();
 	private GlobalScope globalScope;
 	private static final int BUILDING_PLACE_SEARCH_RINGS = 17;
+	private static final float BUILDING_PLACE_SEARCH_REACH = 1077f;
 	private Rectangle playableMapArea;
 	private static final long COMBAT_SEED_SALT = 0x2545F4914F6CDD1DL;
 	private static final String MISSILE_SPEED = "Missilespeed";
@@ -530,10 +531,6 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		}
 	}
 
-	public void internalUnregisterTimer(final CTimer timer) {
-		this.activeTimers.remove(timer);
-	}
-
 	public CUnit internalCreateUnit(final War3ID typeId, final int playerIndex, final float x, final float y,
 			final float facing, final ArgbImage buildingPathingPixelMap, int editorConfigHitPointPercent,
 			int editorConfigManaAmount) {
@@ -710,6 +707,8 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	 * overlapping them. Measured: the original takes the first free grid point along a square spiral that starts
 	 * downwards and turns counter-clockwise (down 1, right 1, up 2, left 2, down 3, ...), not the nearest one. It
 	 * gives up after 1225 points (a spot found at step 1168 was taken, one at 1243 was not) and then keeps the point.
+	 * A candidate only counts while it lies within about 1077 units of the asked point (kept on the map) on both axes (a hall found
+	 * 1076 away was moved, a barracks found 1078 away stayed put).
 	 */
 	private Vector2 findBuildingPlace(final CUnitType unitType, final float x, final float y) {
 		final ArgbImage pathingMap = unitType.getBuildingPathingPixelMap();
@@ -718,6 +717,10 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		final Vector2 clamped = placeOutsidePlayableArea(unitType, gridPoint(x, offsetX), gridPoint(y, offsetY), true,
 				new boolean[1]);
 		final float baseX = clamped.x;
+		final float reachX = Math.max(this.pathingGrid.getWorldXFromCorner(0),
+				Math.min(this.pathingGrid.getWorldXFromCorner(0) + (this.pathingGrid.getWidth() * 32f) - 64f, x));
+		final float reachY = Math.max(this.pathingGrid.getWorldYFromCorner(0),
+				Math.min(this.pathingGrid.getWorldYFromCorner(0) + (this.pathingGrid.getHeight() * 32f) - 64f, y));
 		final float baseY = clamped.y;
 		final int[] stepX = { 0, 1, 0, -1 };
 		final int[] stepY = { -1, 0, 1, 0 };
@@ -732,7 +735,9 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 					final float candidateX = baseX + (cellX * 64f);
 					final float candidateY = baseY + (cellY * 64f);
 					// Measured: a script-created Undead building is not moved to blight.
-					if (this.pathingGrid.contains(candidateX, candidateY)
+					if ((Math.abs(candidateX - reachX) <= BUILDING_PLACE_SEARCH_REACH)
+							&& (Math.abs(candidateY - reachY) <= BUILDING_PLACE_SEARCH_REACH)
+							&& this.pathingGrid.contains(candidateX, candidateY)
 							&& !AbstractCAbilityBuild.isBuildLocationObstructed(this, unitType, pathingMap, false,
 							candidateX, candidateY, null, BuildOnBuildingIntersector.INSTANCE, true)) {
 						return new Vector2(candidateX, candidateY);
@@ -905,33 +910,12 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 
 	/**
 	 * An integer a script reads as a handle names whatever holds that id now, as in the original game, also when the
-	 * script got the number from an earlier holder of the id.
+	 * script got the number from an earlier holder of the id. The handle comes back as it is when its kind is not the
+	 * one the script asks for (a timer read as a unit stays the timer); natives that cannot use it treat it as none.
 	 */
 	@Override
 	public Object handleOfId(final int handleId, final String typeName) {
-		final Object handle = holderOfId(handleId, typeName);
-		// Natives take a handle of another kind than they expect as none at all.
-		return isOfType(handle, typeName) ? handle : null;
-	}
-
-	private static boolean isOfType(final Object handle, final String typeName) {
-		if (typeName == null) {
-			return true;
-		}
-		switch (typeName) {
-		case "unit":
-			return handle instanceof CUnit;
-		case "item":
-			return handle instanceof CItem;
-		case "destructable":
-			return handle instanceof CDestructable;
-		case "widget":
-			return handle instanceof CWidget;
-		case "player":
-			return handle instanceof CPlayer;
-		default:
-			return true;
-		}
+		return holderOfId(handleId, typeName);
 	}
 
 	private Object holderOfId(final int handleId, final String typeName) {
@@ -1176,7 +1160,8 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 			this.pathfindingProcessors[playerIndex] = pathfindingProcessor;
 		}
 		pathfindingProcessor.findNaiveSlowPath(ignoreIntersectionsWithThisUnit, ignoreIntersectionsWithThisSecondUnit,
-				startX, startY, goal, movementType, collisionSize, allowSmoothing, queueItem);
+				startX, startY, goal, movementType, collisionSize, allowSmoothing, queueItem,
+				getPlayer(playerIndex).getController() == CMapControl.USER);
 	}
 
 	/** Whether a unit at a point can walk to within a reach of another point, ignoring other units. */
@@ -2017,10 +2002,6 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		return null;
 	}
 
-	public void createEffectOnUnit(final CUnit unit, final String effectPath) {
-		this.simulationRenderController.spawnEffectOnUnit(unit, effectPath);
-	}
-
 	public void createTemporarySpellEffectOnUnit(final CUnit unit, final War3ID alias, final CEffectType effectType) {
 		this.simulationRenderController.spawnTemporarySpellEffectOnUnit(unit, alias, effectType);
 	}
@@ -2170,10 +2151,6 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 
 	protected List<CGlobalEvent> getEventList(final JassGameEventsWar3 eventType) {
 		return this.eventTypeToEvents.get(eventType);
-	}
-
-	public void addGlobalEvent(final CGlobalEvent newEvent) {
-		getOrCreateEventList(newEvent.getEventType()).add(newEvent);
 	}
 
 	public void removeGlobalEvent(final CGlobalEvent globalEvent) {
@@ -2675,10 +2652,6 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	@Override
 	public boolean isTerrainWater(final float x, final float y) {
 		return this.terrainData.isWater(x, y);
-	}
-
-	public int getMapVersion() {
-		return this.mapVersion;
 	}
 
 	/** PlayCinematic: the movie plays when the game that asked for it ends, in the order they were asked for. */

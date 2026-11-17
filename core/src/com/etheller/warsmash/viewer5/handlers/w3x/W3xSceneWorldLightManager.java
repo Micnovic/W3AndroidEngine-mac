@@ -12,6 +12,16 @@ import com.etheller.warsmash.viewer5.gl.DataTexture;
 import com.etheller.warsmash.viewer5.handlers.mdx.LightInstance;
 
 public class W3xSceneWorldLightManager implements SceneLightManager, W3xSceneLightManager {
+	/**
+	 * The graphics packages' day and night light is strongly tinted at night and has no ambient part (the packages light
+	 * the models from an environment map), so the night ground came out nearly black and saturated blue. At night the
+	 * light's colour is moved this far towards grey (1 keeps it), and an ambient light of the light's own hue with this
+	 * strength is added to the terrain light, fading out as the light reaches full day strength.
+	 */
+	private static final float HD_NIGHT_SATURATION = Float
+			.parseFloat(System.getProperty("warsmash.hdNightSaturation", "0.3"));
+	private static final float HD_TERRAIN_NIGHT_FILL = Float
+			.parseFloat(System.getProperty("warsmash.hdTerrainNightFill", "0.85"));
 	public final List<LightInstance> lights;
 	private FloatBuffer lightDataCopyHeap;
 	private final DataTexture unitLightsTexture;
@@ -65,6 +75,7 @@ public class W3xSceneWorldLightManager implements SceneLightManager, W3xSceneLig
 		if (this.viewer.dncUnit != null) {
 			if (!this.viewer.dncUnit.lights.isEmpty()) {
 				this.viewer.dncUnit.lights.get(0).bind(0, this.lightDataCopyHeap);
+				adjustPackageLight(this.lightDataCopyHeap, false);
 				offset += 16;
 				this.unitLightCount++;
 			}
@@ -83,6 +94,7 @@ public class W3xSceneWorldLightManager implements SceneLightManager, W3xSceneLig
 		if (this.viewer.dncTerrain != null) {
 			if (!this.viewer.dncTerrain.lights.isEmpty()) {
 				this.viewer.dncTerrain.lights.get(0).bind(0, this.lightDataCopyHeap);
+				adjustPackageLight(this.lightDataCopyHeap, true);
 				offset += 16;
 				this.terrainLightCount++;
 			}
@@ -94,6 +106,32 @@ public class W3xSceneWorldLightManager implements SceneLightManager, W3xSceneLig
 		}
 		this.lightDataCopyHeap.limit(offset);
 		this.terrainLightsTexture.bindAndUpdateIfChanged(this.lightDataCopyHeap, 4, this.terrainLightCount);
+	}
+
+	private void adjustPackageLight(final FloatBuffer light, final boolean terrain) {
+		if (!this.viewer.isPackageInterface()) {
+			return;
+		}
+		if ((light.get(12) + light.get(13) + light.get(14)) * light.get(15) > 0.01f) {
+			return;
+		}
+		final float red = light.get(8);
+		final float green = light.get(9);
+		final float blue = light.get(10);
+		final float grey = (0.299f * red) + (0.587f * green) + (0.114f * blue);
+		final float strength = light.get(11) * grey;
+		final float night = 1f - Math.min(1f, strength);
+		final float saturation = HD_NIGHT_SATURATION + ((1f - HD_NIGHT_SATURATION) * (1f - night));
+		light.put(8, grey + ((red - grey) * saturation));
+		light.put(9, grey + ((green - grey) * saturation));
+		light.put(10, grey + ((blue - grey) * saturation));
+		if (terrain && (grey > 0.001f)) {
+			final float scale = 1f / grey;
+			light.put(12, light.get(8) * scale);
+			light.put(13, light.get(9) * scale);
+			light.put(14, light.get(10) * scale);
+			light.put(15, HD_TERRAIN_NIGHT_FILL * night);
+		}
 	}
 
 	@Override

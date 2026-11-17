@@ -22,6 +22,9 @@ public final class GameOptions {
 	public static final int PARTICLES_LOW = 0;
 	public static final int PARTICLES_MEDIUM = 1;
 	public static final int PARTICLES_HIGH = 2;
+	public static final int UNIT_SHADOWS_OFF = 0;
+	public static final int UNIT_SHADOWS_BLOB = 1;
+	public static final int UNIT_SHADOWS_FULL = 2;
 	private static final String FILE_NAME = "Options.dat";
 	private static final float[] PARTICLE_FACTORS = { 0.5f, 1.0f, 1.5f };
 	private static final float SLOWEST_SCROLL_FACTOR = 0.25f;
@@ -297,11 +300,20 @@ public final class GameOptions {
 	}
 
 	public boolean isUnitShadows() {
-		return flag("unitShadows", true);
+		return flag("unitShadows", true) && (getUnitShadowMode() != UNIT_SHADOWS_OFF);
 	}
 
 	public void setUnitShadows(final boolean value) {
 		setFlag("unitShadows", value);
+		if (value && (getUnitShadowMode() == UNIT_SHADOWS_OFF)) {
+			this.values.remove("unitShadowMode");
+		}
+	}
+
+	/** One of the UNIT_SHADOWS constants, or -1 when the player has not chosen and the graphics decide. */
+	public int getUnitShadowMode() {
+		final Integer value = this.values.get("unitShadowMode");
+		return value == null ? -1 : Math.max(UNIT_SHADOWS_OFF, Math.min(UNIT_SHADOWS_FULL, value));
 	}
 
 	public boolean isVSync() {

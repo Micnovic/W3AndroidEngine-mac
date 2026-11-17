@@ -1,6 +1,7 @@
 package com.etheller.warsmash.units.collapsed;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.etheller.warsmash.units.GameObject;
@@ -110,7 +111,7 @@ public class CollapsedObjectData {
 							level = 1;
 						}
 						if (repeatCount >= 10) {
-							metaDataName += String.format("%2d", level).replace(' ', '0');
+							metaDataName += String.format(Locale.ROOT, "%2d", level).replace(' ', '0');
 						}
 						else {
 							metaDataName += Integer.toString(level);

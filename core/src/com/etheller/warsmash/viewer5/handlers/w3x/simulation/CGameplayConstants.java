@@ -531,10 +531,6 @@ public class CGameplayConstants {
 		return this.maxHeroLevel;
 	}
 
-	public int getMaxUnitLevel() {
-		return this.maxUnitLevel;
-	}
-
 	public float getSummonedKillFactor() {
 		return this.summonedKillFactor;
 	}
@@ -611,10 +607,6 @@ public class CGameplayConstants {
 		return this.pawnItemRange;
 	}
 
-	public float getPawnItemRate() {
-		return this.pawnItemRate;
-	}
-
 	public int getPawnItemValue(final int cost) {
 		// rates such as 0.7f sit just below their decimal value; the bias keeps whole products whole
 		return (int) ((cost * this.pawnItemRate) + 0.001f);
@@ -626,14 +618,6 @@ public class CGameplayConstants {
 
 	public float getFollowRange() {
 		return this.followRange;
-	}
-
-	public float getStructureFollowRange() {
-		return this.structureFollowRange;
-	}
-
-	public float getFollowItemRange() {
-		return this.followItemRange;
 	}
 
 	public float getSpellCastRangeBuffer() {

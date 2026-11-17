@@ -11,6 +11,7 @@ public final class GameResult {
 	public static final int FORMAT = 2;
 	/** The engine did not tell the campaign (a game that did not get as far, a result of an older format). */
 	public static final int CAMPAIGN_UNKNOWN = -2;
+	private static final int MAX_REASON = 160;
 
 	/**
 	 * victory, defeat, tie, quit (left the game to the menu), exit (closed the program), error (not started) or crash
@@ -23,6 +24,8 @@ public final class GameResult {
 	public String map;
 	public String profile;
 	public String loadFailure;
+	/** Why a game that did not start could not be loaded, as {@link #describeFailure} words it; null when not told. */
+	public String reason;
 	/** The race the player played, a random one as it was drawn; 0 when the engine did not tell. */
 	public int race;
 	public long finished;
@@ -54,6 +57,24 @@ public final class GameResult {
 		return "error".equals(this.result) || (this.loadFailure != null);
 	}
 
+	/** The line a failed start is shown with: the map, and under it the reason when the engine gave one. */
+	public String failureText() {
+		final String shown = this.map == null ? "" : this.map;
+		return (this.reason == null) || this.reason.isEmpty() ? shown : shown + "\n" + this.reason;
+	}
+
+	/** The deepest cause of an exception in one short line, such as "NoSuchFileException: Data/data/data.003". */
+	public static String describeFailure(final Throwable failure) {
+		Throwable cause = failure;
+		while ((cause.getCause() != null) && (cause.getCause() != cause)) {
+			cause = cause.getCause();
+		}
+		final String message = cause.getMessage();
+		final String text = cause.getClass().getSimpleName()
+				+ ((message == null) || message.isEmpty() ? "" : ": " + message);
+		return text.length() > MAX_REASON ? text.substring(0, MAX_REASON - 3) + "..." : text;
+	}
+
 	public boolean crashed() {
 		return "crash".equals(this.result);
 	}
@@ -81,6 +102,9 @@ public final class GameResult {
 		json.addChild("profile", text(this.profile));
 		if (this.loadFailure != null) {
 			json.addChild("loadFailure", new JsonValue(this.loadFailure));
+		}
+		if ((this.reason != null) && !this.reason.isEmpty()) {
+			json.addChild("reason", new JsonValue(this.reason));
 		}
 		if (this.race > 0) {
 			json.addChild("race", new JsonValue(this.race));
@@ -131,6 +155,7 @@ public final class GameResult {
 		result.map = json.getString("map", "");
 		result.profile = json.getString("profile", "");
 		result.loadFailure = json.has("loadFailure") ? json.getString("loadFailure", null) : null;
+		result.reason = json.has("reason") ? json.getString("reason", null) : null;
 		result.race = json.getInt("race", 0);
 		result.finished = json.getLong("finished", 0);
 		result.mapName = json.getString("mapName", "");

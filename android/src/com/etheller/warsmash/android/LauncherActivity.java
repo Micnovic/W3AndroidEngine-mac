@@ -44,6 +44,7 @@ import android.widget.TextView;
 import com.badlogic.gdx.backends.android.AndroidApplication;
 import com.badlogic.gdx.backends.android.AndroidApplicationConfiguration;
 import com.badlogic.gdx.math.Rectangle;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.GlueBackdropRenderer;
 import com.etheller.warsmash.launcher.CampaignChoice;
 import com.etheller.warsmash.launcher.DataFolderCheck;
@@ -54,6 +55,7 @@ import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.lan.LanLauncherModel;
 import net.warsmash.lan.maps.LanMapIndex;
 import com.etheller.warsmash.launcher.LauncherBoard;
+import com.etheller.warsmash.launcher.LauncherKeys;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.viewer5.FogSettings;
@@ -225,6 +227,8 @@ public class LauncherActivity extends AndroidApplication {
 	@Override
 	protected void onCreate(final Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		CCampaignProgress.setAllMissionsOpen(
+				(getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 		BackCallbacks.register(this, this::goBack);
 		if (AndroidLauncher.showRunningGame(this)) {
 			finish();
@@ -263,7 +267,7 @@ public class LauncherActivity extends AndroidApplication {
 		addSceneView();
 		setContentView(outer);
 		this.dialogs.trackOnscreenKeyboard();
-		this.catalog = new GameCatalog(this, this.ini, GameCatalog.dataKey(this.ini));
+		this.catalog = newCatalog();
 		takeReturn();
 		if (this.cache.isCurrent()) {
 			showAfterPrep();
@@ -310,6 +314,13 @@ public class LauncherActivity extends AndroidApplication {
 		GlContextWatch.dropContextOnPauseIfAsked(this, this.sceneView);
 		this.root.addView(this.sceneView, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
 				ViewGroup.LayoutParams.MATCH_PARENT));
+	}
+
+	/** The catalog of the game data, whose campaigns follow the edition the launcher is in. */
+	private GameCatalog newCatalog() {
+		final GameCatalog opened = new GameCatalog(this, this.ini, GameCatalog.dataKey(this.ini));
+		opened.setEdition(this.preferences.getString(KEY_EDITION, LauncherKeys.EDITION_TFT));
+		return opened;
 	}
 
 	/**
@@ -380,7 +391,7 @@ public class LauncherActivity extends AndroidApplication {
 					this.loadPage.loadFailureText(result.loadFailure));
 		}
 		else if ((result != null) && result.failed()) {
-			this.dialogs.showMessage(getString(R.string.game_not_started), result.map);
+			this.dialogs.showMessage(getString(R.string.game_not_started), result.failureText());
 		}
 	}
 
@@ -775,6 +786,7 @@ public class LauncherActivity extends AndroidApplication {
 		this.launching = true;
 		stopMusic();
 		request.profile = this.profiles.current();
+		request.edition = this.preferences.getString(KEY_EDITION, LauncherKeys.EDITION_TFT);
 		request.skin = chosenSkin();
 		if (SkinArt.REFORGED_SKIN.equals(request.skin)) {
 			request.portrait = this.profiles.portrait(request.profile) + 1;
@@ -836,7 +848,7 @@ public class LauncherActivity extends AndroidApplication {
 		}
 		this.lanChecksumAsked = false;
 		final GameCatalog old = this.catalog;
-		this.catalog = new GameCatalog(this, this.ini, GameCatalog.dataKey(this.ini));
+		this.catalog = newCatalog();
 		if (old != null) {
 			old.close();
 		}

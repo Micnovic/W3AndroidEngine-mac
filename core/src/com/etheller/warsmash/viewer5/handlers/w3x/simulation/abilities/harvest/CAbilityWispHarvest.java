@@ -167,10 +167,6 @@ public class CAbilityWispHarvest extends AbstractGenericSingleIconActiveAbility 
 		return CTimer.wholeSteps(duration + 0.5f);
 	}
 
-	public float getPeriodicIntervalLength() {
-		return this.periodicIntervalLength;
-	}
-
 	public int getPeriodicIntervalLengthTicks() {
 		return this.periodicIntervalLengthTicks;
 	}

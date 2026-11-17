@@ -578,10 +578,6 @@ public abstract class CAbilityAbilityBuilderGenericActive extends AbstractGeneri
 		return castTime;
 	}
 
-	public void setCastTime(float castTime) {
-		this.castTime = castTime;
-	}
-
 	public boolean ignoreCastTime() {
 		return this.ignoreCastTime;
 	}

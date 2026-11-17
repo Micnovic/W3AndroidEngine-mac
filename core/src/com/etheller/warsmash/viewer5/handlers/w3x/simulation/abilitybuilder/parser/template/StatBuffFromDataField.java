@@ -34,38 +34,20 @@ public class StatBuffFromDataField {
 	public DataFieldLetter getPercentageBooleanField() {
 		return percentageBooleanField;
 	}
-	public void setPercentageBooleanField(DataFieldLetter percentageBooleanField) {
-		this.percentageBooleanField = percentageBooleanField;
-	}
 	public DataFieldLetter getFlatBooleanField() {
 		return flatBooleanField;
-	}
-	public void setFlatBooleanField(DataFieldLetter flatBooleanField) {
-		this.flatBooleanField = flatBooleanField;
 	}
 	public DataFieldLetter getDataField() {
 		return dataField;
 	}
-	public void setDataField(DataFieldLetter dataField) {
-		this.dataField = dataField;
-	}
 	public Boolean isPercentageOverride() {
 		return percentageOverride;
-	}
-	public void setPercentageOverride(Boolean percentageOverride) {
-		this.percentageOverride = percentageOverride;
 	}
 	public DataFieldLetter getTargetMeleeField() {
 		return targetMeleeField;
 	}
-	public void setTargetMeleeField(DataFieldLetter targetMeleeField) {
-		this.targetMeleeField = targetMeleeField;
-	}
 	public DataFieldLetter getTargetRangeField() {
 		return targetRangeField;
-	}
-	public void setTargetRangeField(DataFieldLetter targetRangeField) {
-		this.targetRangeField = targetRangeField;
 	}
 	public NonStackingStatBuff getBuff() {
 		return buff;

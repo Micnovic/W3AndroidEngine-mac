@@ -55,14 +55,6 @@ public class RecordingAbilityTargetCheckReceiver<TARGET_TYPE> implements Ability
 		return this.target;
 	}
 
-	public boolean isNotActive() {
-		return this.notActive;
-	}
-
-	public boolean isWrongId() {
-		return this.wrongId;
-	}
-
 	public String getCommandStringErrorKey() {
 		return this.commandStringErrorKey;
 	}

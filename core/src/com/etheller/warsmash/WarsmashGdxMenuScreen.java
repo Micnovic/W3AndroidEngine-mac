@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.util.EnumSet;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.Gdx;
@@ -43,6 +44,7 @@ import com.etheller.warsmash.util.WarsmashUtils;
 import com.etheller.warsmash.viewer5.Camera;
 import com.etheller.warsmash.viewer5.CanvasProvider;
 import com.etheller.warsmash.viewer5.FogSettings;
+import com.etheller.warsmash.viewer5.FogStyle;
 import com.etheller.warsmash.viewer5.Model;
 import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.ModelViewer;
@@ -60,6 +62,7 @@ import com.etheller.warsmash.viewer5.handlers.mdx.Sequence;
 import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.SecondaryTag;
+import com.etheller.warsmash.viewer5.handlers.w3x.ModelCinematic;
 import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.MenuUI;
@@ -67,6 +70,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.MenuUI;
 public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleModelScreen, SliderHost {
 	private static final String MAPS_DOWNLOAD_DEFAULT = "Maps/Download";
 	private static final boolean ENABLE_AUDIO = true;
+	private static final PathSolver DIRECT_PATHS = (src, solverParams) -> new SolvedPath(src,
+			src.substring(src.lastIndexOf('.')), true);
 	private DataSource codebase;
 	/** Game data the caller opened and closes; the menu and its maps read it instead of opening their own. */
 	private DataSource gameData;
@@ -105,8 +110,16 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 	private String startupMap;
 	private String startupSlots;
 	private String startupProfile;
+	private String campaignEdition;
 	private boolean launcherMode;
 	private boolean endsAtCampaignVictory;
+	/** The model cinematic of a campaign mission that is no map, while it plays in place of the menu; else null. */
+	private volatile ModelCinematic missionCinematic;
+	private String missionPath;
+	private int missionCampaign;
+	private String missionName;
+	private String missionDifficulty;
+	private float missionSeconds;
 	/** The menu shows the startup map's own loading screen while the rest of it is built. */
 	private boolean previewing;
 	private boolean previewTried;
@@ -331,6 +344,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		// The maps read the data the menu has open; the menu closes it, a finished map's close leaves it.
 		this.menuUI.setGameData(new BorrowedDataSource(this.codebase));
 		this.menuUI.setStartupProfile(this.startupProfile);
+		this.menuUI.setCampaignEdition(this.campaignEdition);
 		this.menuUI.setMapLoadFailureListener(this::mapLoadFailed);
 		this.menuUI.setReforgedLoadingScreens(this.reforgedLoadingScreens);
 		this.menuUI.setReforgedPortrait(this.reforgedPortrait);
@@ -396,7 +410,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 		int animIndex = 0;
 		for (final Sequence s : model2.getSequences()) {
-			if (s.getName().toLowerCase().startsWith("stand work")) {
+			if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 				animIndex = model2.getSequences().indexOf(s);
 			}
 		}
@@ -419,7 +433,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 		int animIndex = 0;
 		for (final Sequence s : model2.getSequences()) {
-			if (s.getName().toLowerCase().startsWith(animName)) {
+			if (s.getName().toLowerCase(Locale.ROOT).startsWith(animName)) {
 				animIndex = model2.getSequences().indexOf(s);
 				break;
 			}
@@ -509,7 +523,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 			int animIndex = i % acolyteModel.getSequences().size();
 			for (final Sequence s : acolyteModel.getSequences()) {
-				if (s.getName().toLowerCase().startsWith("stand work")) {
+				if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 					animIndex = acolyteModel.getSequences().indexOf(s);
 				}
 			}
@@ -573,7 +587,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 			int animIndex = i % acolyteModel.getSequences().size();
 			for (final Sequence s : acolyteModel.getSequences()) {
-				if (s.getName().toLowerCase().startsWith("stand work")) {
+				if (s.getName().toLowerCase(Locale.ROOT).startsWith("stand work")) {
 					animIndex = acolyteModel.getSequences().indexOf(s);
 				}
 			}
@@ -683,6 +697,10 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 		final float deltaTime = Gdx.graphics.getDeltaTime();
 		Gdx.gl30.glBindVertexArray(WarsmashGdxGame.VAO);
+		if (this.missionCinematic != null) {
+			renderModelMission(deltaTime);
+			return;
+		}
 		this.cameraManager.updateCamera();
 		this.menuUI.update(deltaTime);
 		if ((this.mainInstance != null) && this.mainInstance.sequenceEnded
@@ -697,6 +715,82 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 		Gdx.gl30.glActiveTexture(GL30.GL_TEXTURE0);
 		GammaOverlay.render(this.batch);
+	}
+
+	@Override
+	public boolean playModelMission(final String path, final int campaign, final String missionName,
+			final String difficulty) {
+		if (!this.loaded || (this.missionCinematic != null)) {
+			return false;
+		}
+		final MdxModel model = ModelCinematic.load(this.viewer.dataSource, this.viewer, DIRECT_PATHS, null, path);
+		if (model == null) {
+			return false;
+		}
+		// The menu's background goes, and with it the glue interface, for the length of the cinematic.
+		setModel(null, null);
+		this.scene.fogSettings.style = FogStyle.NONE;
+		this.menuUI.hide();
+		this.uiScene.show = false;
+		this.missionCinematic = ModelCinematic.playOnScene(this.scene, model);
+		this.missionPath = path;
+		this.missionCampaign = campaign;
+		this.missionName = missionName;
+		this.missionDifficulty = difficulty;
+		this.missionSeconds = 0;
+		return true;
+	}
+
+	public boolean isPlayingModelMission() {
+		return this.missionCinematic != null;
+	}
+
+	/** Skips the model cinematic of a campaign mission, which then ends as played. */
+	public boolean skipModelMission() {
+		if (this.missionCinematic == null) {
+			return false;
+		}
+		this.missionCinematic.skip();
+		return true;
+	}
+
+	private void renderModelMission(final float deltaTime) {
+		this.missionSeconds += deltaTime;
+		if (this.missionCinematic.isDone()) {
+			endModelMission();
+			return;
+		}
+		this.missionCinematic.placeWorldCamera();
+		this.viewer.updateAndRender();
+
+		WarsmashGdxGame.leaveViewerState(this.viewer.webGL);
+
+		Gdx.gl30.glActiveTexture(GL30.GL_TEXTURE0);
+	}
+
+	/**
+	 * The cinematic has played or was skipped: the mission is won. A launcher is told, as it is of a map's end; the
+	 * engine's own menu comes back to its campaign screens.
+	 */
+	private void endModelMission() {
+		this.missionCinematic.dispose();
+		this.missionCinematic = null;
+		recordVictory(this.missionPath, this.missionDifficulty);
+		final GameEndListener listener = this.gameEndListener;
+		if ((listener != null) && this.endsAtCampaignVictory) {
+			final GameResult ended = new GameResult();
+			ended.result = "victory";
+			ended.campaign = this.missionCampaign;
+			ended.map = this.missionPath;
+			ended.mapName = this.missionName == null ? "" : this.missionName;
+			ended.seconds = (int) this.missionSeconds;
+			ended.difficulty = this.missionDifficulty == null ? "" : this.missionDifficulty;
+			listener.gameEnded(ended);
+			return;
+		}
+		this.uiScene.show = true;
+		this.menuUI.show();
+		this.menuUI.onReturnFromGame(false);
 	}
 
 	@Override
@@ -882,6 +976,13 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean keyDown(final int keycode) {
+		if (this.missionCinematic != null) {
+			if ((keycode == Input.Keys.ESCAPE) || (keycode == Input.Keys.BACK) || (keycode == Input.Keys.SPACE)
+					|| (keycode == Input.Keys.ENTER)) {
+				skipModelMission();
+			}
+			return true;
+		}
 		if (keycode == Input.Keys.ENTER) {
 			if (Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT) || Gdx.input.isKeyPressed(Input.Keys.ALT_RIGHT)) {
 				WarsmashUtils.toggleFullScreen();
@@ -893,16 +994,26 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean keyUp(final int keycode) {
+		if (this.missionCinematic != null) {
+			return true;
+		}
 		return this.menuUI.keyUp(keycode);
 	}
 
 	@Override
 	public boolean keyTyped(final char character) {
+		if (this.missionCinematic != null) {
+			return true;
+		}
 		return this.menuUI.keyTyped(character);
 	}
 
 	@Override
 	public boolean touchDown(final int screenX, final int screenY, final int pointer, final int button) {
+		if (this.missionCinematic != null) {
+			skipModelMission();
+			return false;
+		}
 		final float worldScreenY = this.game.getHeight() - screenY;
 
 		if (this.menuUI.touchDown(screenX, screenY, worldScreenY, button)) {
@@ -913,6 +1024,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean touchUp(final int screenX, final int screenY, final int pointer, final int button) {
+		if (this.missionCinematic != null) {
+			return false;
+		}
 		final float worldScreenY = this.game.getHeight() - screenY;
 
 		if (this.menuUI.touchUp(screenX, screenY, worldScreenY, button)) {
@@ -923,6 +1037,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean touchDragged(final int screenX, final int screenY, final int pointer) {
+		if (this.missionCinematic != null) {
+			return false;
+		}
 		final float worldScreenY = this.game.getHeight() - screenY;
 		if (this.menuUI.touchDragged(screenX, screenY, worldScreenY, pointer)) {
 			return false;
@@ -932,6 +1049,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean mouseMoved(final int screenX, final int screenY) {
+		if (this.missionCinematic != null) {
+			return false;
+		}
 		final float worldScreenY = this.game.getHeight() - screenY;
 		if (this.menuUI.mouseMoved(screenX, screenY, worldScreenY)) {
 			return false;
@@ -941,6 +1061,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean scrolled(final float amountX, final float amountY) {
+		if (this.missionCinematic != null) {
+			return false;
+		}
 		return (this.menuUI != null) && this.menuUI.scrolled(Gdx.input.getX(), Gdx.input.getY(), amountY);
 	}
 
@@ -1148,6 +1271,11 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		this.startupProfile = profile;
 	}
 
+	/** See {@link MenuUI#setCampaignEdition(String)}; must be set before the menu is built. */
+	public void setCampaignEdition(final String campaignEdition) {
+		this.campaignEdition = campaignEdition;
+	}
+
 	/** See {@link MenuUI#setLauncherMode(boolean)}; must be set before the menu is built. */
 	public void setLauncherMode(final boolean launcherMode) {
 		this.launcherMode = launcherMode;
@@ -1216,6 +1344,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		final GameResult failed = new GameResult();
 		failed.result = "error";
 		failed.map = mapFile;
+		failed.reason = this.menuUI.mapLoadFailureReason();
 		this.gameEndListener.gameEnded(failed);
 		return true;
 	}

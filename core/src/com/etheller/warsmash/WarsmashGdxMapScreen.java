@@ -1,5 +1,6 @@
 package com.etheller.warsmash;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -41,6 +42,7 @@ import com.etheller.warsmash.datasources.CompoundDataSourceDescriptor;
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.datasources.DataSourceDescriptor;
 import com.etheller.warsmash.datasources.FolderDataSourceDescriptor;
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.datasources.MapsFolderDataSourceDescriptor;
 import com.etheller.warsmash.datasources.MpqDataSourceDescriptor;
 import com.etheller.warsmash.datasources.SubdirDataSource;
@@ -390,6 +392,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 	public static void parseDataSourceDescriptors(final DataTable warsmashIni,
 			final List<DataSourceDescriptor> dataSourcesList, final List<String> allCascPrefixes) {
 		final Element dataSourcesConfig = warsmashIni.get("DataSources");
+		final String language = GameLanguage.configured(warsmashIni);
 		for (int i = 0; i < dataSourcesConfig.size(); i++) {
 			final String numberText = (i < 10 ? "0" : "") + i;
 			final String type = dataSourcesConfig.getField("Type" + numberText);
@@ -397,6 +400,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			switch (type) {
 			case "Folder": {
 				dataSourcesList.add(new FolderDataSourceDescriptor(path));
+				addLanguageFolder(dataSourcesList, path, language);
 				break;
 			}
 			case "Maps": {
@@ -411,7 +415,8 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 				final String prefixes = dataSourcesConfig.getField("Prefixes" + numberText);
 				final String product = dataSourcesConfig.getField("Product" + numberText);
 				final boolean oldFormat = dataSourcesConfig.getFieldValue("OldFormat" + numberText) == 1;
-				final List<String> parsedPrefixes = Arrays.asList(prefixes.split(","));
+				final List<String> parsedPrefixes = new ArrayList<>(
+						GameLanguage.prefixes(Arrays.asList(prefixes.split(",")), language));
 				allCascPrefixes.addAll(parsedPrefixes);
 				dataSourcesList.add(new CascDataSourceDescriptor(path, parsedPrefixes, product, oldFormat));
 				break;
@@ -421,6 +426,15 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			default:
 				throw new RuntimeException("Unknown data source type: " + type);
 			}
+		}
+	}
+
+	/** The language folder of the chosen language over the folder of the data's own, when the folder has one. */
+	private static void addLanguageFolder(final List<DataSourceDescriptor> sources, final String path,
+			final String language) {
+		final String sibling = GameLanguage.siblingFolder(path, language);
+		if ((sibling != null) && new File(sibling).isDirectory()) {
+			sources.add(new FolderDataSourceDescriptor(sibling));
 		}
 	}
 

@@ -1100,10 +1100,6 @@ public class CUnit extends CWidget {
 		return this.classifications.add(unitClassification);
 	}
 
-	public boolean removeClassification(final CUnitClassification unitClassification) {
-		return this.classifications.remove(unitClassification);
-	}
-
 	public float getDefense() {
 		return this.defenseState.currentDefense;
 	}
@@ -2165,11 +2161,17 @@ public class CUnit extends CWidget {
 	}
 
 	public void onPickUpItem(final CSimulation game, final CItem item, final boolean playUserUISounds) {
+		onPickUpItem(game, item, playUserUISounds, null);
+	}
+
+	/** absorbingItem is the held item that took in all the charges of the picked up one, or null. */
+	public void onPickUpItem(final CSimulation game, final CItem item, final boolean playUserUISounds,
+			final CItem absorbingItem) {
 		this.stateNotifier.inventoryChanged();
 		if (playUserUISounds) {
 			game.unitPickUpItemEvent(this, item);
 		}
-		firePickUpItemEvents(game, item);
+		CUnitEvents.firePickUpItemEvents(this, game, item, absorbingItem);
 	}
 
 	public void onDropItem(final CSimulation game, final CItem droppedItem, final boolean playUserUISounds) {
@@ -2259,10 +2261,6 @@ public class CUnit extends CWidget {
 		public StateListenerUpdate(final CUnitStateListener listener, final StateListenerUpdateType updateType) {
 			this.listener = listener;
 			this.updateType = updateType;
-		}
-
-		public CUnitStateListener getListener() {
-			return this.listener;
 		}
 
 		public StateListenerUpdateType getUpdateType() {
@@ -2464,6 +2462,11 @@ public class CUnit extends CWidget {
 		CUnitEvents.firePickUpItemEvents(this, game, item);
 	}
 
+	public void fireStackItemEvents(final CSimulation game, final CItem source, final CItem target,
+			final int targetPreviousCharges) {
+		CUnitEvents.fireStackItemEvents(this, game, source, target, targetPreviousCharges);
+	}
+
 	public void fireUseItemEvents(final CSimulation game, final CItem item) {
 		CUnitEvents.fireUseItemEvents(this, game, item);
 	}
@@ -2630,10 +2633,6 @@ public class CUnit extends CWidget {
 		}
 	}
 
-	public boolean isUltravision() {
-		return this.visibility.ultravisionSources > 0;
-	}
-
 	public EnumSet<CTargetType> getTargetedAs() {
 		return this.targetedAs;
 	}
@@ -2678,10 +2677,6 @@ public class CUnit extends CWidget {
 		if (list != null) {
 			list.remove(listener);
 		}
-	}
-
-	public List<CUnitBehaviorChangeListener> getBehaviorChangeListeners() {
-		return this.behaviorChangeListeners;
 	}
 
 	public void addBehaviorChangeListener(final CUnitBehaviorChangeListener listener) {
@@ -2851,10 +2846,6 @@ public class CUnit extends CWidget {
 		return this.magicImmune;
 	}
 
-	public void setLimitedMagicImmune(final boolean limitedMagicImmune) {
-		this.limitedMagicImmune = limitedMagicImmune;
-	}
-
 	public boolean isLimitedMagicImmune() {
 		return this.limitedMagicImmune;
 	}
@@ -2912,6 +2903,26 @@ public class CUnit extends CWidget {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * True while a detector or detecting fog modifier (Far Sight) covers an invisible unit's place for the player.
+	 * Counts the invisibility a paused Shade still has for the detection check, though it no longer hides it from
+	 * sight, and the invisibility of a unit whose fade is running (Permanent Invisibility restarted by an attack).
+	 */
+	public boolean isDetectedThroughFog(final CSimulation simulation, final int toPlayerIndex) {
+		byte levels = 0;
+		for (int i = 0, n = this.stateModBuffs.size(); i < n; i++) {
+			final StateModBuff buff = this.stateModBuffs.get(i);
+			if ((buff.getBuffType() == StateModBuffType.INVISIBLE) && (buff.getValue() != 0)) {
+				levels |= (byte) buff.getValue();
+			}
+		}
+		if ((levels == 0) && (this.fadeTimer != null) && this.fadeTimer.isRunning()) {
+			levels = 1;
+		}
+		return (levels != 0) && simulation.getPlayer(toPlayerIndex).getFogOfWar().isDetecting(simulation,
+				simulation.getPathingGrid(), getX(), getY(), levels);
 	}
 
 	public boolean hasUniqueFlag(String flag) {

@@ -12,6 +12,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -151,6 +152,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	final MeleeUITeamResources teamResources = new MeleeUITeamResources(this);
 	final MeleeUIMinimapPanel minimapPanel = new MeleeUIMinimapPanel(this);
 	final MeleeUICinematics cinematics = new MeleeUICinematics(this);
+	private PortraitLipSync lipSync;
+	final MeleeUIOriginFrames originFrames = new MeleeUIOriginFrames(this);
+	FrameEventSink frameEvents;
 	final DataSource dataSource;
 	final ExtendViewport uiViewport;
 	final Scene uiScene;
@@ -608,7 +612,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				this.lanOverlay = new LanOverlay(this.rootFrame, this.uiViewport, play, new LanOverlay.Host() {
 					@Override
 					public void showLine(final String line) {
-						MeleeUI.this.messages.showGameMessage(line, CHAT_MESSAGE_SECONDS);
+						MeleeUI.this.messages.showChatMessage(line, CHAT_MESSAGE_SECONDS);
 					}
 
 					@Override
@@ -636,6 +640,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.meleeUIMinimap.setTerrainVisible(GameOptions.get().isMinimapTerrain());
 		this.meleeUIMinimap.setAltIconSource(this.war3MapViewer::getAltMinimapIcon,
 				(path) -> ImageUtils.getAnyExtensionTexture(this.war3MapViewer.mapMpq, path));
+		this.meleeUIMinimap.setScriptIconSource(this.war3MapViewer::getScriptMinimapIcons);
 
 		this.meleeUIAbilityActivationReceiver = new MeleeUIAbilityActivationReceiver(
 				this.war3MapViewer.getLocalPlayerIndex(), this.messages::getUiSoundForError);
@@ -722,6 +727,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void update(final float deltaTime) {
+		this.war3MapViewer.scriptUiState.flushFrames();
+		this.originFrames.update();
 		this.menus.updateAlliesButton();
 		if (this.replayPanel != null) {
 			this.replayPanel.update(deltaTime);
@@ -1011,6 +1018,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 	}
 
+	private static final float USER_UI_DISABLED_WORLD_DIM = 0.64f;
+
 	@Override
 	public void render(final SpriteBatch batch, final GlyphLayout glyphLayout) {
 		// The dialogs are drawn by renderModal, over the minimap and the interface's 3D models drawn after this.
@@ -1021,7 +1030,23 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.cineFilter.render(batch, this.rootFrame,
 				(this.uiViewport.getMinWorldWidth() - this.uiViewport.getWorldWidth()) / 2, 0, this.uiViewport.getWorldWidth(),
 				this.uiViewport.getWorldHeight());
+		if (this.cinematics.isUserUIDisabledDim()) {
+			final Texture black = this.rootFrame.loadTexture("Textures\\Black32.blp");
+			if (black != null) {
+				batch.setColor(1, 1, 1, USER_UI_DISABLED_WORLD_DIM);
+				batch.draw(black,
+						(this.uiViewport.getMinWorldWidth() - this.uiViewport.getWorldWidth()) / 2, 0,
+						this.uiViewport.getWorldWidth(), this.uiViewport.getWorldHeight());
+				batch.setColor(1, 1, 1, 1);
+			}
+		}
 		this.rootFrame.render(batch, this.rootFrame.getFont20(), glyphLayout);
+		if (this.cinematics.isUserUIDisabledDim()) {
+			final Texture black = this.rootFrame.loadTexture("Textures\\Black32.blp");
+			if (black != null) {
+				this.groups.renderDisabledDim(batch, black, USER_UI_DISABLED_WORLD_DIM);
+			}
+		}
 		for (int i = 0; i < this.modalFrames.length; i++) {
 			this.modalFrames[i].setVisible(this.modalFramesShown[i]);
 		}
@@ -1409,6 +1434,16 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	public boolean keyDown(final int keycode) {
 		sendScriptKeyEvent(keycode, true);
 		return this.input.keyDown(keycode);
+	}
+
+	@Override
+	public UIFrame getOriginFrame(final int originType, final int index) {
+		return this.originFrames.get(originType, index);
+	}
+
+	@Override
+	public void setFrameEventSink(final FrameEventSink sink) {
+		this.frameEvents = sink;
 	}
 
 	@Override
@@ -1854,7 +1889,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				for (final CScriptDialogButton button : buttons) {
 					this.messages.attachScriptDialogButton(dialog, button);
 					if (button.isQuitButton()) {
-						button.setQuitAction(this::quitMission);
+						final boolean toScoreScreen = button.isQuitToScoreScreen();
+						button.setQuitAction(toScoreScreen, () -> endGame(toScoreScreen));
 					}
 				}
 				dialog.setVisible(visible);
@@ -1892,7 +1928,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		if (dot > 0) {
 			map = map.substring(0, dot);
 		}
-		return CSaveStorage.safeName(map + " " + new SimpleDateFormat("yyyy-MM-dd HH.mm.ss").format(new Date()));
+		return CSaveStorage.safeName(map + " " + new SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.ROOT).format(new Date()));
 	}
 
 	/**
@@ -2087,6 +2123,18 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	}
 
 	@Override
+	public void dialogueSoundStarted(final String soundPath) {
+		lipSync().soundStarted(soundPath);
+	}
+
+	PortraitLipSync lipSync() {
+		if (this.lipSync == null) {
+			this.lipSync = new PortraitLipSync(this.war3MapViewer.dataSource);
+		}
+		return this.lipSync;
+	}
+
+	@Override
 	public void endCinematicScene() {
 		this.cinematics.endCinematicScene();
 	}
@@ -2138,6 +2186,10 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	}
 
 	boolean isSelectionOn(final int offBit) {
+		// BlzEnableSelections(false, ...) stops the player's click and box selection.
+		if (((offBit & (SELECT_OFF | DRAG_SELECT_OFF)) != 0) && !this.war3MapViewer.scriptUiState.isSelectionEnabled()) {
+			return false;
+		}
 		return (this.selectionOff & offBit) == 0;
 	}
 

@@ -68,7 +68,7 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 		String path;
 		path = row.getFieldAsString(UNIT_FILE, 0);
 
-		if (path.toLowerCase().endsWith(".mdl") || path.toLowerCase().endsWith(".mdx")) {
+		if (path.toLowerCase(Locale.ROOT).endsWith(".mdl") || path.toLowerCase(Locale.ROOT).endsWith(".mdx")) {
 			path = path.substring(0, path.length() - 4);
 		}
 		if ((row.readSLKTagInt("fileVerFlags") == 2) && this.dataSource.has(path + "_V1.mdx")) {
@@ -226,7 +226,7 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 	private EnumSet<SecondaryTag> parseSecondaryTags(final String requiredAnimationNamesForAttachmentsString) {
 		final EnumSet<SecondaryTag> requiredAnimationNamesForAttachments = EnumSet.noneOf(SecondaryTag.class);
 		TokenLoop: for (final String animationName : requiredAnimationNamesForAttachmentsString.split(",")) {
-			final String upperCaseToken = animationName.toUpperCase();
+			final String upperCaseToken = animationName.toUpperCase(Locale.ROOT);
 			for (final SecondaryTag secondaryTag : SecondaryTag.VALUES) {
 				if (upperCaseToken.equals(secondaryTag.name())) {
 					requiredAnimationNamesForAttachments.add(secondaryTag);

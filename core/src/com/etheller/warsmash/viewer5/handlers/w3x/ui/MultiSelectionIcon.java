@@ -37,6 +37,14 @@ public class MultiSelectionIcon extends AbstractRenderableFrame implements Click
 		this.queueIconIndexId = queueIconIndexId;
 	}
 
+	public SimpleStatusBarFrame getHpBarFrame() {
+		return this.hpBarFrame;
+	}
+
+	public SimpleStatusBarFrame getManaBarFrame() {
+		return this.manaBarFrame;
+	}
+
 	public void set(final TextureFrame iconFrame, final SimpleStatusBarFrame hpBarFrame,
 			final SimpleStatusBarFrame manaBarFrame) {
 		this.iconFrame = iconFrame;

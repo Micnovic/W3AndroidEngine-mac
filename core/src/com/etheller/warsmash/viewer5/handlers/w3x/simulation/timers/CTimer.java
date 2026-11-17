@@ -35,8 +35,18 @@ public abstract class CTimer {
 	public void resetTimeoutTime(final float timeoutTime) {
 		this.timeoutTime = timeoutTime;
 		this.segmentTime = timeoutTime;
-		this.engineFireTick = (int) Math.round(this.scheduleTime / WarsmashConstants.SIMULATION_STEP_TIME)
-				+ wholeSteps(timeoutTime);
+		if (isExactTiming()) {
+			this.engineFireTick = (int) Math.ceil(((this.scheduleTime + timeoutTime)
+					/ WarsmashConstants.SIMULATION_STEP_TIME) - 1e-3);
+		}
+		else {
+			this.engineFireTick = (int) Math.round(this.scheduleTime / WarsmashConstants.SIMULATION_STEP_TIME)
+					+ wholeSteps(timeoutTime);
+		}
+	}
+
+	public boolean hasExactTiming() {
+		return isExactTiming();
 	}
 
 	public boolean isRepeats() {

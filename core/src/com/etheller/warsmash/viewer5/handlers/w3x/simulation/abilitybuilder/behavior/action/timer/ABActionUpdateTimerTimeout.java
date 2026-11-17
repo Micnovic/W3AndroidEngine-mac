@@ -20,6 +20,10 @@ public class ABActionUpdateTimerTimeout implements ABSingleAction {
 			final int castId) {
 		CTimer theT = this.timer.callback(game, caster, localStore, castId);
 		theT.resetTimeoutTime(this.timeout.callback(game, caster, localStore, castId));
+		if (theT.isRunning() && theT.hasExactTiming()) {
+			// the queue is ordered by fire tick, which just changed
+			game.registerTimer(theT);
+		}
 	}
 
 	@Override

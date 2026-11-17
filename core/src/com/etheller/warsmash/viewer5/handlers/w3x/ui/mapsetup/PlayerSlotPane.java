@@ -2,6 +2,7 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui.mapsetup;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.IntPredicate;
 
 import com.badlogic.gdx.utils.viewport.Viewport;
@@ -119,7 +120,7 @@ public class PlayerSlotPane {
 		final List<MenuItem> teamMenuItems = new ArrayList<>();
 		for (int team = 0; team < this.teamCount; team++) {
 			teamMenuItems.add(new MenuItem(
-					String.format(rootFrame.getTemplates().getDecoratedString("TEAM_FORMAT"), team + 1), -2));
+					String.format(Locale.ROOT, rootFrame.getTemplates().getDecoratedString("TEAM_FORMAT"), team + 1), -2));
 		}
 		this.teamMenu.setItems(uiViewport, teamMenuItems);
 	}
@@ -220,7 +221,7 @@ public class PlayerSlotPane {
 
 		final int team = player.getTeam();
 		rootFrame.setText(this.teamButtonTitle,
-				String.format(rootFrame.getTemplates().getDecoratedString("TEAM_FORMAT"), team + 1));
+				String.format(Locale.ROOT, rootFrame.getTemplates().getDecoratedString("TEAM_FORMAT"), team + 1));
 
 		final MenuFrame handicapItems = (MenuFrame) this.handicapMenu.getPopupMenuFrame();
 		final int handicapItem = Math.round((1.0f - player.getHandicap()) * 10);

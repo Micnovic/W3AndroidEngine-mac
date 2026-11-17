@@ -8,6 +8,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.etheller.warsmash.input.touch.TouchInputRouter;
+import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
@@ -41,6 +42,7 @@ final class MeleeUIMenus {
 	private SimpleButtonFrame menuButton;
 	private SimpleButtonFrame alliesButton;
 	private boolean alliesButtonAvailable = true;
+	private boolean upperBarLocked;
 	private SimpleButtonFrame chatButton;
 	private boolean savingFromMenu;
 	private Runnable closeMenuAction;
@@ -273,7 +275,14 @@ final class MeleeUIMenus {
 					@Override
 					public void closed() {
 					}
-				}, () -> this.ui.musicPlayer.optionsChanged(), this.ui.war3MapViewer.getGameData());
+				}, () -> {
+					this.ui.musicPlayer.optionsChanged();
+					// The world is redrawn at the new scale from the next frame.
+					final RenderScaleStore store = RenderScaleStore.Holder.get();
+					if (store != null) {
+						this.ui.war3MapViewer.setRenderScale(store.percent() / 100f);
+					}
+				}, this.ui.war3MapViewer.getGameData());
 		this.ui.openMenuAction = () -> this.menuButton.onClick(Input.Buttons.LEFT);
 		this.closeMenuAction = () -> returnButton.onClick(Input.Buttons.LEFT);
 		this.escMenuButtons = new GlueTextButtonFrame[] { pauseButton, saveGameButton, loadGameButton,
@@ -325,7 +334,7 @@ final class MeleeUIMenus {
 			@Override
 			public void run() {
 				MeleeUIMenus.this.ui.war3MapViewer.setGamePaused(War3MapViewer.PauseSource.MENU, false);
-				setUpperButtonsEnabled(true);
+				setUpperButtonsEnabled(!isUpperBarLocked());
 				escMenuBackdrop.setVisible(false);
 				escMenuMainPanel.setVisible(false);
 				MeleeUIMenus.this.ui.smashEscMenu.setVisible(false);
@@ -421,9 +430,19 @@ final class MeleeUIMenus {
 		}
 	}
 
+	/** With the user interface disabled the upper bar is greyed out and does not answer, like under the game menu. */
+	boolean isUpperBarLocked() {
+		return this.ui.cinematics.isUserUIDisabledDim();
+	}
+
 	void updateAlliesButton() {
+		final boolean locked = isUpperBarLocked();
+		if (locked != this.upperBarLocked) {
+			this.upperBarLocked = locked;
+			setUpperButtonsEnabled(!locked && !this.ui.smashEscMenu.isVisible());
+		}
 		final boolean available = this.ui.allianceDialog.isAvailable() && !this.ui.smashEscMenu.isVisible()
-				&& !this.ui.war3MapViewer.isReplayPlayback();
+				&& !locked && !this.ui.war3MapViewer.isReplayPlayback();
 		if (available != this.alliesButtonAvailable) {
 			this.alliesButtonAvailable = available;
 			this.alliesButton.setEnabled(available);
@@ -687,7 +706,7 @@ final class MeleeUIMenus {
 	}
 
 	private void showChatLine(final String line) {
-		this.ui.messages.showGameMessage(line, MeleeUI.CHAT_MESSAGE_SECONDS);
+		this.ui.messages.showChatMessage(line, MeleeUI.CHAT_MESSAGE_SECONDS);
 	}
 
 	void toggleQuestDialog() {

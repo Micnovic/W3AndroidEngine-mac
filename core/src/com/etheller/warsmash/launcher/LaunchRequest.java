@@ -6,6 +6,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.MenuUI;
 import com.etheller.warsmash.launcher.lan.LanLaunch;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignCatalog;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignMission;
 
 /**
  * A game the launcher starts in the engine without its menu: a campaign mission, a custom game, a saved game or a
@@ -49,6 +50,11 @@ public final class LaunchRequest {
 	public String skin;
 	/** The profile's Reforged portrait, from 1, which the Reforged loading screens show for the local player. */
 	public int portrait;
+	/**
+	 * The launcher's edition, {@link LauncherKeys#EDITION_ROC} or {@link LauncherKeys#EDITION_TFT}, whose campaign list
+	 * the campaign number belongs to; null for the engine's own game version.
+	 */
+	public String edition;
 	/** The player profile the game is played with, by its name. */
 	public String profile;
 	/** A LAN game: the lobby's game of the process's LAN session, whose map is {@link #mapFile}. */
@@ -150,9 +156,11 @@ public final class LaunchRequest {
 		// the game from a campaign's mission ends the same way, whatever this game was started as.
 		menuScreen.setEndsAtCampaignVictory(true);
 		menuScreen.setReforgedPortrait(this.portrait);
-		menuScreen.setStartupMap(this.mapFile);
+		// A model has no loading screen to show while the menu is built.
+		menuScreen.setStartupMap(CampaignMission.isModelEntry(this.mapFile) ? null : this.mapFile);
 		menuScreen.setStartupSlots(this.slots);
 		menuScreen.setStartupProfile(this.profile);
+		menuScreen.setCampaignEdition(this.edition);
 	}
 
 	/** Starts the game on the built menu; false when the engine cannot start it. */

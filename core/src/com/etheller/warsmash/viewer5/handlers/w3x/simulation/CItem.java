@@ -1,11 +1,14 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
@@ -41,6 +44,10 @@ public class CItem extends CWidget {
 	private Boolean activelyUsedOverride;
 	private Boolean useAutomaticallyOverride;
 	private Boolean includeAsRandomChoiceOverride;
+	// The abilities this one item gives its carrier, after a script added or removed one; null reads what the item
+	// type says. groundAbilities are the abilities of an item lying on the ground, made when a script asks for them.
+	private List<War3ID> abilityIds;
+	private List<CAbility> groundAbilities;
 
 	public CItem(final int handleId, final float x, final float y, final float life, final War3ID typeId,
 			final CItemType itemTypeInstance) {
@@ -72,6 +79,8 @@ public class CItem extends CWidget {
 		this.activelyUsedOverride = null;
 		this.useAutomaticallyOverride = null;
 		this.includeAsRandomChoiceOverride = null;
+		this.abilityIds = null;
+		this.groundAbilities = null;
 
 		game.updateItemModel(this);
 		if (this.containedInventory != null) {
@@ -320,6 +329,45 @@ public class CItem extends CWidget {
 
 	public void setIncludeAsRandomChoice(final boolean includeAsRandomChoice) {
 		this.includeAsRandomChoiceOverride = includeAsRandomChoice;
+	}
+
+	/** The ids of the abilities this item gives its carrier. */
+	public List<War3ID> getAbilityIds() {
+		return (this.abilityIds != null) ? this.abilityIds : this.itemType.getAbilityList();
+	}
+
+	public boolean addAbilityId(final War3ID abilityId) {
+		if (getAbilityIds().contains(abilityId)) {
+			return false;
+		}
+		if (this.abilityIds == null) {
+			this.abilityIds = new ArrayList<>(this.itemType.getAbilityList());
+		}
+		this.abilityIds.add(abilityId);
+		return true;
+	}
+
+	public boolean removeAbilityId(final War3ID abilityId) {
+		if (!getAbilityIds().contains(abilityId)) {
+			return false;
+		}
+		if (this.abilityIds == null) {
+			this.abilityIds = new ArrayList<>(this.itemType.getAbilityList());
+		}
+		this.abilityIds.remove(abilityId);
+		return true;
+	}
+
+	public List<CAbility> getGroundAbilities() {
+		return this.groundAbilities;
+	}
+
+	public void setGroundAbilities(final List<CAbility> groundAbilities) {
+		this.groundAbilities = groundAbilities;
+	}
+
+	public int getStackMax() {
+		return this.itemType.getStackMax();
 	}
 
 	public boolean isDropOnDeath() {

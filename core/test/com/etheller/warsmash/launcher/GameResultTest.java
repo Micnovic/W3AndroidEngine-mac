@@ -81,6 +81,20 @@ class GameResultTest {
 	}
 
 	@Test
+	void aFailedStartKeepsItsReasonUnderTheMap() {
+		final GameResult failed = new GameResult();
+		failed.result = "error";
+		failed.map = "Campaign\\FrozenThrone\\NightElfX01.w3x";
+		failed.reason = GameResult.describeFailure(
+				new RuntimeException("CASC parser error", new java.io.FileNotFoundException("data.003 (No such file)")));
+		final GameResult read = GameResult.fromJson(failed.toJson());
+		assertEquals("FileNotFoundException: data.003 (No such file)", read.reason);
+		assertEquals(failed.map + "\nFileNotFoundException: data.003 (No such file)", read.failureText());
+		assertNull(GameResult.fromJson("{\"result\": \"error\", \"map\": \"a.w3x\"}").reason);
+		assertEquals("a.w3x", GameResult.fromJson("{\"result\": \"error\", \"map\": \"a.w3x\"}").failureText());
+	}
+
+	@Test
 	void theFirstFormatStillReads() {
 		final GameResult read = GameResult.fromJson("{\n  \"version\": 1,\n  \"result\": \"defeat\",\n"
 				+ "  \"source\": \"campaign\",\n  \"map\": \"Maps\\\\Campaign\\\\Prologue02.w3m\",\n"

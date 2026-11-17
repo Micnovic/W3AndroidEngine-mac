@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -326,7 +327,7 @@ final class SavedScriptPositions {
 	}
 
 	private static boolean isPointer(final String fieldName) {
-		return fieldName.toLowerCase().contains("instructionp");
+		return fieldName.toLowerCase(Locale.ROOT).contains("instructionp");
 	}
 
 	/** A function a saved position or reference is in, as it was when saving. */

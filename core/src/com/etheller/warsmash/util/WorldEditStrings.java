@@ -7,12 +7,11 @@ import java.io.InputStreamReader;
 import java.lang.ref.SoftReference;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.PropertyResourceBundle;
 import java.util.ResourceBundle;
-
-import org.apache.commons.io.IOUtils;
 
 import com.etheller.warsmash.datasources.DataSource;
 
@@ -46,7 +45,7 @@ public class WorldEditStrings implements StringBundle {
 
 	private static synchronized ResourceBundle loadBundle(final DataSource dataSource, final String path) {
 		try (InputStream fis = dataSource.getResourceAsStream(path)) {
-			final byte[] content = IOUtils.toByteArray(fis);
+			final byte[] content = StreamBytes.readAll(fis);
 			final SoftReference<Loaded> reference = LOADED.get(path);
 			final Loaded known = reference == null ? null : reference.get();
 			if ((known != null) && Arrays.equals(known.content, content)) {
@@ -65,14 +64,14 @@ public class WorldEditStrings implements StringBundle {
 	@Override
 	public String getString(String string) {
 		try {
-			while (string.toUpperCase().startsWith("WESTRING")) {
+			while (string.toUpperCase(Locale.ROOT).startsWith("WESTRING")) {
 				string = internalGetString(string);
 			}
 			return string;
 		}
 		catch (final MissingResourceException exc) {
 			try {
-				return this.bundlegs.getString(string.toUpperCase());
+				return this.bundlegs.getString(string.toUpperCase(Locale.ROOT));
 			}
 			catch (final MissingResourceException exc2) {
 				return string;
@@ -82,17 +81,17 @@ public class WorldEditStrings implements StringBundle {
 
 	private String internalGetString(final String key) {
 		if (this.bundle == null) {
-			return this.bundlegs.getString(key.toUpperCase());
+			return this.bundlegs.getString(key.toUpperCase(Locale.ROOT));
 		}
 		try {
-			String string = this.bundle.getString(key.toUpperCase());
+			String string = this.bundle.getString(key.toUpperCase(Locale.ROOT));
 			if ((string.charAt(0) == '"') && (string.length() >= 2) && (string.charAt(string.length() - 1) == '"')) {
 				string = string.substring(1, string.length() - 1);
 			}
 			return string;
 		}
 		catch (final MissingResourceException exc) {
-			return this.bundlegs.getString(key.toUpperCase());
+			return this.bundlegs.getString(key.toUpperCase(Locale.ROOT));
 		}
 	}
 

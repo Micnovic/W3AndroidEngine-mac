@@ -118,9 +118,11 @@ public class CScriptDialog extends AllocatedHandle {
 		this.scriptDialogFrame.add(buttonFrame);
 		this.lastAddedComponent = buttonFrame;
 		buttonFrame.positionBounds(rootFrame, uiViewport);
-		this.scriptDialogFrame
-				.setHeight(((this.scriptDialogFrame.getAssignedHeight() + (buttonFrame.getFramePointY(FramePoint.TOP)))
-						- buttonFrame.getFramePointY(FramePoint.BOTTOM)) * 1.5f);
+		// The box is as tall as its content: from its top down to the last button, and the gap the title has above it
+		// below that.
+		final float top = this.scriptDialogFrame.getFramePointY(FramePoint.TOP);
+		final float titleInset = top - this.scriptDialogTextFrame.getFramePointY(FramePoint.TOP);
+		this.scriptDialogFrame.setHeight((top - buttonFrame.getFramePointY(FramePoint.BOTTOM)) + titleInset);
 		this.scriptDialogFrame.positionBounds(rootFrame, uiViewport);
 		scriptDialogButton.setupEvents(onPress);
 	}

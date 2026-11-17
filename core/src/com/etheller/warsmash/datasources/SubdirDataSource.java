@@ -19,6 +19,12 @@ public class SubdirDataSource implements DataSource {
 	}
 
 	@Override
+	public DataSource graphicsIndependent() {
+		final DataSource inner = this.dataSource.graphicsIndependent();
+		return inner == this.dataSource ? this : new SubdirDataSource(inner, this.subdir);
+	}
+
+	@Override
 	public File getFile(final String filepath) throws IOException {
 		return this.dataSource.getFile(this.subdir + filepath);
 	}

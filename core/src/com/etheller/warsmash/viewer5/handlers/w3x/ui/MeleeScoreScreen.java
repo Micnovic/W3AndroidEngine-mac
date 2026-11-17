@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -488,7 +489,7 @@ public class MeleeScoreScreen {
 
 	private static String elapsedTime(final float seconds) {
 		final int total = (int) seconds;
-		return String.format("%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60);
+		return String.format(Locale.ROOT, "%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60);
 	}
 
 	private static String raceIcon(final CPlayer player) {
@@ -534,7 +535,7 @@ public class MeleeScoreScreen {
 			}
 			else {
 				this.bar = (SpriteFrame) root.createFrameByType("MODEL", "SmashScoreScreenBar" + index, parent, "", 0);
-				root.setSpriteFrameModel(this.bar, String.format(BAR_PATH, kind == 1 ? "Center" : "Bottom"));
+				root.setSpriteFrameModel(this.bar, String.format(Locale.ROOT, BAR_PATH, kind == 1 ? "Center" : "Bottom"));
 				this.bar.addSetPoint(new SetPoint(FramePoint.TOPLEFT, previousBar, FramePoint.BOTTOMLEFT, 0, 0));
 				parent.add(this.bar);
 			}

@@ -24,7 +24,8 @@ final class MapViewerBlight {
 		// Measured on the original game: blight is set on the terrain corners (every 128) around the corner nearest
 		// to the point (halves rounded away from zero), with the radius rounded to whole corners and a corner counted
 		// when it is within that many corners plus a little; a 128 tile is blighted, for building and blight checks
-		// too, when any of its four corners is.
+		// too, when any of its four corners is. A change reaches all four tiles round each changed corner, so clearing
+		// a corner clears them even where a neighbouring corner stays blighted.
 		final int cornerRadius = getBlightCornerRadius(radius);
 		final float cornerReach = cornerRadius + 0.35f;
 		final float centerX = roundHalfAwayFromZero(whichLocationX / 128f) * 128f;
@@ -81,9 +82,7 @@ final class MapViewerBlight {
 				for (int b = -1; b <= 0; b++) {
 					final float tileX = cornerX + (a * 128f);
 					final float tileY = cornerY + (b * 128f);
-					final boolean tileBlighted = blighted || isCornerBlighted(viewer, tileX, tileY)
-							|| isCornerBlighted(viewer, tileX + 128f, tileY) || isCornerBlighted(viewer, tileX, tileY + 128f)
-							|| isCornerBlighted(viewer, tileX + 128f, tileY + 128f);
+					final boolean tileBlighted = blighted;
 					for (float x = tileX + 16f; x < (tileX + 128f); x += 32f) {
 						for (float y = tileY + 16f; y < (tileY + 128f); y += 32f) {
 							if (pathingGrid.contains(x, y)) {

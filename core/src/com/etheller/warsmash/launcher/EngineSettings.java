@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.input.touch.ControlScheme;
 import com.etheller.warsmash.input.touch.PenButton;
@@ -25,13 +26,14 @@ import com.etheller.warsmash.input.touch.TouchStyle;
 /**
  * The engine's own settings as the launcher's Options page changes them, kept where the engine reads them: the Options
  * menu values in Options.dat of the current profile (the file and format of GameOptions, below Gdx.files.local), and
- * the touch thresholds and the in-game graphics in the [Touch] and [Graphics] sections of warsmash.ini, and the
- * player's content folder in [CustomContent].
+ * the touch thresholds and the in-game graphics in the [Touch] and [Graphics] sections of warsmash.ini, the game
+ * language in [Language] and the player's content folder in [CustomContent].
  */
 public class EngineSettings {
 	private static final String TOUCH = "Touch";
 	/** The sections the launcher writes, which a new configuration for other game data keeps. */
-	private static final String[] OWN_SECTIONS = { TOUCH, GraphicsSettings.SECTION, CustomContent.SECTION };
+	private static final String[] OWN_SECTIONS = { TOUCH, GraphicsSettings.SECTION, CustomContent.SECTION,
+			GameLanguage.SECTION };
 
 	private final File options;
 	private final File ini;
@@ -151,6 +153,15 @@ public class EngineSettings {
 
 	public void setGraphics(final String key, final String value) {
 		setIniValue(GraphicsSettings.SECTION, key, value);
+	}
+
+	/** The game language warsmash.ini chooses, empty when it leaves the choice to the data. */
+	public String language() {
+		return GameLanguage.canonical(iniValue(GameLanguage.SECTION, GameLanguage.KEY_LOCALE, ""));
+	}
+
+	public void setLanguage(final String locale) {
+		setIniValue(GameLanguage.SECTION, GameLanguage.KEY_LOCALE, GameLanguage.canonical(locale));
 	}
 
 	/** The player's content folder, or null when none is chosen. */

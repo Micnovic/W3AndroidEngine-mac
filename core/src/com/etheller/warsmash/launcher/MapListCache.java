@@ -33,7 +33,8 @@ public final class MapListCache {
 	// 2: test maps are no longer listed, so lists kept by format 1 are made again.
 	// 3: the header also holds a fingerprint of the map files, so added, removed and changed maps are noticed.
 	// 4: maps that cannot be read in the player's own folders are kept with their reason.
-	private static final int FORMAT = 4;
+	// 5: every map also holds the issue that keeps it from being played.
+	private static final int FORMAT = 5;
 	private static final int MAP_FOLDER_DEPTH = 8;
 	private static final String SKIPPED = "!";
 
@@ -183,9 +184,9 @@ public final class MapListCache {
 				if ((parts.length == 3) && SKIPPED.equals(parts[0])) {
 					skipped.add(new Skipped(parts[1], Problem.valueOf(parts[2])));
 				}
-				else if (parts.length == 4) {
+				else if (parts.length == 5) {
 					entries.add(new GameCatalog.MapEntry(parts[0], Integer.parseInt(parts[1]), parts[2],
-							"1".equals(parts[3])));
+							"1".equals(parts[3]), MapIssue.valueOf(parts[4])));
 				}
 			}
 			return new Listing(entries, skipped);
@@ -203,7 +204,7 @@ public final class MapListCache {
 		for (final GameCatalog.MapEntry entry : listing.maps) {
 			text.append(entry.path).append('\t').append(entry.players).append('\t')
 					.append(entry.name.replace('\t', ' ').replace('\n', ' ')).append('\t')
-					.append(entry.melee ? '1' : '0').append('\n');
+					.append(entry.melee ? '1' : '0').append('\t').append(entry.issue.name()).append('\n');
 		}
 		for (final Skipped skip : listing.skipped) {
 			text.append(SKIPPED).append('\t').append(skip.path).append('\t').append(skip.problem.name()).append('\n');
@@ -245,7 +246,8 @@ public final class MapListCache {
 				final War3MapW3i info = map.readMapInformation();
 				final WTS wts = Warcraft3MapObjectData.loadWTS(map);
 				entries.add(new GameCatalog.MapEntry(path, info.getPlayers().size(),
-						GameCatalog.trigStr(wts, info.getName()), info.hasFlag(War3MapW3iFlags.MELEE_MAP)));
+						GameCatalog.trigStr(wts, info.getName()), info.hasFlag(War3MapW3iFlags.MELEE_MAP),
+						MapIssue.of(map)));
 			}
 			catch (final IOException | RuntimeException e) {
 				// The engine's list leaves out a map it cannot read, too.

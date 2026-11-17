@@ -278,16 +278,8 @@ public abstract class CUnitAttack {
 		computeDerivedFields();
 	}
 
-	public void setDamageUpgradeAmount(final int damageUpgradeAmount) {
-		this.damageUpgradeAmount = damageUpgradeAmount;
-	}
-
 	public void setRange(final int range) {
 		this.range = range;
-	}
-
-	public void setRangeMotionBuffer(final float rangeMotionBuffer) {
-		this.rangeMotionBuffer = rangeMotionBuffer;
 	}
 
 	public void setShowUI(final boolean showUI) {
@@ -300,10 +292,6 @@ public abstract class CUnitAttack {
 
 	public void setWeaponSound(final String weaponSound) {
 		this.weaponSound = weaponSound;
-	}
-
-	public void setWeaponType(final CWeaponType weaponType) {
-		this.weaponType = weaponType;
 	}
 
 	public int getMinDamageDisplay() {
@@ -329,25 +317,13 @@ public abstract class CUnitAttack {
 		computeDerivedFields();
 	}
 
-	public float getAttackSpeedModifier() {
-		return this.attackSpeedModifier;
-	}
-
 	public void setAttackSpeedModifier(final float attackSpeedModifier) {
 		this.attackSpeedModifier = attackSpeedModifier;
 		computeDerivedFields();
 	}
 
-	public Map<String, List<NonStackingStatBuff>> getNonStackingFlatBuffs() {
-		return this.nonStackingFlatBuffs;
-	}
-
 	public void setNonStackingFlatBuffs(final Map<String, List<NonStackingStatBuff>> nonStackingFlatBuffs) {
 		this.nonStackingFlatBuffs = nonStackingFlatBuffs;
-	}
-
-	public Map<String, List<NonStackingStatBuff>> getNonStackingPctBuffs() {
-		return this.nonStackingPctBuffs;
 	}
 
 	public void setNonStackingPctBuffs(final Map<String, List<NonStackingStatBuff>> nonStackingPctBuffs) {
@@ -370,14 +346,6 @@ public abstract class CUnitAttack {
 
 	public int getPrimaryAttributePermanentDamageBonus() {
 		return this.primaryAttributePermanentDamageBonus;
-	}
-
-	public int getPrimaryAttributeTemporaryDamageBonus() {
-		return this.primaryAttributeTemporaryDamageBonus;
-	}
-
-	public int getPermanentDamageBonus() {
-		return this.permanentDamageBonus;
 	}
 
 	public int getTemporaryDamageBonus() {

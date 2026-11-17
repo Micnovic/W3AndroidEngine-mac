@@ -18,6 +18,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.queue.CAbilityReviveHero;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilitySpell;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.nightelf.warden.CAbilityBlink;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.blademaster.CAbilityMirrorImage;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
@@ -28,6 +29,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIdUtils
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderExecutor;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.BooleanAbilityActivationReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.BooleanAbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CWidgetAbilityTargetCheckReceiver;
@@ -455,6 +457,18 @@ final class OrderNatives extends CommonNatives {
 					}
 					final AbilityPointTarget whichLocation = arguments.get(2)
 							.visit(ObjectJassValueVisitor.getInstance());
+					final boolean maskedPoint = isMaskedForOwner(whichUnit, whichLocation.x, whichLocation.y);
+					// Measured on 1.29: only a Blink item is refused at a point under the black mask of its owner; other
+					// point items still walk to the point and are used there.
+					boolean refusedAtMask = false;
+					if (maskedPoint) {
+						for (final CAbility itemAbility : item.getContainedInventory().getItemAbilities(item)) {
+							refusedAtMask |= itemAbility instanceof CAbilityBlink;
+						}
+					}
+					if (refusedAtMask) {
+						return BooleanJassValue.FALSE;
+					}
 					final CPlayerUnitOrderExecutor defaultPlayerUnitOrderExecutor = this.simulation
 							.getDefaultPlayerUnitOrderExecutor(whichUnit.getPlayerIndex());
 					final BooleanAbilityActivationReceiver activationReceiver = BooleanAbilityActivationReceiver.INSTANCE;
@@ -587,6 +601,12 @@ final class OrderNatives extends CommonNatives {
 		return ability.getContainerMenuOrderId() != 0;
 	}
 
+	private boolean isMaskedForOwner(final CUnit unit, final float x, final float y) {
+		final CPlayer owner = this.simulation.getPlayer(unit.getPlayerIndex());
+		return (owner != null) && !this.simulation.isNeutralPlayer(owner.getId())
+				&& (fogState(owner, x, y) == CFogState.MASKED);
+	}
+
 	private boolean issuePointOrder(final int orderingPlayerIndex, final CUnit whichUnit, final int orderId,
 			final float x, final float y) {
 		return issuePointOrder(orderingPlayerIndex, whichUnit, orderId, x, y, false);
@@ -594,14 +614,21 @@ final class OrderNatives extends CommonNatives {
 
 	private boolean issuePointOrder(final int orderingPlayerIndex, final CUnit whichUnit, final int orderId,
 			final float x, final float y, final boolean queue) {
-		if (whichUnit.isLoaded() || CAbilityMirrorImage.isHidingCaster(whichUnit)) {
+		// Measured on 1.29: a drop order cannot be given as a point order, it needs the item (UnitDropItemPoint).
+		if (whichUnit.isLoaded() || CAbilityMirrorImage.isHidingCaster(whichUnit) || (orderId == OrderIds.dropitem)) {
 			return false;
 		}
 		final BooleanAbilityActivationReceiver activationReceiver = BooleanAbilityActivationReceiver.INSTANCE;
 		int abilityHandleId = 0;
 		AbilityPointTarget targetAsPoint = new AbilityPointTarget(x, y);
+		final boolean maskedPoint = isMaskedForOwner(whichUnit, x, y);
 		for (final CAbility ability : whichUnit.getAbilities()) {
 			if (isHeldItemAbility(whichUnit, ability) || isMenuSpell(ability)) {
+				continue;
+			}
+			// Measured on 1.29: Blink is refused at a point under the black mask of its owner; other point
+			// orders (move, attack, patrol, Flame Strike, Blizzard) are not.
+			if (maskedPoint && (ability instanceof CAbilityBlink)) {
 				continue;
 			}
 			ability.checkCanUse(this.simulation, whichUnit, orderingPlayerIndex, orderId, false, 

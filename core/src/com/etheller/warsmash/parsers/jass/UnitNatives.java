@@ -396,7 +396,8 @@ final class UnitNatives extends CommonNatives {
 					// even where the player's fog hides it.
 					return BooleanJassValue.of((whichUnit != null) && (whichPlayer != null) && !whichUnit.isDead()
 							&& (whichUnit.isRevealedTo(whichPlayer.getId()) || ((whichUnit.getInvisLevels() > 0)
-									&& whichUnit.isVisible(this.simulation, whichPlayer.getId()))));
+									&& whichUnit.isVisible(this.simulation, whichPlayer.getId()))
+									|| whichUnit.isDetectedThroughFog(this.simulation, whichPlayer.getId())));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("UnitInstantReturnResources",
 				(arguments, globalScope, triggerScope) -> {

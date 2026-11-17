@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Color;
@@ -152,7 +153,7 @@ public class MapListContainer {
 		if (!hasMapExtension(file)) {
 			return false;
 		}
-		final String lower = file.toLowerCase().replace('/', '\\');
+		final String lower = file.toLowerCase(Locale.ROOT).replace('/', '\\');
 		return (lower.endsWith(".w3x") || lower.endsWith(".w3m"))
 				&& ((!lower.contains("\\")) || lower.startsWith("maps\\")) && !isTestMap(lower);
 	}
@@ -166,7 +167,7 @@ public class MapListContainer {
 
 	/** Whether a file lies in a folder of test maps, at any depth. */
 	public static boolean isTestMap(final String file) {
-		final String[] parts = file.toLowerCase().replace('/', '\\').split("\\\\");
+		final String[] parts = file.toLowerCase(Locale.ROOT).replace('/', '\\').split("\\\\");
 		for (int i = 0; i < (parts.length - 1); i++) {
 			for (final String folder : TEST_MAP_FOLDERS) {
 				if (parts[i].equals(folder)) {

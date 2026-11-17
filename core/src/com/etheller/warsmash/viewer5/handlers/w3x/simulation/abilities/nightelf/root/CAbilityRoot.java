@@ -226,10 +226,6 @@ public class CAbilityRoot extends AbstractGenericSingleIconNoSmartActiveAbility 
 		}
 	}
 
-	public boolean isRooted() {
-		return this.rooted;
-	}
-
 	public void setRooted(final boolean rooted, final CUnit unit, final CSimulation game) {
 		final boolean rooting = !this.rooted && rooted;
 		final boolean uprooting = this.rooted && !rooted;
@@ -316,14 +312,6 @@ public class CAbilityRoot extends AbstractGenericSingleIconNoSmartActiveAbility 
 
 	public void setOffDuration(final float offDuration) {
 		this.offDuration = offDuration;
-	}
-
-	public List<CAbility> getRootedAbilities() {
-		return this.rootedAbilities;
-	}
-
-	public List<CAbility> getUprootedAbilities() {
-		return this.uprootedAbilities;
 	}
 
 	@Override

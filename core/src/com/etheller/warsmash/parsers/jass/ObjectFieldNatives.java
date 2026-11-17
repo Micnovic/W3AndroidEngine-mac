@@ -3,6 +3,7 @@ package com.etheller.warsmash.parsers.jass;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.etheller.interpreter.ast.function.ConvertedConstant;
@@ -351,7 +352,7 @@ final class ObjectFieldNatives {
 				: i.getItemType().getCooldownGroup().getValue());
 		ITEM_INT_GET.put(id("ipri"), (n, i) -> i.getItemType().getPriority());
 		ITEM_INT_GET.put(id("iarm"), (n, i) -> {
-			final int index = ITEM_ARMOR_TYPES.indexOf(String.valueOf(i.getItemType().getArmorType()).toLowerCase());
+			final int index = ITEM_ARMOR_TYPES.indexOf(String.valueOf(i.getItemType().getArmorType()).toLowerCase(Locale.ROOT));
 			return Math.max(0, index);
 		});
 		tintItemField("iclr", 0);

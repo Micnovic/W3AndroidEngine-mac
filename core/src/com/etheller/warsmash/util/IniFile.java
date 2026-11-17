@@ -3,6 +3,7 @@ package com.etheller.warsmash.util;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,7 +39,7 @@ public class IniFile {
 				final Matcher matcher = NAME_PATTERN.matcher(line);
 
 				if (matcher.matches()) {
-					final String name = matcher.group(1).trim().toLowerCase();
+					final String name = matcher.group(1).trim().toLowerCase(Locale.ROOT);
 
 					section = this.sections.get(name);
 
@@ -51,7 +52,7 @@ public class IniFile {
 				else {
 					final Matcher dataMatcher = DATA_PATTERN.matcher(line);
 					if (dataMatcher.matches()) {
-						section.put(dataMatcher.group(1).toLowerCase(), dataMatcher.group(2));
+						section.put(dataMatcher.group(1).toLowerCase(Locale.ROOT), dataMatcher.group(2));
 					}
 				}
 			}
@@ -79,6 +80,6 @@ public class IniFile {
 	}
 
 	public Map<String, String> getSection(final String name) {
-		return this.sections.get(name.toLowerCase());
+		return this.sections.get(name.toLowerCase(Locale.ROOT));
 	}
 }

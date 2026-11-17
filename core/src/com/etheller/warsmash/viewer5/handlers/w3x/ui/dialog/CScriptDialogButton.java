@@ -18,6 +18,7 @@ public class CScriptDialogButton extends AllocatedHandle {
 	private String text;
 	private int hotkey;
 	private boolean quitButton;
+	private boolean quitToScoreScreen;
 	private final List<Trigger> eventTriggers = new ArrayList<>();
 	private Runnable afterClick;
 
@@ -45,6 +46,11 @@ public class CScriptDialogButton extends AllocatedHandle {
 
 	public boolean isQuitButton() {
 		return this.quitButton;
+	}
+
+	/** Whether the quit button leaves to the score screen; a saved game keeps it to give the loaded button the same exit. */
+	public boolean isQuitToScoreScreen() {
+		return this.quitToScoreScreen;
 	}
 
 	public GlueTextButtonFrame getButtonFrame() {
@@ -76,8 +82,9 @@ public class CScriptDialogButton extends AllocatedHandle {
 	/**
 	 * Runs after the button's triggers are queued, as a quit button (DialogAddQuitButton) leaves the game then.
 	 */
-	public void setQuitAction(final Runnable afterClick) {
+	public void setQuitAction(final boolean toScoreScreen, final Runnable afterClick) {
 		this.quitButton = true;
+		this.quitToScoreScreen = toScoreScreen;
 		this.afterClick = afterClick;
 	}
 

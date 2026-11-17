@@ -225,6 +225,15 @@ public final class DataPackage implements Closeable {
 		return this.totalBytes + SPARE_BYTES;
 	}
 
+	/** Bytes free where the target would be unpacked; the nearest existing folder above it is asked. */
+	public static long freeBytesFor(final File target) {
+		File folder = target.getAbsoluteFile().getParentFile();
+		while ((folder != null) && !folder.exists()) {
+			folder = folder.getParentFile();
+		}
+		return folder == null ? 0 : folder.getUsableSpace();
+	}
+
 	private static String field(final List<String> lines, final String name) {
 		for (final String line : lines) {
 			final int equals = line.indexOf('=');
@@ -512,7 +521,7 @@ public final class DataPackage implements Closeable {
 			}
 			catch (final IOException | RuntimeException e) {
 				if (staging.getUsableSpace() < BUFFER) {
-					throw new ImportException(Problem.NO_SPACE, name, e);
+					throw new ImportException(Problem.NO_SPACE, staging.getUsableSpace() + " / " + neededBytes(), e);
 				}
 				throw new ImportException(Problem.IO, name, e);
 			}

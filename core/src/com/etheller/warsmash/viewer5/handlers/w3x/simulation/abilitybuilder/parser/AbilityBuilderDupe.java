@@ -40,10 +40,6 @@ public class AbilityBuilderDupe {
 		return instantCastId;
 	}
 
-	public void setInstantCastId(String instantCastId) {
-		this.instantCastId = instantCastId;
-	}
-
 	public String getAutoCastOnId() {
 		return autoCastOnId;
 	}

@@ -112,6 +112,50 @@ class Etc2EncoderTest {
 	}
 
 	@Test
+	void encodedBlocksStayTheSameAsInTheCacheFiles() {
+		final int width = 70;
+		final int height = 45;
+		final Random random = new Random(5);
+		final byte[] rgba = new byte[width * height * 4];
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				final int i = ((y * width) + x) * 4;
+				rgba[i] = (byte) ((x * 4) + random.nextInt(24));
+				rgba[i + 1] = (byte) ((y * 5) + random.nextInt(40));
+				rgba[i + 2] = (byte) (((x ^ y) & 1) == 0 ? random.nextInt(256) : ((x + y) * 3));
+				rgba[i + 3] = (byte) (x < (width / 2) ? 255 : random.nextInt(256));
+			}
+		}
+		assertEquals(1429083629L, crc(Etc2Encoder.encodeRgb(rgba, width, height)));
+		assertEquals(1732319283L, crc(Etc2Encoder.encodeRgba(rgba, width, height)));
+		assertEquals(3626054375L, crc(Etc2Encoder.encodeRg(rgba, width, height)));
+	}
+
+	@Test
+	void levelsEncodedTogetherMatchTheSameLevelsEncodedAlone() {
+		final Random random = new Random(11);
+		final int[] sizes = { 96, 48, 24, 12, 6, 3, 1 };
+		final byte[][] pixels = new byte[sizes.length][];
+		final int[] widths = new int[sizes.length];
+		for (int level = 0; level < sizes.length; level++) {
+			pixels[level] = new byte[sizes[level] * sizes[level] * 4];
+			random.nextBytes(pixels[level]);
+			widths[level] = sizes[level];
+		}
+		final byte[][] together = Etc2Encoder.encodeLevels(pixels, widths, widths, 16, Etc2Encoder.KIND_RGBA);
+		for (int level = 0; level < sizes.length; level++) {
+			assertTrue(java.util.Arrays.equals(Etc2Encoder.encodeRgba(pixels[level], sizes[level], sizes[level]),
+					together[level]));
+		}
+	}
+
+	private static long crc(final byte[] bytes) {
+		final java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+		crc.update(bytes, 0, bytes.length);
+		return crc.getValue();
+	}
+
+	@Test
 	void sizesThatAreNotWholeBlocksAreCovered() {
 		final byte[] rgba = new byte[5 * 3 * 4];
 		java.util.Arrays.fill(rgba, (byte) 120);

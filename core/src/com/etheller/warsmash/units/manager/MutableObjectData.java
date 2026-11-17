@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -504,7 +505,7 @@ public final class MutableObjectData {
 					&& key.startsWith("Data")) {
 				for (final String metaKeyString : MutableObjectData.this.sourceSLKMetaData.keySet()) {
 					final GameObject metaField = MutableObjectData.this.sourceSLKMetaData.get(metaKeyString);
-					if ("data".equals(metaField.getField("field").toLowerCase())) {
+					if ("data".equals(metaField.getField("field").toLowerCase(Locale.ROOT))) {
 						final String useSpecific = metaField.getField("useSpecific");
 						final String[] specificUses = useSpecific.split(",");
 						for (final String use : specificUses) {
@@ -530,7 +531,7 @@ public final class MutableObjectData {
 					&& key.startsWith("Data")) {
 				for (final String metaKeyString : MutableObjectData.this.sourceSLKMetaData.keySet()) {
 					final GameObject metaField = MutableObjectData.this.sourceSLKMetaData.get(metaKeyString);
-					if ("data".equals(metaField.getField("field").toLowerCase())) {
+					if ("data".equals(metaField.getField("field").toLowerCase(Locale.ROOT))) {
 						final String useSpecific = metaField.getField("useSpecific");
 						final String[] specificUses = useSpecific.split(",");
 						for (final String use : specificUses) {
@@ -556,7 +557,7 @@ public final class MutableObjectData {
 					&& key.startsWith("Data")) {
 				for (final String metaKeyString : MutableObjectData.this.sourceSLKMetaData.keySet()) {
 					final GameObject metaField = MutableObjectData.this.sourceSLKMetaData.get(metaKeyString);
-					if ("data".equals(metaField.getField("field").toLowerCase())) {
+					if ("data".equals(metaField.getField("field").toLowerCase(Locale.ROOT))) {
 						final String useSpecific = metaField.getField("useSpecific");
 						final String[] specificUses = useSpecific.split(",");
 						for (final String use : specificUses) {
@@ -582,7 +583,7 @@ public final class MutableObjectData {
 					&& key.startsWith("Data")) {
 				for (final String metaKeyString : MutableObjectData.this.sourceSLKMetaData.keySet()) {
 					final GameObject metaField = MutableObjectData.this.sourceSLKMetaData.get(metaKeyString);
-					if ("data".equals(metaField.getField("field").toLowerCase())) {
+					if ("data".equals(metaField.getField("field").toLowerCase(Locale.ROOT))) {
 						final String useSpecific = metaField.getField("useSpecific");
 						final String[] specificUses = useSpecific.split(",");
 						for (final String use : specificUses) {
@@ -893,7 +894,7 @@ public final class MutableObjectData {
 				level = 1;
 			}
 			if (repeatCount >= 10) {
-				metaDataName += String.format("%2d", level).replace(' ', '0');
+				metaDataName += String.format(Locale.ROOT, "%2d", level).replace(' ', '0');
 			}
 			else {
 				metaDataName += Integer.toString(level);

@@ -33,6 +33,9 @@ public class MenuFrame extends AbstractUIFrame {
 
 	public void setControlBackdrop(final UIFrame controlBackdrop) {
 		this.controlBackdrop = controlBackdrop;
+		if (controlBackdrop instanceof BackdropFrame) {
+			((BackdropFrame) controlBackdrop).setOpaqueBacking(true);
+		}
 	}
 
 	public UIFrame getControlBackdrop() {

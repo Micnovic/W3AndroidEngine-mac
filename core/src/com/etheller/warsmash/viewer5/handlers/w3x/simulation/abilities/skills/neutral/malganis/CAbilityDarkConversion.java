@@ -69,11 +69,4 @@ public class CAbilityDarkConversion extends CAbilityTargetSpellBase {
 		return false;
 	}
 
-	public String getTargetRace() {
-		return this.targetRace;
-	}
-
-	public War3ID getConvertedUnitId() {
-		return this.convertedUnitId;
-	}
 }

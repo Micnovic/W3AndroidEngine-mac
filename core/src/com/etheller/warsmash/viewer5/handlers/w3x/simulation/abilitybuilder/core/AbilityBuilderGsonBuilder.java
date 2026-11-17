@@ -870,6 +870,7 @@ public abstract class AbilityBuilderGsonBuilder {
 				.registerSubtype(ABConditionIsUnitMaxHp.class, "isUnitMaxHp")
 				.registerSubtype(ABConditionIsUnitMaxMp.class, "isUnitMaxMp")
 				.registerSubtype(ABConditionIsUnitBuilding.class, "isUnitBuilding")
+				.registerSubtype(ABConditionIsUnitPaused.class, "isUnitPaused")
 				.registerSubtype(ABConditionIsUnitHero.class, "isUnitHero")
 				.registerSubtype(ABConditionIsUnitSummoned.class, "isUnitSummoned")
 				.registerSubtype(ABConditionIsUnitVisible.class, "isUnitVisible")

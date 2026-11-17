@@ -27,6 +27,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.datasources.GraphicsSet;
 import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.input.touch.ControlScheme;
@@ -47,7 +48,10 @@ final class OptionsPage extends LauncherViews {
 	static final int TAB_GAME_DATA = 4;
 	private static final int TAB_ABOUT = 5;
 
+	private static final long HINT_MILLIS = 3000;
+
 	int optionsTab = TAB_GRAPHICS;
+	private TextView hint;
 	final HotkeyEditorPage hotkeys;
 
 	OptionsPage(final LauncherActivity activity) {
@@ -119,7 +123,7 @@ final class OptionsPage extends LauncherViews {
 				new String[] { getString(R.string.launcher_classic),
 					getString(reforgedHere ? R.string.launcher_reforged : R.string.options_reforged_locked) },
 				new boolean[] { true, reforgedHere }, this.activity.cache.reforged() ? 1 : 0,
-				choice -> chooseSkin(choice == 1));
+				choice -> chooseSkin(choice == 1), getString(R.string.options_reforged_locked_note));
 		final GraphicsSet[] sets = GraphicsSet.values();
 		final String[] setNames = new String[sets.length];
 		final boolean[] setsHere = new boolean[sets.length];
@@ -130,7 +134,8 @@ final class OptionsPage extends LauncherViews {
 		// The game falls back to Classic when the data lacks the chosen package, and so does the row.
 		final int setChoice = GraphicsSet.fromIniName(engine.graphics(GraphicsSettings.KEY_SET, "")).ordinal();
 		radioRow(rows, R.string.options_ingame_graphics, setNames, setsHere, setsHere[setChoice] ? setChoice : 0,
-				choice -> engine.setGraphics(GraphicsSettings.KEY_SET, sets[choice].getIniName()));
+				choice -> engine.setGraphics(GraphicsSettings.KEY_SET, sets[choice].getIniName()),
+				getString(R.string.options_graphics_locked_note));
 		final String[] sizeNames = new String[LauncherOptions.TEXTURE_SIZES.length];
 		for (int i = 0; i < sizeNames.length; i++) {
 			sizeNames[i] = getString(stringId(LauncherOptions.TEXTURE_SIZES[i]));
@@ -142,9 +147,19 @@ final class OptionsPage extends LauncherViews {
 		catch (final NumberFormatException e) {
 			textureSize = AndroidLauncher.defaultTextureSize(this.activity);
 		}
-		radioRow(rows, R.string.options_texture_size, sizeNames, null, LauncherOptions.textureSizeChoice(textureSize),
+		// Sizes the device's memory cannot hold are greyed out; one already stored is lowered while playing, and says so.
+		final int cap = GraphicsSettings.textureCap(AndroidLauncher.totalMemoryMb(this.activity), GraphicsSettings
+				.compressionWanted(engine.graphics(GraphicsSettings.KEY_TEXTURE_COMPRESSION, ""), true));
+		final boolean[] sizesHere = new boolean[sizeNames.length];
+		for (int i = 0; i < sizesHere.length; i++) {
+			sizesHere[i] = GraphicsSettings.limitToCap(GraphicsSettings.TEXTURE_SIZES[i], cap) == GraphicsSettings.TEXTURE_SIZES[i];
+		}
+		// What the game will use is the one shown as chosen, so a stored size above the cap does not leave the row unmarked.
+		radioRow(rows, R.string.options_texture_size, sizeNames, cap > 0 ? sizesHere : null,
+				LauncherOptions.textureSizeChoice(GraphicsSettings.limitToCap(textureSize, cap)),
 				choice -> engine.setGraphics(GraphicsSettings.KEY_TEXTURE_SIZE,
-						Integer.toString(GraphicsSettings.TEXTURE_SIZES[choice])));
+						Integer.toString(GraphicsSettings.TEXTURE_SIZES[choice])),
+				getString(R.string.options_texture_capped, cap));
 		final String[] scaleNames = new String[LauncherOptions.RENDER_SCALES.length];
 		for (int i = 0; i < scaleNames.length; i++) {
 			scaleNames[i] = getString(stringId(LauncherOptions.RENDER_SCALES[i]));
@@ -279,10 +294,14 @@ final class OptionsPage extends LauncherViews {
 
 	/** A line of explanation across the whole row, for settings that mean something else under the other scheme. */
 	private void noteRow(final LinearLayout rows, final int note) {
+		noteRow(rows, getString(note));
+	}
+
+	private void noteRow(final LinearLayout rows, final String note) {
 		final LauncherBoard b = this.activity.board;
 		final FrameLayout row = row(rows);
 		row.getLayoutParams().height = px(b.rowH * 1.6f);
-		final TextView shown = text(getString(note), b.small, this.activity.art.text());
+		final TextView shown = text(note, b.small, this.activity.art.text());
 		shown.setGravity(Gravity.CENTER_VERTICAL);
 		shown.setSingleLine(false);
 		shown.setMaxLines(3);
@@ -323,8 +342,22 @@ final class OptionsPage extends LauncherViews {
 				: DataFolderCheck.Kind.FOLDER;
 		final File folder = new File(this.activity.homePage.dataFolder());
 		final String locale = DataFolderCheck.locale(kind, folder);
-		infoRow(rows, R.string.options_locale, locale.isEmpty() ? getString(R.string.options_not_stated) : locale,
-				false);
+		final List<String> languages = DataFolderCheck.locales(kind, folder);
+		if (languages.size() > 1) {
+			final String[] names = new String[languages.size()];
+			for (int i = 0; i < names.length; i++) {
+				names[i] = GameLanguage.displayName(languages.get(i));
+			}
+			final EngineSettings engine = new EngineSettings(this.activity);
+			final String chosen = engine.language().isEmpty() ? locale : engine.language();
+			radioRow(rows, R.string.options_language, names, null, Math.max(0, languages.indexOf(chosen)),
+					choice -> engine.setLanguage(languages.get(choice)));
+			noteRow(rows, getString(R.string.options_language_note));
+		}
+		else {
+			infoRow(rows, R.string.options_locale, locale.isEmpty() ? getString(R.string.options_not_stated) : locale,
+					false);
+		}
 		if (!this.activity.homePage.installedGame()) {
 			final String files = DataFolderCheck.describe(kind, folder);
 			final TextView shown = infoRow(rows, R.string.options_files, files, false);
@@ -346,6 +379,12 @@ final class OptionsPage extends LauncherViews {
 		infoRow(rows, R.string.options_reforged_ui,
 				getString(SkinCache.hasReforged(this.activity) ? R.string.options_found : R.string.options_missing),
 				false);
+		final boolean hd = SkinCache.hasGraphics(this.activity, GraphicsSet.REFORGED);
+		final boolean de = SkinCache.hasGraphics(this.activity, GraphicsSet.DE);
+		infoRow(rows, R.string.options_hd_graphics,
+				getString(hd ? R.string.options_found : R.string.options_missing_classic), false);
+		infoRow(rows, R.string.options_de_graphics,
+				getString(de ? R.string.options_found : R.string.options_missing_classic), false);
 		final int recordings = this.activity.art.recordings();
 		infoRow(rows, R.string.options_backgrounds, recordings == 0 ? getString(R.string.options_backgrounds_missing)
 				: getString(R.string.options_backgrounds_count, recordings, SkinArt.SCENES.length), false);
@@ -427,6 +466,17 @@ final class OptionsPage extends LauncherViews {
 		infoRow(rows, R.string.options_launcher, this.activity.homePage.buildLine(), false);
 		infoRow(rows, R.string.options_engine, getString(R.string.options_engine_value), false);
 		infoRow(rows, R.string.options_license, getString(R.string.options_license_value), false);
+		infoRow(rows, R.string.options_source_code, ProjectLink.shortUrl(), false);
+		final View sourceRow = rows.getChildAt(rows.getChildCount() - 1);
+		sourceRow.setContentDescription(getString(R.string.options_source_code));
+		onTap(sourceRow, false, v -> {
+			try {
+				this.activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(ProjectLink.url())));
+			}
+			catch (final RuntimeException e) {
+				// No browser on the device; the address stays readable in the row.
+			}
+		});
 		infoRow(rows, R.string.options_art, getString(R.string.options_art_value), false);
 		checkRow(rows, R.string.options_check_updates, this.activity.preferences.getBoolean(KEY_UPDATE_CHECK, true),
 				on -> this.activity.preferences.edit().putBoolean(KEY_UPDATE_CHECK, on).apply());
@@ -545,6 +595,12 @@ final class OptionsPage extends LauncherViews {
 
 	void radioRow(final LinearLayout rows, final int label, final String[] choices, final boolean[] enabled,
 			final int selected, final IntConsumer changed) {
+		radioRow(rows, label, choices, enabled, selected, changed, null);
+	}
+
+	/** @param lockedNote shown beside a greyed-out choice when it is tapped or held, to say why it cannot be chosen */
+	private void radioRow(final LinearLayout rows, final int label, final String[] choices, final boolean[] enabled,
+			final int selected, final IntConsumer changed, final String lockedNote) {
 		final LauncherBoard b = this.activity.board;
 		final TextView[] names = new TextView[choices.length];
 		final float[] nameWidths = new float[choices.length];
@@ -580,6 +636,15 @@ final class OptionsPage extends LauncherViews {
 			nameParams.leftMargin = px(LauncherBoard.RADIO_NAME_GAP);
 			item.addView(name, nameParams);
 			item.setEnabled(active);
+			// A disabled view takes no touches, so a locked choice stays enabled and only ignores the selection.
+			if (!active && (lockedNote != null)) {
+				item.setEnabled(true);
+				onTap(item, false, v -> showHint(item, lockedNote));
+				item.setOnLongClickListener(v -> {
+					showHint(item, lockedNote);
+					return true;
+				});
+			}
 			if (active) {
 				onTap(item, false, v -> {
 					if (current[0] == choice) {
@@ -592,6 +657,53 @@ final class OptionsPage extends LauncherViews {
 				});
 			}
 			place(row, item, places.x[i], places.choicesY, places.w[i], b.rowH);
+		}
+	}
+
+	private void showHint(final View anchor, final String note) {
+		hideHint();
+		final LauncherBoard b = this.activity.board;
+		final int[] at = new int[2];
+		anchor.getLocationInWindow(at);
+		final int[] origin = new int[2];
+		this.activity.root.getLocationInWindow(origin);
+		// The tip stays inside the panel the choice is in.
+		View panel = anchor;
+		while ((panel.getParent() instanceof View) && !(panel instanceof ScrollView)) {
+			panel = (View) panel.getParent();
+		}
+		final int[] area = new int[2];
+		panel.getLocationInWindow(area);
+		final int left = area[0] - origin[0];
+		final int top = area[1] - origin[1];
+		final int width = panel instanceof ScrollView ? panel.getWidth() : px(b.width);
+		final int height = panel instanceof ScrollView ? panel.getHeight() : px(b.height);
+		final int border = px(b.tablet ? 8 : 6);
+		final TextView tip = text(note, b.small, Color.WHITE);
+		tip.setSingleLine(false);
+		tip.setEllipsize(null);
+		tip.setBackground(panelFrame(b.tablet ? 8 : 6, Color.rgb(0x08, 0x08, 0x10)));
+		tip.setPadding(border + px(12), border + px(8), border + px(12), border + px(8));
+		final int maxWidth = Math.min(px(b.tablet ? 900 : 700), width);
+		tip.setMaxWidth(maxWidth);
+		tip.measure(View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+				View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+		final FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+				ViewGroup.LayoutParams.WRAP_CONTENT);
+		params.leftMargin = Math.max(left, Math.min(at[0] - origin[0] - px(8), left + width - tip.getMeasuredWidth()));
+		final int below = at[1] - origin[1] + anchor.getHeight() + px(6);
+		// Above the choice when there is no room below it, so the tip never covers the choice.
+		params.topMargin = below + tip.getMeasuredHeight() <= top + height ? below
+				: Math.max(top, at[1] - origin[1] - px(6) - tip.getMeasuredHeight());
+		this.activity.root.addView(tip, params);
+		this.hint = tip;
+		tip.postDelayed(this::hideHint, HINT_MILLIS);
+	}
+
+	private void hideHint() {
+		if (this.hint != null) {
+			this.activity.root.removeView(this.hint);
+			this.hint = null;
 		}
 	}
 

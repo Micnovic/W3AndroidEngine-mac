@@ -74,6 +74,25 @@ public class CPathfindingProcessor {
 	private static final int SLIDE_STEPS = 64;
 	private static final int WITHDRAWN_TURN_UPDATES = 2;
 	private static final int DETOUR_ITERATION_FACTOR = 16;
+	/**
+	 * A goal that standing units close off cannot be reached, however far the search looks: the original walks to the
+	 * ring and stops there. Such a pocket is found by a small fill from the goal; the search then ends once it has got
+	 * to the ring and has looked a little way beyond the straight line, instead of filling the map for a way in.
+	 */
+	private static final int ENCLOSED_POCKET_CELLS = 1024;
+	private static final float ENCLOSED_STOP_MARGIN = 192f;
+	private static final double ENCLOSED_FLOOD_MARGIN = 1024;
+	/** A free line this many cells long from the goal means the ground round it is open: no fill is needed. */
+	private static final int ENCLOSED_OPEN_REACH = 12;
+	/**
+	 * Iterations one tick may spend on searches. A search that has already used that much in earlier ticks is given as
+	 * much again each tick, up to the maximum, so a long one ends in a few ticks while a short one costs what it did.
+	 * It follows from the search's own count, so it is the same on every machine.
+	 */
+	private static final int TICK_ITERATIONS = 1500;
+	private static final int TICK_ITERATIONS_MAX = 4000;
+	/** Ticks a computer player's search may keep waiting for the shared graph while human orders go before it. */
+	private static final int HUMAN_PRIORITY_MAX_WAIT = 200;
 	private static final double DETOUR_MIN_DISTANCE = 1024;
 	private int totalIterations = 0;
 	private int totalJobLoops = 0;
@@ -712,9 +731,23 @@ public class CPathfindingProcessor {
 			final CUnit ignoreIntersectionsWithThisSecondUnit, final float startX, final float startY,
 			final CPathPoint goal, final PathingGrid.MovementType movementType, final float collisionSize,
 			final boolean allowSmoothing, final CBehaviorMove queueItem) {
+		findNaiveSlowPath(ignoreIntersectionsWithThisUnit, ignoreIntersectionsWithThisSecondUnit, startX, startY, goal,
+				movementType, collisionSize, allowSmoothing, queueItem, false);
+	}
+
+	/**
+	 * @param humanOrder whether the unit belongs to a human player: its search does not wait behind a computer
+	 *                   player's long one
+	 */
+	public void findNaiveSlowPath(final CUnit ignoreIntersectionsWithThisUnit,
+			final CUnit ignoreIntersectionsWithThisSecondUnit, final float startX, final float startY,
+			final CPathPoint goal, final PathingGrid.MovementType movementType, final float collisionSize,
+			final boolean allowSmoothing, final CBehaviorMove queueItem, final boolean humanOrder) {
 		final PathfindingJob job = new PathfindingJob(ignoreIntersectionsWithThisUnit,
 				ignoreIntersectionsWithThisSecondUnit, startX, startY, goal, movementType, collisionSize, allowSmoothing,
 				queueItem);
+		job.humanOrder = humanOrder;
+		job.queuedTick = this.gameTurnTick;
 		final int[] withdrawn = this.withdrawnTurns.remove(queueItem);
 		if (withdrawn == null) {
 			job.turn = this.nextTurn++;
@@ -804,6 +837,13 @@ public class CPathfindingProcessor {
 	 */
 	private boolean nodePathable(final PathfindingJob job, final SearchGrid grid, final int epoch, final int index,
 			final float x, final float y) {
+		if ((x < grid.xs[0]) || (y < grid.ys[0])) {
+			// A point just below the map truncates to the first row or column: it shares that node with the point
+			// inside, which would let the answer depend on which of the two a tick happened to test first.
+			return this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
+					&& isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit, secondUnitAt(job, x, y),
+							job.movementType);
+		}
 		final int cached = grid.pathable(index);
 		if ((cached & ~1) != epoch) {
 			final boolean pathable = this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
@@ -1086,6 +1126,28 @@ public class CPathfindingProcessor {
 		if ((graph.reservedFor == this) && this.moveQueue.isEmpty()) {
 			graph.reservedFor = null;
 		}
+		final PathfindingJob head = this.moveQueue.peek();
+		if ((head != null) && head.humanOrder && !head.jobStarted) {
+			// A human player's order does not wait behind a computer player's: it takes the reservation, and a
+			// search of theirs that has paused between ticks starts over later (once, so it cannot starve).
+			if ((graph.reservedFor != null) && (graph.reservedFor != this)) {
+				final PathfindingJob reservedHead = graph.reservedFor.moveQueue.peek();
+				if ((reservedHead == null) || (!reservedHead.humanOrder
+						&& ((this.gameTurnTick - reservedHead.queuedTick) < HUMAN_PRIORITY_MAX_WAIT))) {
+					graph.reservedFor = this;
+				}
+			}
+			if ((graph.owner != null) && (graph.owner != this)) {
+				final PathfindingJob ownerHead = graph.owner.moveQueue.peek();
+				if ((ownerHead != null) && ownerHead.jobStarted && !ownerHead.humanOrder && !ownerHead.preempted) {
+					ownerHead.preempted = true;
+					ownerHead.jobStarted = false;
+					ownerHead.searchGrid = null;
+					graph.owner = null;
+					graph.reservedFor = this;
+				}
+			}
+		}
 		if ((graph.owner != null) && (graph.owner != this)) {
 			if (!this.moveQueue.isEmpty() && (graph.reservedFor == null)) {
 				graph.reservedFor = this;
@@ -1096,6 +1158,9 @@ public class CPathfindingProcessor {
 		JobsLoop: while (!this.moveQueue.isEmpty()) {
 			this.totalJobLoops++;
 			final PathfindingJob job = this.moveQueue.peek();
+			final int tickBudget = job.jobStarted
+					? Math.min(TICK_ITERATIONS_MAX, Math.max(TICK_ITERATIONS, this.totalIterations))
+					: TICK_ITERATIONS;
 			if (job.jobStarted && (job.searchGrid == null)) {
 				// a search saved before its state moved into the shared arrays starts again
 				job.jobStarted = false;
@@ -1230,6 +1295,12 @@ public class CPathfindingProcessor {
 				}
 				final int startGridY = job.gridMapping.getY(this.pathingGrid, job.startY);
 				final int startGridX = job.gridMapping.getX(this.pathingGrid, job.startX);
+				job.enclosedGoalRadius = 0;
+				if ((job.weightForHittingWalls >= 1E9f) && !job.goalNodesBlocked && !job.shortSearch) {
+					job.enclosedGoalRadius = enclosedGoalRadius(job, grid,
+							graph.pathableEpoch(this.pathfindJobId, simulation.getGameTurnTick()),
+							(startGridY * grid.width) + startGridX);
+				}
 				grid.clearOpen();
 
 				final int startCell = (startGridY * grid.width) + startGridX;
@@ -1384,6 +1455,11 @@ public class CPathfindingProcessor {
 						Math.max(MIN_SCRIPTED_SEARCH_ITERATIONS, 4 * job.straightCells * job.straightCells)))) {
 					break;
 				}
+				if ((job.enclosedGoalRadius > 0)
+						&& (job.bestDistance <= (job.enclosedGoalRadius + ENCLOSED_STOP_MARGIN))
+						&& ((currentG + h(currentX, currentY)) > ((job.straightCells * 32) + ENCLOSED_FLOOD_MARGIN))) {
+					break;
+				}
 				if (this.totalIterations > job.iterationLimit) {
 					// Measured on 1.29: a unit ordered to a point behind a long wall walks out and round it, even when
 					// that way is many times the straight distance. Such a search (a far goal, or one that has not got
@@ -1401,7 +1477,7 @@ public class CPathfindingProcessor {
 						break;
 					}
 				}
-				if (workIterations >= 1500) {
+				if (workIterations >= tickBudget) {
 					// breaking jobs loop will implicitly exit without calling pathFound() below
 					break JobsLoop;
 				}
@@ -1454,6 +1530,109 @@ public class CPathfindingProcessor {
 			finishJob();
 			job.queueItem.pathFound(job.goal, partialPath, false, simulation);
 		}
+	}
+
+	/**
+	 * Whether a straight line of free points leaves the goal cell for a good way in some direction, so the ground round
+	 * it cannot be a pocket and the fill (which most jobs would pay for in full on open ground) is skipped.
+	 */
+	private boolean openAround(final PathfindingJob job, final SearchGrid grid, final int goalCell) {
+		final int goalX = goalCell % grid.width;
+		final int goalY = goalCell / grid.width;
+		for (final Direction direction : Direction.VALUES) {
+			int step = 1;
+			for (; step <= ENCLOSED_OPEN_REACH; step++) {
+				final int x = goalX + (direction.xOffset * step);
+				final int y = goalY + (direction.yOffset * step);
+				if ((x < 0) || (y < 0) || (x >= grid.width) || (y >= grid.height)
+						|| !this.pathingGrid.isPathable(grid.xs[x], grid.ys[y], job.movementType, job.collisionSize)
+						|| !isPathableDynamically(grid.xs[x], grid.ys[y], job.ignoreIntersectionsWithThisUnit,
+								secondUnitAt(job, grid.xs[x], grid.ys[y]), job.movementType)) {
+					break;
+				}
+			}
+			if (step > ENCLOSED_OPEN_REACH) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The distance from the goal to the farthest point of the free ground round it, when standing units close that
+	 * ground off completely within a few cells; 0 when it is open to the rest of the map, or holds the unit itself.
+	 */
+	private float enclosedGoalRadius(final PathfindingJob job, final SearchGrid grid, final int epoch,
+			final int startCell) {
+		int goalCell = -1;
+		for (int i = 0; i < this.goals; i++) {
+			if (nodePathable(job, grid, epoch, this.goalCells[i], this.goalCellX[i], this.goalCellY[i])) {
+				goalCell = this.goalCells[i];
+				break;
+			}
+		}
+		if (goalCell < 0) {
+			return 0;
+		}
+		if (openAround(job, grid, goalCell)) {
+			return 0;
+		}
+		final int seenSize = ENCLOSED_POCKET_CELLS * 4;
+		final int[] seen = new int[seenSize];
+		final int[] queue = new int[ENCLOSED_POCKET_CELLS];
+		int head = 0;
+		int tail = 0;
+		queue[tail++] = goalCell;
+		seen[(goalCell * 31) % seenSize] = goalCell + 1;
+		float radius = 0;
+		boolean unitsInRing = false;
+		while (head < tail) {
+			final int cell = queue[head++];
+			if (cell == startCell) {
+				return 0;
+			}
+			final int cellX = cell % grid.width;
+			final int cellY = cell / grid.width;
+			radius = Math.max(radius,
+					(float) distance(grid.xs[cellX], grid.ys[cellY], job.goalX, job.goalY));
+			for (final Direction direction : Direction.VALUES) {
+				final int nextX = cellX + direction.xOffset;
+				final int nextY = cellY + direction.yOffset;
+				if ((nextX < 0) || (nextY < 0) || (nextX >= grid.width) || (nextY >= grid.height)) {
+					continue;
+				}
+				final int next = (nextY * grid.width) + nextX;
+				// Not through nodePathable: its answer is kept by cell for the search, which tests other points of it.
+				if (!this.pathingGrid.isPathable(grid.xs[nextX], grid.ys[nextY], job.movementType,
+						job.collisionSize)) {
+					continue;
+				}
+				if (!isPathableDynamically(grid.xs[nextX], grid.ys[nextY], job.ignoreIntersectionsWithThisUnit,
+						secondUnitAt(job, grid.xs[nextX], grid.ys[nextY]), job.movementType)) {
+					unitsInRing = true;
+					continue;
+				}
+				int slot = (next * 31) % seenSize;
+				boolean known = false;
+				while (seen[slot] != 0) {
+					if (seen[slot] == (next + 1)) {
+						known = true;
+						break;
+					}
+					slot = (slot + 1) % seenSize;
+				}
+				if (known) {
+					continue;
+				}
+				if (tail >= ENCLOSED_POCKET_CELLS) {
+					return 0;
+				}
+				seen[slot] = next + 1;
+				queue[tail++] = next;
+			}
+		}
+		// A pocket that terrain alone closes off is left to the full search, as before.
+		return unitsInRing ? radius : 0;
 	}
 
 	/**
@@ -2059,6 +2238,10 @@ public class CPathfindingProcessor {
 		private final boolean allowSmoothing;
 		private final CBehaviorMove queueItem;
 		private boolean jobStarted;
+		private boolean humanOrder;
+		private boolean preempted;
+		float enclosedGoalRadius;
+		private int queuedTick;
 		private int turn;
 		public float goalY;
 		public float goalX;

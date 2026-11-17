@@ -490,6 +490,12 @@ class LegacyPathfindingProcessor {
 	private boolean nodePathable(final PathfindingJob job, final CSimulation simulation, final float x, final float y) {
 		final Node node = node(job.searchGraph, job.gridMapping.getY(this.pathingGrid, y),
 				job.gridMapping.getX(this.pathingGrid, x));
+		if ((x != node.point.x) || (y != node.point.y)) {
+			// a point just below the map shares the first row's node; its answer is not kept for that node
+			return this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
+					&& isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit,
+							job.ignoreIntersectionsWithThisSecondUnit, job.movementType);
+		}
 		final int tick = simulation.getGameTurnTick();
 		if ((node.pathableJobId != this.pathfindJobId) || (node.pathableTick != tick)) {
 			node.pathableJobId = this.pathfindJobId;

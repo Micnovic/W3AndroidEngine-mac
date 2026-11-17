@@ -3,6 +3,7 @@ package com.etheller.warsmash.util;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -54,7 +55,7 @@ public class MappedData implements Iterable<Map.Entry<String, MappedDataRow>> {
 					String name = (String) rowKey;
 
 					if (name != null) {
-						name = name.toLowerCase();
+						name = name.toLowerCase(Locale.ROOT);
 
 						if (!this.map.containsKey(name)) {
 							this.map.put(name, new MappedDataRow());
@@ -98,15 +99,15 @@ public class MappedData implements Iterable<Map.Entry<String, MappedDataRow>> {
 	}
 
 	public MappedDataRow getRow(final String key) {
-		return this.map.get(key.toLowerCase());
+		return this.map.get(key.toLowerCase(Locale.ROOT));
 	}
 
 	public Object getProperty(final String key, final String name) {
-		return this.map.get(key.toLowerCase()).get(name);
+		return this.map.get(key.toLowerCase(Locale.ROOT)).get(name);
 	}
 
 	public void setRow(final String key, final MappedDataRow values) {
-		this.map.put(key.toLowerCase(), values);
+		this.map.put(key.toLowerCase(Locale.ROOT), values);
 	}
 
 	@Override

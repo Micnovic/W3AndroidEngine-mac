@@ -21,6 +21,7 @@ import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.datasources.GraphicsSet;
 import com.etheller.warsmash.datasources.GpuMemory;
 import com.etheller.warsmash.datasources.GraphicsSettings;
+import com.etheller.warsmash.launcher.GameResult;
 import com.etheller.warsmash.lan.LanGameStart;
 import com.etheller.warsmash.lan.LockstepTurnManager;
 import com.etheller.warsmash.networking.GameTurnManager;
@@ -99,6 +100,7 @@ final class MenuMapStart {
 	}
 
 	private int mapLoadErrorCount;
+	private String mapLoadFailureReason;
 
 	void setMapLoadFailureListener(final Predicate<String> listener) {
 		this.mapLoadFailureListener = listener;
@@ -111,6 +113,7 @@ final class MenuMapStart {
 	private void mapLoadFailed(final String mapFilename, final Exception cause) {
 		Log.error("Unable to load the map " + mapFilename + ":");
 		Log.error(cause);
+		this.mapLoadFailureReason = GameResult.describeFailure(cause);
 		if (this.loadingMap != null) {
 			try {
 				this.loadingMap.viewer.dispose();
@@ -132,6 +135,11 @@ final class MenuMapStart {
 	/** How many times a map or replay failed to load and the error was shown; a headless run ends on the first. */
 	int mapLoadErrorCount() {
 		return this.mapLoadErrorCount;
+	}
+
+	/** Why the last map or mission failed to start or load, in one line; null when none has. */
+	String mapLoadFailureReason() {
+		return this.mapLoadFailureReason;
 	}
 
 	void showMapLoadError() {
@@ -209,6 +217,11 @@ final class MenuMapStart {
 		viewer.setTextureSizeLimit(GraphicsSettings.textureSize(this.menu.warsmashIni, gameGraphics(mapFilename),
 				GpuMemory::desktopDefaultTextureSize));
 		viewer.setRenderScale(GraphicsSettings.renderScale(this.menu.warsmashIni));
+		final int shadowMode = GameOptions.get().getUnitShadowMode();
+		viewer.getDynamicShadowManager().setModelShadows(shadowMode >= 0
+				? shadowMode == GameOptions.UNIT_SHADOWS_FULL
+				: GraphicsSettings.modelUnitShadows(this.menu.warsmashIni, gameGraphics(mapFilename),
+						Gdx.app.getType() == ApplicationType.Android));
 		viewer.setTextureCompression(GraphicsSettings.textureCompression(this.menu.warsmashIni,
 				gameGraphics(mapFilename), Gdx.app.getType() == ApplicationType.Android,
 				Gdx.graphics.isGL30Available()));
@@ -680,7 +693,8 @@ final class MenuMapStart {
 
 	static void requireJassScript(final War3Map map, final String mapFilename) throws IOException {
 		if (!map.hasJassScript()) {
-			throw new IOException("The map has no JASS script (war3map.j), only a Lua one or none: " + mapFilename);
+			throw new IOException((map.hasLuaScript() ? "This map uses a Lua script, which is not supported yet: "
+					: "The map has no script: ") + mapFilename);
 		}
 	}
 
@@ -690,12 +704,15 @@ final class MenuMapStart {
 	 * @return false when the map cannot be read or has no script this engine runs
 	 */
 	boolean prepareMapConfigs(final String mapFilename) {
+		this.mapLoadFailureReason = null;
 		try {
 			loadAndCacheMapConfigs(mapFilename);
 			return true;
 		}
 		catch (final IOException | RuntimeException e) {
+			Log.error("Unable to read the map " + mapFilename + ":");
 			Log.error(e);
+			this.mapLoadFailureReason = GameResult.describeFailure(e);
 			return false;
 		}
 	}

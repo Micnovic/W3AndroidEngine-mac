@@ -63,17 +63,19 @@ public class Jass2 {
 		final JassProgram jassProgramVisitor = new JassProgram();
 		final CommonEnvironment environment = new CommonEnvironment(jassProgramVisitor, dataSource, uiViewport, uiScene,
 				war3MapViewer, meleeUI, files);
+		// The scripts of the game are simulation data: the same for every graphics set.
+		final DataSource scripts = dataSource.graphicsIndependent();
 		for (final String file : files) {
 			String jassFilePath = file;
-			if (!dataSource.has(jassFilePath)) {
+			if (!scripts.has(jassFilePath)) {
 				jassFilePath = jassFilePath
 						.substring(Math.max(jassFilePath.lastIndexOf('/'), jassFilePath.lastIndexOf('\\')) + 1);
 			}
-			if (!dataSource.has(jassFilePath)) {
+			if (!scripts.has(jassFilePath)) {
 				final String lowerCaseDirectoryPath = file.toLowerCase(Locale.US);
 				final String lowerCaseDirectoryPathLinux = file.toLowerCase(Locale.US).replace("\\", "/");
 
-				final Collection<String> listfile = dataSource.getListfile();
+				final Collection<String> listfile = scripts.getListfile();
 				final Map<String, String> fixedListfile = new HashMap<>();
 				for (final String path : listfile) {
 					fixedListfile.put(path.toLowerCase(Locale.US), path);
@@ -83,12 +85,12 @@ public class Jass2 {
 					final String realPath = pathAndPath.getValue();
 					if (lowerCasePath.startsWith(lowerCaseDirectoryPath)
 							|| lowerCasePath.startsWith(lowerCaseDirectoryPathLinux)) {
-						environment.scriptFailed(readJassFile(dataSource, jassProgramVisitor, realPath));
+						environment.scriptFailed(readJassFile(scripts, jassProgramVisitor, realPath));
 					}
 				}
 			}
 			else {
-				environment.scriptFailed(readJassFile(dataSource, jassProgramVisitor, jassFilePath));
+				environment.scriptFailed(readJassFile(scripts, jassProgramVisitor, jassFilePath));
 			}
 		}
 		// The handles the global initializers make come before the players in 1.29.
@@ -602,6 +604,7 @@ public class Jass2 {
 			AbilityFieldNatives.register(jassProgramVisitor, war3MapViewer);
 			WeaponFieldNatives.register(jassProgramVisitor, war3MapViewer);
 			ReforgedMiscNatives.register(jassProgramVisitor, war3MapViewer);
+			ReforgedDoodadNatives.register(jassProgramVisitor, war3MapViewer);
 			FrameNatives.register(jassProgramVisitor, war3MapViewer, uiViewport, meleeUI);
 			ScriptObjectNatives.register(jassProgramVisitor, war3MapViewer);
 		}
@@ -878,7 +881,7 @@ public class Jass2 {
 			final String[] originalFiles, final JassProgram jassProgramVisitor, final String mainFunction, final boolean runMain) {
 		final Integer prevPtr = jassProgramVisitor.getGlobals().getUserFunctionInstructionPtr(mainFunction);
 		try {
-			try (InputStreamReader reader = new InputStreamReader(dataSource.getResourceAsStream(filename),
+			try (InputStreamReader reader = new InputStreamReader(dataSource.graphicsIndependent().getResourceAsStream(filename),
 					StandardCharsets.UTF_8)) {
 				final SmashJassParser smashJassParser = new SmashJassParser(reader);
 				smashJassParser.scanAndParse(filename, jassProgramVisitor);
@@ -916,14 +919,15 @@ public class Jass2 {
 		AINatives.registerSharedCommonAIFunctions(jassProgram, war3MapViewer, meleeUI, game);
 		final Integer prevPtr = jassProgram.getGlobals().getUserFunctionInstructionPtr(mainFunction);
 		// Blizzard.j names the melee scripts without their folder; every AI script runs on top of common.ai.
-		final String scriptPath = dataSource.has(filename) ? filename : "Scripts\\" + filename;
-		if (!dataSource.has(scriptPath)) {
+		final DataSource scripts = dataSource.graphicsIndependent();
+		final String scriptPath = scripts.has(filename) ? filename : "Scripts\\" + filename;
+		if (!scripts.has(scriptPath)) {
 			// Measured: the original ignores an AI script that is not there.
 			return;
 		}
 		try {
 			for (final String aiFile : new String[] { "Scripts\\common.ai", scriptPath }) {
-				try (InputStreamReader reader = new InputStreamReader(dataSource.getResourceAsStream(aiFile),
+				try (InputStreamReader reader = new InputStreamReader(scripts.getResourceAsStream(aiFile),
 						StandardCharsets.UTF_8)) {
 					final SmashJassParser smashJassParser = new SmashJassParser(reader);
 					smashJassParser.scanAndParse(aiFile, jassProgram);

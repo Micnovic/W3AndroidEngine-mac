@@ -79,7 +79,4 @@ public class CAbilityTypeJassDefinition implements CAbilityTypeDefinition {
 		};
 	}
 
-	public GlobalScope getJassGlobalScope() {
-		return this.jassGlobalScope;
-	}
 }

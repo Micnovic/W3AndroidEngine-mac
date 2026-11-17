@@ -102,10 +102,6 @@ public abstract class CBasePlayer implements CPlayerJass, CHandle {
 		this.onScoreScreen = onScoreScreen;
 	}
 
-	public boolean isOnScoreScreen() {
-		return this.onScoreScreen;
-	}
-
 	@Override
 	public void setRaceSelectable(final boolean raceSelectable) {
 		this.raceSelectable = raceSelectable;

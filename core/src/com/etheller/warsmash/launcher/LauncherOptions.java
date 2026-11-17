@@ -65,7 +65,8 @@ public final class LauncherOptions {
 	/** Graphics after the graphics set and the animated background, which are the launcher's own. */
 	public static final List<Row> GRAPHICS = Collections.unmodifiableList(Arrays.asList(
 			new Row("options_particles", Kind.RADIO, "particles", 2, "options_low", "options_medium", "options_high"),
-			check("options_unit_shadows", "unitShadows", true),
+			new Row("options_unit_shadows", Kind.RADIO, "unitShadowMode", 2, "options_shadows_off", "options_shadows_blob",
+					"options_shadows_full"),
 			slider("options_gamma", "gamma", 50, "options_low", "options_high")));
 
 	/**

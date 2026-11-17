@@ -3,6 +3,7 @@ package com.etheller.warsmash.android;
 import java.util.List;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -50,6 +51,10 @@ final class LobbyPage extends LauncherViews {
 	private LauncherKit.GlueButton primary;
 	private int shownVersion = -1;
 	private int shownChat;
+	/** The map the minimap was asked for, and the picture that came for {@link #minimapPath}. */
+	private String minimapAsked;
+	private String minimapPath;
+	private Bitmap minimapBitmap;
 	private TextView tooltip;
 	private boolean shown;
 
@@ -229,6 +234,7 @@ final class LobbyPage extends LauncherViews {
 			this.secondary.setText(countdown ? "Cancel" : LanText.changeMap());
 			this.secondary.setEnabled(true);
 			this.secondary.setVisibility(View.VISIBLE);
+			this.primary.setVisibility(View.VISIBLE);
 			final LanLobbyView.HostAction action = view.hostAction();
 			this.primary.setText(countdown ? "Starting… " + model.countdownSeconds()
 					: action == LanLobbyView.HostAction.START ? "Start Game"
@@ -242,9 +248,37 @@ final class LobbyPage extends LauncherViews {
 			this.secondary.setText(ready ? "Not Ready" : "Ready");
 			this.secondary.setSelected(ready);
 			this.secondary.setEnabled(model.canReady());
-			this.primary.setText("Start Game");
-			this.primary.setEnabled(false);
+			// Only the host starts the game: the guest's page has no button for it.
+			this.primary.setVisibility(View.GONE);
 		}
+	}
+
+	/** The minimap of the lobby's map, once this machine has the map and has read it; null until then or without one. */
+	private Bitmap lobbyMinimap() {
+		final java.io.File file = this.activity.lan().lobbyMapFile();
+		if (file == null) {
+			return null;
+		}
+		final String path = file.getPath();
+		if (path.equals(this.minimapPath)) {
+			return this.minimapBitmap;
+		}
+		if (!path.equals(this.minimapAsked)) {
+			this.minimapAsked = path;
+			final int generation = this.activity.generation;
+			this.activity.catalog.mapDetails(path, details -> {
+				if ((generation != this.activity.generation) || !path.equals(this.minimapAsked)) {
+					return;
+				}
+				this.minimapPath = path;
+				this.minimapBitmap = (details == null) || (details.minimap == null) ? null
+						: GameCatalog.bitmap(details.minimap);
+				if (this.shown) {
+					refresh();
+				}
+			});
+		}
+		return null;
 	}
 
 	private void fillChat(final LanLauncherModel model) {
@@ -285,7 +319,8 @@ final class LobbyPage extends LauncherViews {
 		final ImageView minimap = new ImageView(this.activity);
 		minimap.setScaleType(ImageView.ScaleType.FIT_XY);
 		minimap.setBackground(minimapFrame(t ? 8 : 4));
-		minimap.setImageBitmap(this.activity.art.bitmap(SkinArt.MINIMAP_UNKNOWN));
+		final Bitmap mapPicture = lobbyMinimap();
+		minimap.setImageBitmap(mapPicture != null ? mapPicture : this.activity.art.bitmap(SkinArt.MINIMAP_UNKNOWN));
 		place(panel, minimap, frame + (t ? 8 : 2), frame + (t ? 8 : 2), ms, ms);
 		final float fx = frame + (t ? 8 : 2) + ms + (t ? 30 : 12);
 		final float fw = rightW - fx - frame;

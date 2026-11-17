@@ -61,6 +61,8 @@ public class MdxComplexInstance extends ModelInstance {
 	/** Called when the sequence reaches its end, so an owner that only reacts to the end need not poll every frame. */
 	public Runnable sequenceEndObserver;
 	public float[] vertexColor = { 1, 1, 1, 1 };
+	/** Whether this model casts its shape as a shadow onto the ground below it. */
+	public boolean groundShadow;
 	// Particles do not spawn when the sequence is -1, or when the sequence finished
 	// and it's not repeating
 	public boolean allowParticleSpawn = false;
@@ -68,12 +70,13 @@ public class MdxComplexInstance extends ModelInstance {
 	// Any later non-forced update can then use variancy to skip updating things.
 	// It is set to true every time the sequence is set with setSequence().
 	public boolean forced = true;
+	/** The spoken line whose face bones replace the sequence's while it plays; null for every instance but a talking HD portrait. */
+	private FaceFxPlayback facePlayback;
 	public float[][] geosetColors;
 	public float[] layerAlphas;
 	public int[] layerTextures;
 	public float[][] uvAnims;
 	public Matrix4[] worldMatrices;
-	public FloatBuffer worldMatricesCopyHeap;
 	// Filled first and copied in one call: one put per float into a direct buffer is slow on Android.
 	private float[] worldMatricesCopyArray;
 	// Only for frames in which the instance was not packed into its scene's bone atlas.
@@ -133,8 +136,6 @@ public class MdxComplexInstance extends ModelInstance {
 
 		// A shared typed array for all world matrices of the internal nodes.
 		this.worldMatrices = ((List<Matrix4>) sharedNodeData[1]).toArray(new Matrix4[0]);
-		this.worldMatricesCopyHeap = ByteBuffer.allocateDirect(boneTextureTexels(this.worldMatrices.length) * 16)
-				.order(ByteOrder.nativeOrder()).asFloatBuffer();
 		this.worldMatricesCopyArray = new float[16 * this.worldMatrices.length];
 
 		// And now initialize all of the nodes and objects
@@ -370,13 +371,16 @@ public class MdxComplexInstance extends ModelInstance {
 				final Quaternion localRotation = node.localRotation;
 				final Quaternion overrideWorldRotation = node.overrideWorldRotation;
 				final Vector3 localScale = node.localScale;
+				// A face bone is read from the sequence every frame: its pose is overwritten below and the sequence's is
+				// what the line blends in from and out to.
+				final boolean faceDriven = (facePlayback != null) && facePlayback.drives(i);
 
 				// Only update the local node data if there is a need to
-				if (forced || variants.generic[sequence]) {
+				if (forced || faceDriven || variants.generic[sequence]) {
 					wasDirty = true;
 
 					// Translation
-					if (forced || variants.translation[sequence]) {
+					if (forced || faceDriven || variants.translation[sequence]) {
 						genericObject.getTranslation(translationHeap, sequence, frame, counter);
 
 						localLocation.x = translationHeap[0];
@@ -385,7 +389,7 @@ public class MdxComplexInstance extends ModelInstance {
 					}
 
 					// Rotation
-					if (forced || variants.rotation[sequence]) {
+					if (forced || faceDriven || variants.rotation[sequence]) {
 						genericObject.getRotation(rotationHeap, sequence, frame, counter);
 
 						localRotation.x = rotationHeap[0];
@@ -395,13 +399,16 @@ public class MdxComplexInstance extends ModelInstance {
 					}
 
 					// Scale
-					if (forced || variants.scale[sequence]) {
+					if (forced || faceDriven || variants.scale[sequence]) {
 						genericObject.getScale(scaleHeap, sequence, frame, counter);
 
 						localScale.x = scaleHeap[0];
 						localScale.y = scaleHeap[1];
 						localScale.z = scaleHeap[2];
 					}
+				}
+				if (faceDriven) {
+					facePlayback.apply(i, node);
 				}
 				if (overrideWorldRotation != null) {
 					if (node.preOverrideLocalRotation != null) {
@@ -546,6 +553,19 @@ public class MdxComplexInstance extends ModelInstance {
 		}
 	}
 
+	// Every instance used to hold its own native buffer for this, freed only when a collection got to it; the upload
+	// is done on the render thread before the next instance needs the buffer.
+	private static FloatBuffer boneUploadScratch;
+
+	private static FloatBuffer boneUploadBuffer(final int floats) {
+		if ((boneUploadScratch == null) || (boneUploadScratch.capacity() < floats)) {
+			boneUploadScratch = ByteBuffer.allocateDirect(floats * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+		}
+		boneUploadScratch.clear();
+		boneUploadScratch.limit(floats);
+		return boneUploadScratch;
+	}
+
 	private static int boneTextureTexels(final int bones) {
 		final int texels = bones * 4;
 		if (texels <= BoneAtlas.WIDTH) {
@@ -614,10 +634,13 @@ public class MdxComplexInstance extends ModelInstance {
 				this.model.viewer.trackDataTexture(this.boneTexture);
 			}
 			if (this.boneTextureStale) {
-				this.worldMatricesCopyHeap.clear();
-				this.worldMatricesCopyHeap.put(this.worldMatricesCopyArray);
-				this.worldMatricesCopyHeap.clear();
-				this.boneTexture.bindAndUpdate(this.worldMatricesCopyHeap);
+				final FloatBuffer upload = boneUploadBuffer(boneTextureTexels(this.worldMatrices.length) * 4);
+				upload.put(this.worldMatricesCopyArray);
+				while (upload.hasRemaining()) {
+					upload.put(0f);
+				}
+				upload.flip();
+				this.boneTexture.bindAndUpdate(upload);
 				this.boneTextureStale = false;
 			}
 			texture = this.boneTexture;
@@ -766,12 +789,27 @@ public class MdxComplexInstance extends ModelInstance {
 		}
 	}
 
+	/**
+	 * Plays a spoken line on the face bones from now on, in place of any line still playing; null stops it.
+	 */
+	public void setFacePlayback(final FaceFxPlayback playback) {
+		if ((this.facePlayback != null) && (playback == null)) {
+			this.forced = true;
+		}
+		this.facePlayback = playback;
+	}
+
 	@Override
 	public void updateAnimations(final float dt) {
 		final int sequenceId = this.sequence;
 
 		advanceSequenceClock(dt);
 
+		if ((this.facePlayback != null) && this.facePlayback.advance(dt)) {
+			this.facePlayback = null;
+			// The face bones were overwritten, and the sequence does not set a bone it does not change.
+			this.forced = true;
+		}
 		final boolean forced = this.forced;
 
 		if (sequenceId == -1) {

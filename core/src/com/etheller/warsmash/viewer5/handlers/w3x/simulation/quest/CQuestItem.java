@@ -11,10 +11,6 @@ public class CQuestItem extends AllocatedHandle {
 		this.quest = quest;
 	}
 
-	public CQuest getQuest() {
-		return this.quest;
-	}
-
 	public String getDescription() {
 		return this.description;
 	}

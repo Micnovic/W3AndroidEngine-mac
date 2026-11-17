@@ -17,6 +17,7 @@ public class CSoundFilename extends AbstractCSound {
 	private final CSoundParameters parameters = new CSoundParameters();
 	private final String eaxSetting;
 	private long lastSoundId = -1;
+	private String fileName;
 
 	/**
 	 * @param fileDuration the length of the file in seconds (0 when it is missing); the sound may be null when this
@@ -201,6 +202,15 @@ public class CSoundFilename extends AbstractCSound {
 
 	void stopStacked(final long id) {
 		this.sound.stop(id);
+	}
+
+	/** The file the script created the sound from, as the script wrote it. */
+	public void setFileName(final String fileName) {
+		this.fileName = fileName;
+	}
+
+	public String getFileName() {
+		return this.fileName;
 	}
 
 	CSoundParameters getParameters() {

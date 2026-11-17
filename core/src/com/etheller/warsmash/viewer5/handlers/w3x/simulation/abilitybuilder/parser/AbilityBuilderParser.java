@@ -150,10 +150,6 @@ public class AbilityBuilderParser {
 		return ids;
 	}
 
-	public void setIds(List<AbilityBuilderDupe> ids) {
-		this.ids = ids;
-	}
-
 	public String getParentId() {
 		return parentId;
 	}

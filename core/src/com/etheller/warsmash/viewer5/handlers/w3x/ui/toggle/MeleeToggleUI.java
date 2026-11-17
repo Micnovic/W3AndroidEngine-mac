@@ -1,7 +1,10 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui.toggle;
 
 import com.etheller.warsmash.input.touch.PointKind;
+import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.CineFilter;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.FrameEventSink;
 import java.util.List;
 
 import com.badlogic.gdx.Gdx;
@@ -335,6 +338,21 @@ public class MeleeToggleUI implements WarsmashUI {
 	}
 
 	@Override
+	public CPlayerUnitOrderListener getUnitOrderListener() {
+		return this.meleeUI.getUnitOrderListener();
+	}
+
+	@Override
+	public UIFrame getOriginFrame(final int originType, final int index) {
+		return this.meleeUI.getOriginFrame(originType, index);
+	}
+
+	@Override
+	public void setFrameEventSink(final FrameEventSink sink) {
+		this.meleeUI.setFrameEventSink(sink);
+	}
+
+	@Override
 	public void endTouchHover() {
 		this.meleeUI.endTouchHover();
 	}
@@ -393,6 +411,11 @@ public class MeleeToggleUI implements WarsmashUI {
 	public void setCinematicScene(int portraitUnitId, CPlayerColor color, String speakerTitle, String text,
 			float sceneDuration, float voiceoverDuration) {
 		this.meleeUI.setCinematicScene(portraitUnitId, color, speakerTitle, text, sceneDuration, voiceoverDuration);
+	}
+
+	@Override
+	public void dialogueSoundStarted(final String soundPath) {
+		this.meleeUI.dialogueSoundStarted(soundPath);
 	}
 
 	@Override

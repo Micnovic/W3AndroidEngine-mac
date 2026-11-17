@@ -26,6 +26,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimerSleepAction;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Natives that start and command computer player scripts, and those common.ai declares again.
@@ -134,7 +135,7 @@ final class AINatives extends CommonNatives {
 				final String str = nullable(arguments, 0, StringJassValueVisitor.getInstance());
 				final int val = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 
-				final String value = "DebugFI: " + String.format(str, val);
+				final String value = "DebugFI: " + String.format(Locale.ROOT, str, val);
 				meleeUI.displayTimedText(0, 0, 20, value);
 				Log.warn(value);
 				return null;
@@ -148,7 +149,7 @@ final class AINatives extends CommonNatives {
 				final int valRawcode = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 				final War3ID valId = new War3ID(valRawcode);
 
-				final String value = "DebugUnitID: " + String.format(str, valId);
+				final String value = "DebugUnitID: " + String.format(Locale.ROOT, str, valId);
 				meleeUI.displayTimedText(0, 0, 20, value);
 				Log.warn(value);
 				return null;
@@ -175,7 +176,7 @@ final class AINatives extends CommonNatives {
 				final int p = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
 				final String str = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 				final int v1 = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
-				final String value = String.format(str, v1);
+				final String value = String.format(Locale.ROOT, str, v1);
 				if (war3MapViewer.isViewedPlayer(p)) {
 					meleeUI.displayTimedText(0, 0, 20, value);
 				}
@@ -191,7 +192,7 @@ final class AINatives extends CommonNatives {
 				final String str = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 				final int v1 = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 				final int v2 = arguments.get(3).visit(IntegerJassValueVisitor.getInstance());
-				final String value = String.format(str, v1, v2);
+				final String value = String.format(Locale.ROOT, str, v1, v2);
 				if (war3MapViewer.isViewedPlayer(p)) {
 					meleeUI.displayTimedText(0, 0, 20, value);
 				}
@@ -208,7 +209,7 @@ final class AINatives extends CommonNatives {
 				final int v1 = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 				final int v2 = arguments.get(3).visit(IntegerJassValueVisitor.getInstance());
 				final int v3 = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
-				final String value = String.format(str, v1, v2, v3);
+				final String value = String.format(Locale.ROOT, str, v1, v2, v3);
 				if (war3MapViewer.isViewedPlayer(p)) {
 					meleeUI.displayTimedText(0, 0, 20, value);
 				}

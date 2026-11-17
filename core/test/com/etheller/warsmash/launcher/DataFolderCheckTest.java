@@ -41,4 +41,21 @@ class DataFolderCheckTest {
 		assertEquals("war3.w3mod,war3.w3mod\\_deprecated.w3mod,war3.w3mod\\_locales\\enus.w3mod",
 				DataFolderCheck.cascPrefixes(this.folder));
 	}
+
+	@Test
+	void anInstallListsTheLanguagesOfItsTags() throws IOException {
+		buildInfo("Windows enUS? deDE? enUS speech?:enUS text?:deDE text?");
+		assertEquals(Arrays.asList("enUS", "deDE"), DataFolderCheck.locales(DataFolderCheck.Kind.CASC, this.folder));
+	}
+
+	@Test
+	void anExtractedFolderListsTheLanguageFoldersThatHoldText() throws IOException {
+		for (final String layer : new String[] { "enus", "eses" }) {
+			final File ui = new File(this.folder, "_locales/" + layer + ".w3mod/ui");
+			ui.mkdirs();
+			Files.write(new File(ui, "WorldEditGameStrings.txt").toPath(), new byte[] { 1 });
+		}
+		new File(this.folder, "_locales/frfr.w3mod").mkdirs();
+		assertEquals(Arrays.asList("enUS", "esES"), DataFolderCheck.locales(DataFolderCheck.Kind.FOLDER, this.folder));
+	}
 }

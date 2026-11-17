@@ -5,6 +5,7 @@ import java.util.EnumMap;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.warsmash.parsers.fdf.GameUI;
@@ -28,6 +29,9 @@ public abstract class AbstractRenderableFrame implements UIFrame {
 	protected String name;
 	protected UIFrame parent;
 	protected boolean visible = true;
+	/** A map script hid the frame: the game keeps showing and hiding it as it likes, and it stays out of sight. */
+	private boolean scriptHidden;
+	private float renderScale = 1f;
 	protected int level;
 	private float renderAlpha = 1f;
 	protected final Rectangle renderBounds = new Rectangle(0, 0, 0, 0); // in libgdx rendering space
@@ -332,7 +336,43 @@ public abstract class AbstractRenderableFrame implements UIFrame {
 
 	@Override
 	public boolean isVisible() {
-		return this.visible;
+		return this.visible && !this.scriptHidden;
+	}
+
+	public void setScriptHidden(final boolean scriptHidden) {
+		this.scriptHidden = scriptHidden;
+	}
+
+	public boolean isScriptHidden() {
+		return this.scriptHidden;
+	}
+
+	/** Draws the frame and what it holds enlarged about its center; input finds it where it is drawn. */
+	public void setRenderScale(final float renderScale) {
+		this.renderScale = renderScale;
+	}
+
+	public float getRenderScale() {
+		return this.renderScale;
+	}
+
+	/** The point of the frame's parent that lands on a point of the screen once this frame's scale is undone. */
+	public static float localX(final UIFrame frame, final float x) {
+		if ((frame instanceof AbstractRenderableFrame) && (((AbstractRenderableFrame) frame).renderScale != 1f)) {
+			final AbstractRenderableFrame scaled = (AbstractRenderableFrame) frame;
+			final float center = scaled.renderBounds.x + (scaled.renderBounds.width / 2);
+			return center + ((x - center) / scaled.renderScale);
+		}
+		return x;
+	}
+
+	public static float localY(final UIFrame frame, final float y) {
+		if ((frame instanceof AbstractRenderableFrame) && (((AbstractRenderableFrame) frame).renderScale != 1f)) {
+			final AbstractRenderableFrame scaled = (AbstractRenderableFrame) frame;
+			final float center = scaled.renderBounds.y + (scaled.renderBounds.height / 2);
+			return center + ((y - center) / scaled.renderScale);
+		}
+		return y;
 	}
 
 	public int getLevel() {
@@ -350,20 +390,40 @@ public abstract class AbstractRenderableFrame implements UIFrame {
 
 	@Override
 	public final void render(final SpriteBatch batch, final BitmapFont font20, final GlyphLayout glyphLayout) {
-		if (this.visible) {
-			if ((this.renderAlpha < 1f) && (batch instanceof FadingSpriteBatch)) {
-				if (this.renderAlpha <= 0f) {
-					return;
-				}
-				final FadingSpriteBatch fadingBatch = (FadingSpriteBatch) batch;
-				final float outerAlpha = fadingBatch.getAlphaScale();
-				fadingBatch.setAlphaScale(outerAlpha * this.renderAlpha);
-				internalRender(batch, font20, glyphLayout);
-				fadingBatch.setAlphaScale(outerAlpha);
+		if (this.visible && !this.scriptHidden) {
+			if (this.renderScale != 1f) {
+				renderScaled(batch, font20, glyphLayout);
 			}
 			else {
-				internalRender(batch, font20, glyphLayout);
+				renderFaded(batch, font20, glyphLayout);
 			}
+		}
+	}
+
+	private void renderScaled(final SpriteBatch batch, final BitmapFont font20, final GlyphLayout glyphLayout) {
+		final float centerX = this.renderBounds.x + (this.renderBounds.width / 2);
+		final float centerY = this.renderBounds.y + (this.renderBounds.height / 2);
+		final Matrix4 outer = new Matrix4(batch.getTransformMatrix());
+		final Matrix4 scaled = new Matrix4(outer).translate(centerX, centerY, 0).scale(this.renderScale,
+				this.renderScale, 1f).translate(-centerX, -centerY, 0);
+		batch.setTransformMatrix(scaled);
+		renderFaded(batch, font20, glyphLayout);
+		batch.setTransformMatrix(outer);
+	}
+
+	private void renderFaded(final SpriteBatch batch, final BitmapFont font20, final GlyphLayout glyphLayout) {
+		if ((this.renderAlpha < 1f) && (batch instanceof FadingSpriteBatch)) {
+			if (this.renderAlpha <= 0f) {
+				return;
+			}
+			final FadingSpriteBatch fadingBatch = (FadingSpriteBatch) batch;
+			final float outerAlpha = fadingBatch.getAlphaScale();
+			fadingBatch.setAlphaScale(outerAlpha * this.renderAlpha);
+			internalRender(batch, font20, glyphLayout);
+			fadingBatch.setAlphaScale(outerAlpha);
+		}
+		else {
+			internalRender(batch, font20, glyphLayout);
 		}
 	}
 
@@ -390,7 +450,7 @@ public abstract class AbstractRenderableFrame implements UIFrame {
 
 	@Override
 	public boolean isVisibleOnScreen() {
-		boolean visibleOnScreen = this.visible;
+		boolean visibleOnScreen = isVisible();
 		UIFrame ancestor = this.parent;
 		while (visibleOnScreen && (ancestor != null)) {
 			visibleOnScreen &= ancestor.isVisible();

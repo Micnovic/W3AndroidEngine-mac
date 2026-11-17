@@ -409,6 +409,11 @@ final class ProfilePage extends LauncherViews {
 		return y + 60;
 	}
 
+	/** The campaign list follows the edition, so the progress read for the other one no longer fits. */
+	void editionChanged() {
+		this.profileProgress = null;
+	}
+
 	/** The current profile changed: its progress and saves are read again. */
 	private void profileChanged() {
 		this.activity.campaigns = null;

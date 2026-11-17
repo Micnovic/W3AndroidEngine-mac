@@ -51,44 +51,16 @@ public class CUpgradeType {
 		return upgradeEffects;
 	}
 
-	public boolean isAppliesToAllUnits() {
-		return appliesToAllUnits;
-	}
-
 	public CUpgradeClass getUpgradeClass() {
 		return upgradeClass;
-	}
-
-	public int getGoldBase() {
-		return goldBase;
-	}
-
-	public int getGoldIncrement() {
-		return goldIncrement;
 	}
 
 	public int getLevelCount() {
 		return levelCount;
 	}
 
-	public int getLumberBase() {
-		return lumberBase;
-	}
-
-	public int getLumberIncrement() {
-		return lumberIncrement;
-	}
-
 	public CUnitRace getUnitRace() {
 		return unitRace;
-	}
-
-	public int getTimeBase() {
-		return timeBase;
-	}
-
-	public int getTimeIncrement() {
-		return timeIncrement;
 	}
 
 	public boolean isTransferWithUnitOwnership() {

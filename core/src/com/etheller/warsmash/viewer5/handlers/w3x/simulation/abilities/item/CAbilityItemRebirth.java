@@ -5,6 +5,7 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CBuffSpellArt;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbstractCAbilityTypeDefinition;
@@ -12,8 +13,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 
 /**
- * Rune of Rebirth: the dead monster that held the rune comes back to life under the control of the unit that took
- * it.
+ * Rune of Rebirth: a new unit of the type the rune was dropped by (its drop id) comes to life next to the unit that took
+ * it, under that unit's control. Heroes and runes without a drop id give nothing.
  */
 public class CAbilityItemRebirth extends AbstractCAbilityItemInstantUse {
 	private War3ID buffId;
@@ -39,13 +40,16 @@ public class CAbilityItemRebirth extends AbstractCAbilityItemInstantUse {
 			return true;
 		}
 		final CItem item = getItem();
-		final CUnit holder = item == null ? null : item.getLastHolder();
 		game.unitSoundEffectEvent(caster, getAlias());
-		if ((holder != null) && holder.isDead() && !holder.isHero()) {
-			holder.resurrect(game);
-			holder.changeOwner(game, caster.getPlayerIndex(), true);
-			holder.add(game, new CBuffSpellArt(game.getHandleIdAllocator().createId(), this.buffId, true, true));
-			game.createTemporarySpellEffectOnUnit(holder, getAlias(), CEffectType.TARGET);
+		final War3ID dropId = item == null ? null : item.getDropId();
+		final CUnitType dropType = (dropId == null) ? null : game.getUnitData().getUnitType(dropId);
+		if ((dropType != null) && !dropType.isHero()) {
+			final CUnit reborn = game.createUnit(dropId, caster.getPlayerIndex(), caster.getX(), caster.getY(),
+					caster.getFacing());
+			if (reborn != null) {
+				reborn.add(game, new CBuffSpellArt(game.getHandleIdAllocator().createId(), this.buffId, true, true));
+				game.createTemporarySpellEffectOnUnit(reborn, getAlias(), CEffectType.TARGET);
+			}
 		}
 		return false;
 	}

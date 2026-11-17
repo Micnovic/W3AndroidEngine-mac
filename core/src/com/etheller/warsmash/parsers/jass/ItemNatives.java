@@ -46,7 +46,80 @@ final class ItemNatives extends CommonNatives {
 	void register() {
 		registerItems();
 		registerInventory();
+		registerEquipment();
 		registerStock();
+	}
+
+	/**
+	 * The loadout natives of the Reforged 3.0 item model (equipment slots, bags, item tags). The engine has the
+	 * classic six-slot inventory only: no unit has equipment slots, nothing is equipped or bagged, every item has
+	 * the first equipment type and tag, and the random item filters (which only select by those) match every item.
+	 * A map written for the loadout therefore runs without a script error and sees an empty loadout.
+	 */
+	private void registerEquipment() {
+		final HandleJassType itemType = type("item");
+		final String[] noItem = { "GetEquippedItem", "BlzGetEquippedItem", "GetUnequippedItem",
+				"BlzGetUnequippedItem", "UnitUnequipItemFromSlot", "BlzUnitUnequipItemFromSlot", "UnitItemInBagSlot",
+				"BlzUnitItemInBagSlot", "UnitItemInEquipmentSlot", "BlzUnitItemInEquipmentSlot" };
+		for (final String name : noItem) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(itemType, null));
+		}
+		final String[] noBoolean = { "IsItemEquipped", "BlzIsItemEquipped", "IsItemInBag", "BlzIsItemInBag",
+				"UnitEquipItem", "BlzUnitEquipItem", "UnitHasItemBagged", "BlzUnitHasItemBagged",
+				"UnitHasItemEquipped", "BlzUnitHasItemEquipped", "UnitHasAnyItemEquiped",
+				"BlzUnitHasAnyItemEquipped", "UnitHasItemEquipmentOfType", "BlzUnitHasItemEquipmentOfType",
+				"UnitCanEquipItemOfEquipmentType", "BlzUnitCanEquipItemOfEquipmentType" };
+		for (final String name : noBoolean) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
+		}
+		for (final String name : new String[] { "UnitHasLoadoutSlotEmpty", "BlzUnitHasLoadoutSlotEmpty" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> BooleanJassValue.TRUE);
+		}
+		for (final String name : new String[] { "UnitExtendedInventorySize", "BlzUnitExtendedInventorySize" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> IntegerJassValue.of(0));
+		}
+		for (final String name : new String[] { "UnitUnequipItem", "BlzUnitUnequipItem" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name, (arguments, globalScope, triggerScope) -> null);
+		}
+		for (final String name : new String[] { "GetItemEquipmentType", "BlzGetItemEquipmentType" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> jassProgramVisitor.getJassNativeManager()
+							.convertedConstant(globalScope.getHandleType(declaredName(globalScope, "equipmenttype",
+									"equipmentType")), 0));
+		}
+		for (final String name : new String[] { "GetItemTag", "BlzGetItemTag" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> jassProgramVisitor.getJassNativeManager()
+							.convertedConstant(globalScope.getHandleType(declaredName(globalScope, "itemtag",
+									"itemTag")), 0));
+		}
+		for (final String name : new String[] { "ChooseRandomItemExWithFilter",
+				"ChooseRandomItemExWithFilterAndIncludes" }) {
+			jassProgramVisitor.getJassNativeManager().createNative(name,
+					(arguments, globalScope, triggerScope) -> {
+						final CItemTypeJass whichType = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
+						final int level = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+						final War3ID randomItemId = this.simulation.getItemData().chooseRandomItem(whichType, level,
+								this.simulation.getSeededRandom());
+						return IntegerJassValue.of(randomItemId == null ? 0 : randomItemId.getValue());
+					});
+		}
+	}
+
+	/** Which spelling of a type name common.j declared: the name is lower case in some versions of the file. */
+	private static String declaredName(final com.etheller.interpreter.ast.scope.GlobalScope globalScope,
+			final String lowerCase, final String camelCase) {
+		try {
+			globalScope.parseType(lowerCase);
+			return lowerCase;
+		}
+		catch (final RuntimeException e) {
+			return camelCase;
+		}
 	}
 
 	private void registerItems() {
@@ -459,8 +532,18 @@ final class ItemNatives extends CommonNatives {
 					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					final CItem whichItem = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
 					final int slot = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
-					return BooleanJassValue.of((usableInventory(whichUnit) != null)
-							&& usableInventory(whichUnit).moveItemToSlot(whichItem, slot));
+					final CAbilityInventory inventoryData = usableInventory(whichUnit);
+					if ((inventoryData == null) || (whichItem == null) || (slot < 0)
+							|| (slot >= inventoryData.getItemCapacity()) || (inventoryData.getSlot(whichItem) == -1)) {
+						return BooleanJassValue.FALSE;
+					}
+					// Measured on 1.29: the move is an instant item-drag order to the target item, so the issued
+					// order events fire with the drag order id of the slot.
+					this.simulation.getDefaultPlayerUnitOrderExecutor(whichUnit.getPlayerIndex()).issueTargetOrder(
+							whichUnit.getHandleId(), inventoryData.getHandleId(),
+							OrderIds.itemDragFirst(this.simulation.getGameData().isUseNineItemInventory()) + slot,
+							whichItem.getHandleId(), false);
+					return BooleanJassValue.TRUE;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("UnitRemoveItemFromSlot",
 				(arguments, globalScope, triggerScope) -> {

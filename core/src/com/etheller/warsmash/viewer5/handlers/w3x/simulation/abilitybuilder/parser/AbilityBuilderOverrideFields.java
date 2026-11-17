@@ -69,99 +69,51 @@ public class AbilityBuilderOverrideFields {
 	public ABFloatCallback getAreaOverride() {
 		return areaOverride;
 	}
-	public void setAreaOverride(ABFloatCallback areaOverride) {
-		this.areaOverride = areaOverride;
-	}
 	public ABFloatCallback getRangeOverride() {
 		return rangeOverride;
-	}
-	public void setRangeOverride(ABFloatCallback rangeOverride) {
-		this.rangeOverride = rangeOverride;
 	}
 	public ABFloatCallback getCastTimeOverride() {
 		return castTimeOverride;
 	}
-	public void setCastTimeOverride(ABFloatCallback castTimeOverride) {
-		this.castTimeOverride = castTimeOverride;
-	}
 	public ABFloatCallback getCooldownOverride() {
 		return cooldownOverride;
-	}
-	public void setCooldownOverride(ABFloatCallback cooldownOverride) {
-		this.cooldownOverride = cooldownOverride;
 	}
 	public ABIntegerCallback getManaCostOverride() {
 		return manaCostOverride;
 	}
-	public void setManaCostOverride(ABIntegerCallback manaCostOverride) {
-		this.manaCostOverride = manaCostOverride;
-	}
 	public ABBooleanCallback getIgnoreCastTime() {
 		return ignoreCastTime;
-	}
-	public void setIgnoreCastTime(ABBooleanCallback ignoreCastTime) {
-		this.ignoreCastTime = ignoreCastTime;
 	}
 	public ABBooleanCallback getRepeatCast() {
 		return repeatCast;
 	}
-	public void setRepeatCast(ABBooleanCallback repeatCast) {
-		this.repeatCast = repeatCast;
-	}
 	public ABAutocastTypeCallback getAutocastTypeOverride() {
 		return autocastTypeOverride;
-	}
-	public void setAutocastTypeOverride(ABAutocastTypeCallback autocastTypeOverride) {
-		this.autocastTypeOverride = autocastTypeOverride;
 	}
 	public ABIDCallback getOnTooltipOverride() {
 		return onTooltipOverride;
 	}
-	public void setOnTooltipOverride(ABIDCallback onTooltipOverride) {
-		this.onTooltipOverride = onTooltipOverride;
-	}
 	public ABIDCallback getOffTooltipOverride() {
 		return offTooltipOverride;
-	}
-	public void setOffTooltipOverride(ABIDCallback offTooltipOverride) {
-		this.offTooltipOverride = offTooltipOverride;
 	}
 	public ABBooleanCallback getPhysicalSpell() {
 		return physicalSpell;
 	}
-	public void setPhysicalSpell(ABBooleanCallback physicalSpell) {
-		this.physicalSpell = physicalSpell;
-	}
 	public ABBooleanCallback getMagicSpell() {
 		return magicSpell;
-	}
-	public void setMagicSpell(ABBooleanCallback magicSpell) {
-		this.magicSpell = magicSpell;
 	}
 	public ABBooleanCallback getUniversalSpell() {
 		return universalSpell;
 	}
-	public void setUniversalSpell(ABBooleanCallback universalSpell) {
-		this.universalSpell = universalSpell;
-	}
 	public ABBooleanCallback getDispel() {
 		return dispel;
-	}
-	public void setDispel(ABBooleanCallback dispel) {
-		this.dispel = dispel;
 	}
 
 	public List<ABTargetTypeCallback> getExtraTargetsAllowed() {
 		return extraTargetsAllowed;
 	}
-	public void setExtraTargetsAllowed(List<ABTargetTypeCallback> extraTargetsAllowed) {
-		this.extraTargetsAllowed = extraTargetsAllowed;
-	}
 	public List<ABTargetTypeCallback> getExcludedTargetsAllowed() {
 		return excludedTargetsAllowed;
-	}
-	public void setExcludedTargetsAllowed(List<ABTargetTypeCallback> excludedTargetsAllowed) {
-		this.excludedTargetsAllowed = excludedTargetsAllowed;
 	}
 
 }

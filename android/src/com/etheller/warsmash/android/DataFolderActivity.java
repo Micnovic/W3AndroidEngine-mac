@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 
 import android.app.Activity;
@@ -49,6 +50,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import com.etheller.warsmash.launcher.DataContentCheck;
 import com.etheller.warsmash.launcher.DataFolderCheck;
 import com.etheller.warsmash.launcher.DataPackage;
 
@@ -81,7 +83,7 @@ public class DataFolderActivity extends Activity {
 	private static final int RED = Color.rgb(0xE2, 0x9A, 0x9A);
 
 	private enum Status {
-		WAITING, CHECKING, FOUND, FOUND_UNREADABLE, MISSING, NEEDS_ACCESS, GONE, UNREADABLE, WRITE_FAILED, IMPORTING,
+		WAITING, CHECKING, FOUND, FOUND_UNREADABLE, FOUND_INCOMPLETE, MISSING, NEEDS_ACCESS, GONE, UNREADABLE, WRITE_FAILED, IMPORTING,
 		IMPORT_FAILED
 	}
 
@@ -225,6 +227,8 @@ public class DataFolderActivity extends Activity {
 	/** The files of the chosen folder the game cannot read, when it could be walked. */
 	private DataFolderCheck.Readability readability;
 	private String description;
+	/** What the found data lacks of scripts and maps; empty for complete data. */
+	private List<DataContentCheck.Problem> contentProblems = Collections.emptyList();
 	private Button importButton;
 	private Button cancelButton;
 	private ProgressBar progressBar;
@@ -547,6 +551,9 @@ public class DataFolderActivity extends Activity {
 									&& (!needsAllFilesAccess() || isInAppFolder(found))
 											? DataFolderCheck.readability(found, MAX_WALKED_FILES, UNREADABLE_NAMES)
 											: null;
+			final List<DataContentCheck.Problem> problems = foundKind == DataFolderCheck.Kind.NONE
+					? Collections.emptyList()
+					: DataContentCheck.check(foundKind, found);
 			String description = null;
 			if (foundKind != DataFolderCheck.Kind.NONE) {
 				description = DataFolderCheck.describe(foundKind, found) + " · "
@@ -570,9 +577,23 @@ public class DataFolderActivity extends Activity {
 				this.unreadable = unreadable;
 				this.readability = readability;
 				this.description = details;
+				this.contentProblems = problems;
 				show(null);
 			});
 		}, "DataFolderCheck").start();
+	}
+
+	private String problemText(final DataContentCheck.Problem problem) {
+		return getString(getResources().getIdentifier(problem.message, "string", getPackageName()));
+	}
+
+	/** The problems after the first, which the status line names. */
+	private String incompleteMore() {
+		final StringBuilder more = new StringBuilder();
+		for (int i = 1; i < this.contentProblems.size(); i++) {
+			more.append(" · ").append(problemText(this.contentProblems.get(i)));
+		}
+		return more.toString();
 	}
 
 	private void show(final Status checking) {
@@ -594,7 +615,8 @@ public class DataFolderActivity extends Activity {
 			status = Status.WRITE_FAILED;
 		}
 		else if (this.kind != DataFolderCheck.Kind.NONE) {
-			status = hasUnreadableFiles() ? Status.FOUND_UNREADABLE : Status.FOUND;
+			status = hasUnreadableFiles() ? Status.FOUND_UNREADABLE
+					: this.contentProblems.isEmpty() ? Status.FOUND : Status.FOUND_INCOMPLETE;
 		}
 		else if (needsAllFilesAccess() && !isInAppFolder(this.dataFolder)) {
 			status = Status.NEEDS_ACCESS;
@@ -609,12 +631,14 @@ public class DataFolderActivity extends Activity {
 			status = Status.MISSING;
 		}
 		showFolder();
-		final boolean found = (status == Status.FOUND) || (status == Status.FOUND_UNREADABLE);
+		final boolean found = (status == Status.FOUND) || (status == Status.FOUND_UNREADABLE)
+				|| (status == Status.FOUND_INCOMPLETE);
 		final boolean importing = status == Status.IMPORTING;
 		final boolean appInUse = found && isInAppFolder(this.dataFolder);
 		// A package in the folder, or files the game cannot read, make the import the next step.
 		final boolean importNext = (this.packageZip != null) || (status == Status.UNREADABLE)
-				|| (status == Status.FOUND_UNREADABLE) || (status == Status.IMPORT_FAILED);
+				|| (status == Status.FOUND_UNREADABLE) || (status == Status.FOUND_INCOMPLETE)
+				|| (status == Status.IMPORT_FAILED);
 		this.chooseButton.setText(this.dataFolder == null ? R.string.data_folder_choose : R.string.data_folder_change);
 		look(this.chooseButton, importing ? Look.DISABLED
 				: !importNext && ((status == Status.WAITING) || (status == Status.MISSING) || (status == Status.GONE))
@@ -655,6 +679,11 @@ public class DataFolderActivity extends Activity {
 					getString(R.string.data_folder_found_unreadable, this.readability.unreadable),
 					getString(R.string.data_folder_found_unreadable_detail, this.description,
 							this.readability.firstNames()));
+			break;
+		case FOUND_INCOMPLETE:
+			showStatus("!", GOLD, Color.rgb(0x2A, 0x20, 0x12), Color.rgb(0x6A, 0x54, 0x26),
+					problemText(this.contentProblems.get(0)),
+					getString(R.string.data_folder_incomplete_detail, this.description + incompleteMore()));
 			break;
 		case IMPORTING:
 			showImport(job);
@@ -796,6 +825,14 @@ public class DataFolderActivity extends Activity {
 								dataPackage.gameVersion.isEmpty() ? "?" : dataPackage.gameVersion,
 								dataPackage.fileCount(), Formatter.formatShortFileSize(app, dataPackage.totalBytes));
 				job.update(0, dataPackage.totalBytes, 0, dataPackage.fileCount());
+				// A full DE / HD set is tens of gigabytes; the shortfall is said before any file is written.
+				final long free = DataPackage.freeBytesFor(target);
+				final long leftover = treeBytes(new File(target.getParentFile(), target.getName() + ".importing"))
+						+ treeBytes(new File(target.getParentFile(), target.getName() + ".old"));
+				if (free + leftover < dataPackage.neededBytes()) {
+					throw new DataPackage.ImportException(DataPackage.Problem.NO_SPACE,
+							(free + leftover) + " / " + dataPackage.neededBytes());
+				}
 				job.opened = true;
 				dataPackage.importInto(target, job, () -> job.cancelled);
 				Log.i(TAG, "Game data imported from " + name + ": " + dataPackage.fileCount() + " files");
@@ -816,6 +853,20 @@ public class DataFolderActivity extends Activity {
 			}
 		}, "DataImport").start();
 		watchImport();
+	}
+
+	private static long treeBytes(final File file) {
+		if (file.isFile()) {
+			return file.length();
+		}
+		final File[] children = file.listFiles();
+		long bytes = 0;
+		if (children != null) {
+			for (final File child : children) {
+				bytes += treeBytes(child);
+			}
+		}
+		return bytes;
 	}
 
 	/** Shows the import's progress while it runs and its outcome once it ends. */

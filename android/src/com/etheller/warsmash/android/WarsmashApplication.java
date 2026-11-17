@@ -1,21 +1,28 @@
 package com.etheller.warsmash.android;
 
 import java.security.MessageDigest;
+import java.util.Locale;
 
 import android.app.Application;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.os.Build;
 
 import com.etheller.warsmash.BuildInfo;
+import com.etheller.warsmash.launcher.BuildOrigin;
 
 /** Tells the engine which certificate this APK is signed with, so that it knows whether it is an official build. */
 public class WarsmashApplication extends Application {
+	private static volatile String signer = "";
+
 	@Override
 	public void onCreate() {
 		super.onCreate();
-		BuildInfo.setSigningCertificate(signingCertificateSha256());
+		signer = signingCertificateSha256();
+		BuildInfo.setSigningCertificate(signer);
 		ProfileStorageAndroid.init(this);
 		com.etheller.warsmash.lan.LanSessions.setNetwork(new AndroidLanNetwork(this));
 		com.etheller.warsmash.launcher.lan.LanText.use((name, arguments) -> {
@@ -25,6 +32,11 @@ public class WarsmashApplication extends Application {
 			}
 			return arguments.length == 0 ? getString(id) : getString(id, arguments);
 		});
+	}
+
+	/** The not-official notice or "Debug build" when this APK is not signed with the project's key, else an empty text. */
+	static String originLabel(final Context context) {
+		return BuildOrigin.label((context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0, signer);
 	}
 
 	/** The SHA-256 of the certificate the APK is signed with (the signer, not an earlier one it rotated from). */
@@ -50,7 +62,7 @@ public class WarsmashApplication extends Application {
 			final byte[] digest = MessageDigest.getInstance("SHA-256").digest(signatures[0].toByteArray());
 			final StringBuilder hex = new StringBuilder();
 			for (final byte b : digest) {
-				hex.append(String.format("%02x", b & 0xFF));
+				hex.append(String.format(Locale.ROOT, "%02x", b & 0xFF));
 			}
 			return hex.toString();
 		}

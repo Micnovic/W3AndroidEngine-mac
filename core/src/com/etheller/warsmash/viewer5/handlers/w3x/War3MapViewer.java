@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,11 +47,17 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.Set;
-import org.apache.commons.io.IOUtils;
+import java.util.function.Consumer;
+import com.etheller.warsmash.util.StreamBytes;
+import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
+import com.hiveworkshop.rms.parsers.mdlx.MdlxLight;
+import com.hiveworkshop.rms.parsers.mdlx.MdlxModel;
+import com.hiveworkshop.rms.parsers.mdlx.timeline.MdlxTimeline;
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
@@ -58,6 +65,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Plane;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.etheller.warsmash.common.FetchDataTypeName;
@@ -137,6 +145,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedGame;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedInterfaceState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDoodadTable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameExit;
@@ -159,6 +168,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightning;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightningMovable;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.ScriptMinimapIcon;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.SettableCommandErrorListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.sound.KeyedSounds;
 import mpq.MPQArchive;
@@ -227,6 +237,8 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public MappedData doodadMetaData = new MappedData();
 	public MappedData destructableMetaData = new MappedData();
 	public List<RenderDoodad> doodads = new ArrayList<>();
+	/** The doodads scripts read: from the map file, not from the drawn ones. */
+	public CDoodadTable doodadTable = CDoodadTable.empty();
 	static final float SKY_FAR_PLANE = 100000f;
 	static final float UNIT_INDICATOR_SECONDS = 3f;
 	static final float UNIT_INDICATOR_PULSE_SECONDS = 1f;
@@ -278,9 +290,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	DataTable animSoundsTable;
 	private DataTable scriptSoundsTable;
 	public DataTable miscData;
+	/** The constants the simulation plays by: those of the data without graphics packages. */
+	public DataTable simulationMiscData;
 	private com.etheller.warsmash.viewer5.handlers.w3x.ui.AllyColorFilter allyColorFilter;
 	boolean restartMissionDisabled;
 	String altMinimapIcon;
+	private final List<ScriptMinimapIcon> scriptMinimapIcons = new ArrayList<>();
 	Element misc;
 	private final Map<String, TextTagConfig> keyToTextTagConfig = new HashMap<>();
 	DataTable unitGlobalStrings;
@@ -298,6 +313,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public Vector2[] startLocations;
 
 	final DynamicShadowManager dynamicShadowManager = new DynamicShadowManager();
+	private Vector3 shadowSunDirection;
 
 	/** Seeds the simulation; -Dwarsmash.seed fixes it so test runs repeat. Kept in saved games. */
 	private int gameSeed = chooseGameSeed();
@@ -431,6 +447,29 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return MapViewerEffects.createUbersplat(this, state);
 	}
 
+	private DataTable simulationUberSplatTable;
+
+	/**
+	 * Whether the splat type exists, read from the data every graphics set shares, so that scripts create the same
+	 * splats (and take the same handles) on every machine of a game.
+	 */
+	public synchronized boolean hasSimulationUberSplat(final String name) {
+		if (this.simulationUberSplatTable == null) {
+			final DataTable table = new DataTable(this.worldEditStrings);
+			try (InputStream stream = this.dataSource.graphicsIndependent()
+					.getResourceAsStream("Splats\\UberSplatData.slk")) {
+				if (stream != null) {
+					table.readSLK(stream);
+				}
+			}
+			catch (final IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+			this.simulationUberSplatTable = table;
+		}
+		return this.simulationUberSplatTable.get(name) != null;
+	}
+
 	public List<com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUbersplat> getScriptUbersplats() {
 		return this.scriptUbersplats;
 	}
@@ -504,6 +543,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		super.dispose();
 		try {
 			this.dataSource.close();
+			if (this.mapMpq != null) {
+				this.mapMpq.close();
+			}
 		}
 		catch (final IOException e) {
 			Log.error("Could not close the data of the finished map: " + e.getMessage());
@@ -1236,9 +1278,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				this.gameTurnManager.whilePaused();
 			}
 			if (this.dncTerrain != null) {
-				this.dncTerrain.setFrameByRatio(
-						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
+				final float dayRatio = this.simulation.getGameTimeOfDay()
+						/ this.simulation.getGameplayConstants().getGameDayHours();
+				this.dncTerrain.setFrameByRatio(dayRatio);
 				this.dncTerrain.update(rawDeltaTime, null);
+				this.dynamicShadowManager.setSunLight(this.shadowSunDirection, dayRatio);
 			}
 			if (this.dncUnit != null) {
 				this.dncUnit.setFrameByRatio(
@@ -1293,6 +1337,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	static final long FAST_FORWARD_FRAME_NANOS = 40_000_000L;
+
+	public DynamicShadowManager getDynamicShadowManager() {
+		return this.dynamicShadowManager;
+	}
 
 	public void setRenderScale(final float renderScale) {
 		this.renderScale = Math.max(0.25f, Math.min(1f, renderScale));
@@ -1404,6 +1452,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			this.skyScene.alpha = true;
 		}
 		final MdxModel model = MapViewerEffects.loadModelMdx(this.dataSource, this, path, this.mapPathSolver, this.solverParams);
+		if (model == null) {
+			return;
+		}
 		this.skyInstance = (MdxComplexInstance) model.addInstance();
 		this.skyInstance.setSequenceLoopMode(SequenceLoopMode.ALWAYS_LOOP);
 		this.skyInstance.setSequence(0);
@@ -1424,6 +1475,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public void setDoodadAnimation(final String doodadId, final Rectangle area, final float centerX,
 			final float centerY, final float radius, final boolean nearestOnly, final String animation) {
 		MapViewerDoodads.setDoodadAnimation(this, doodadId, area, centerX, centerY, radius, nearestOnly, animation);
+	}
+
+	public void setDoodadColor(final String doodadId, final Rectangle area, final float centerX,
+			final float centerY, final float radius, final boolean nearestOnly, final int playerColor) {
+		MapViewerDoodads.setDoodadColor(this, doodadId, area, centerX, centerY, radius, nearestOnly, playerColor);
 	}
 
 	@Override
@@ -1601,9 +1657,42 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		setDayNightModels(terrainModel, unitModel);
 	}
 
+	/**
+	 * The direction of the main light of a day and night cycle model, from the ground towards the light, as the model
+	 * has it in the Classic data. The graphics packages' versions of these models light the world, but their light
+	 * stands higher than the one the shadows of the Reforged game fall along.
+	 */
+	private static Vector3 readSunDirection(final DataSource data, final String modelPath) {
+		final String path = mdx(modelPath);
+		try {
+			if (!data.has(path)) {
+				return null;
+			}
+			try (InputStream stream = data.getResourceAsStream(path)) {
+				final MdlxModel parser = new MdlxModel(ByteBuffer.wrap(StreamBytes.readAll(stream)));
+				for (final MdlxLight light : parser.getLights()) {
+					if (light.type != MdlxLight.Type.DIRECTIONAL) {
+						continue;
+					}
+					for (final MdlxTimeline<?> timeline : light.getTimelines()) {
+						if (timeline.name.equals(AnimationMap.KGRT.getWar3id()) && (timeline.getValues().length > 0)) {
+							final float[] q = (float[]) timeline.getValues()[0];
+							return new Quaternion(q[0], q[1], q[2], q[3]).transform(new Vector3(0, 0, 1)).nor();
+						}
+					}
+				}
+			}
+		}
+		catch (final IOException | RuntimeException e) {
+			Log.warn("The light of " + modelPath + " could not be read: " + e);
+		}
+		return null;
+	}
+
 	public void setDayNightModels(final String terrainDNCFile, final String unitDNCFile) {
 		this.dayNightTerrainModel = terrainDNCFile;
 		this.dayNightUnitModel = unitDNCFile;
+		this.shadowSunDirection = readSunDirection(this.dataSource.graphicsIndependent(), terrainDNCFile);
 		final MdxModel terrainDNCModel = loadModelMdx(terrainDNCFile);
 		this.dncTerrain = (MdxComplexInstance) terrainDNCModel.addInstance();
 		this.dncTerrain.setSequenceLoopMode(SequenceLoopMode.ALWAYS_LOOP);
@@ -1620,20 +1709,20 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public static String mdx(String mdxPath) {
-		if (mdxPath.toLowerCase().endsWith(".mdl")) {
+		if (mdxPath.toLowerCase(Locale.ROOT).endsWith(".mdl")) {
 			mdxPath = mdxPath.substring(0, mdxPath.length() - 4);
 		}
-		if (!mdxPath.toLowerCase().endsWith(".mdx")) {
+		if (!mdxPath.toLowerCase(Locale.ROOT).endsWith(".mdx")) {
 			mdxPath += ".mdx";
 		}
 		return mdxPath;
 	}
 
 	public static String mdl(String mdxPath) {
-		if (mdxPath.toLowerCase().endsWith(".mdx")) {
+		if (mdxPath.toLowerCase(Locale.ROOT).endsWith(".mdx")) {
 			mdxPath = mdxPath.substring(0, mdxPath.length() - 4);
 		}
-		if (!mdxPath.toLowerCase().endsWith(".mdl")) {
+		if (!mdxPath.toLowerCase(Locale.ROOT).endsWith(".mdl")) {
 			mdxPath += ".mdl";
 		}
 		return mdxPath;
@@ -1644,7 +1733,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		if (lastDotIndex != -1) {
 			iconPath = iconPath.substring(0, lastDotIndex);
 		}
-		if (!iconPath.toLowerCase().endsWith(".blp")) {
+		if (!iconPath.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 			iconPath += ".blp";
 		}
 		return iconPath;
@@ -1726,6 +1815,19 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public MdxComplexInstance getHighestWalkableUnder(final float x, final float y) {
 		this.walkableObjectsTree.intersect(x, y, this.intersectorFindsHighestWalkable.reset(x, y));
 		return this.intersectorFindsHighestWalkable.highestInstance;
+	}
+
+	/**
+	 * Shows the unit with the model of another unit type (BlzSetUnitSkin); the simulation unit keeps its own type.
+	 * False when the id is no unit type or the unit has no drawn peer.
+	 */
+	public boolean setUnitSkin(final CUnit unit, final War3ID skinId) {
+		if ((this.renderUnitTypeData == null) || !this.unitToRenderPeer.containsKey(unit)
+				|| (this.renderUnitTypeData.get(skinId) == null)) {
+			return false;
+		}
+		this.renderController.unitUpdatedType(unit, skinId, true);
+		return true;
 	}
 
 	/** Shows the item with the model of another item type (BlzSetItemSkin); false when that type has no model. */
@@ -1812,6 +1914,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public void setAltMinimapIcon(final String altMinimapIcon) {
 		this.altMinimapIcon = altMinimapIcon;
+	}
+
+	/** The icons map scripts put on the minimap; only the minimap draws them, the simulation never reads them. */
+	public List<ScriptMinimapIcon> getScriptMinimapIcons() {
+		return this.scriptMinimapIcons;
 	}
 
 	public RenderUnit getRenderPeer(final CUnit unit) {
@@ -2007,11 +2114,14 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	@Override
 	public MdxModel emptyModel() {
-		final ResourceHandler handler = (ResourceHandler) findHandler(".mdx")[0];
-		final MdxModel model = (MdxModel) handler
-				.construct(new ResourceHandlerConstructionParams(this, handler, ".mdx", this.mapPathSolver, ""));
-		model.loadData(null, null);
-		return model;
+		if (this.emptyModel == null) {
+			final ResourceHandler handler = (ResourceHandler) findHandler(".mdx")[0];
+			final MdxModel model = (MdxModel) handler
+					.construct(new ResourceHandlerConstructionParams(this, handler, ".mdx", this.mapPathSolver, ""));
+			model.loadData(null, null);
+			this.emptyModel = model;
+		}
+		return this.emptyModel;
 	}
 
 	public static MdxModel loadModelMdx(final DataSource dataSource, final ModelViewer modelViewer, final String path,
@@ -2153,7 +2263,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return MapViewerVision.fadeLineOfSightColor(lastFogStateColor, state);
 	}
 
+	private MdxModel emptyModel;
+
 	public final class MapLoader {
+		/** The longest a step of the loading runs before it hands the frame back, so that a paused app can stop. */
+		private static final long SLICE_NANOS = 20_000_000L;
+
 		private final LinkedList<LoadMapTask> loadMapTasks = new LinkedList<>();
 		private int startingTaskCount;
 
@@ -2190,7 +2305,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 								dataSources.add(new SubdirDataSource(compoundDataSource,
 										"_tilesets/" + this.tileset + ".w3mod/"));
 							} else {
-								final byte[] mapData = IOUtils.toByteArray(mapStream);
+								final byte[] mapData = StreamBytes.readAll(mapStream);
 								sbc = new SeekableInMemoryByteChannel(mapData);
 								final DataSource internalMpqContentsDataSource = new MpqDataSource(new MPQArchive(sbc),
 										sbc);
@@ -2220,6 +2335,8 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 						dataSources.add(new SubdirDataSource(compoundDataSource,
 								"Melee_V" + War3MapViewer.this.gameData.getGameVersion() + "\\"));
 					}
+					// Last, so the map's own files win over the game data's version folders and the tileset files.
+					dataSources.add(war3Map.getMapContentsDataSource());
 					this.tilesetSource = new CompoundDataSource(dataSources);
 				} catch (final MPQException e) {
 					throw new RuntimeException(e);
@@ -2235,6 +2352,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			});
 			this.loadMapTasks.add(() -> {
 				loadSLKs(War3MapViewer.this.worldEditStrings);
+			});
+			this.loadMapTasks.add(() -> {
+				MapViewerVision.applyMapTerrainFog(War3MapViewer.this, w3iFile);
 			});
 
 			this.loadMapTasks.add(() -> {
@@ -2279,11 +2399,13 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			});
 
 			this.loadMapTasks.add(() -> {
-				if (War3MapViewer.this.preloadedWTS != null) {
-					War3MapViewer.this.allObjectData = War3MapViewer.this.mapMpq
-							.readModifications(War3MapViewer.this.preloadedWTS);
-				} else {
-					War3MapViewer.this.allObjectData = War3MapViewer.this.mapMpq.readModifications();
+				final Warcraft3MapRuntimeObjectData.Loading loading = War3MapViewer.this.mapMpq
+						.readModificationsInSteps(War3MapViewer.this.preloadedWTS);
+				addNextTask(() -> War3MapViewer.this.allObjectData = loading.getResult());
+				final List<Warcraft3MapRuntimeObjectData.Step> steps = loading.getSteps();
+				for (int i = steps.size() - 1; i >= 0; i--) {
+					final Warcraft3MapRuntimeObjectData.Step step = steps.get(i);
+					addNextTask(step::run);
 				}
 			});
 			this.loadMapTasks.add(() -> {
@@ -2294,14 +2416,15 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 						War3MapViewer.this.gameData.mapGameVersion(War3MapViewer.this.mapFileName,
 								w3iFile.getGameDataVersion()),
 						War3MapViewer.this.gameData,
-						War3MapViewer.this.miscData, War3MapViewer.this.allObjectData.getUnits(),
+						War3MapViewer.this.simulationMiscData, War3MapViewer.this.allObjectData.getUnits(),
 						War3MapViewer.this.allObjectData.getItems(),
 						War3MapViewer.this.allObjectData.getDestructibles(),
 						War3MapViewer.this.allObjectData.getAbilities(), War3MapViewer.this.allObjectData.getUpgrades(),
 						War3MapViewer.this.allObjectData.getStandardUpgradeEffectMeta(),
 						War3MapViewer.this.renderController, War3MapViewer.this.pathingTextures,
 						War3MapViewer.this.terrain.pathingGrid,
-						CTerrainData.load(this.terrainData, this.tileset, War3MapViewer.this.dataSource,
+						CTerrainData.load(this.terrainData, this.tileset,
+								War3MapViewer.this.dataSource.graphicsIndependent(),
 								War3MapViewer.this.worldEditStrings),
 						War3MapViewer.this.terrain.getEntireMap(),
 						War3MapViewer.this.seededRandom, War3MapViewer.this.commandErrorListener);
@@ -2311,7 +2434,8 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			this.loadMapTasks.add(() -> {
 				War3MapViewer.this.walkableObjectsTree = new Quadtree<>(War3MapViewer.this.terrain.getEntireMap());
 				if (War3MapViewer.this.doodadsAndDestructiblesLoaded) {
-					MapViewerDoodads.loadDoodadsAndDestructibles(War3MapViewer.this, War3MapViewer.this.allObjectData, w3iFile);
+					MapViewerDoodads.queueDoodadsAndDestructibles(War3MapViewer.this, War3MapViewer.this.allObjectData,
+							w3iFile, this);
 				} else {
 					throw new IllegalStateException(
 							"transcription of JS has not loaded a map and has no JS async promises");
@@ -2331,6 +2455,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			});
 
 			this.loadMapTasks.add(() -> {
+				MapViewerEffects.applyMapGlobalWeather(War3MapViewer.this, w3iFile);
+			});
+
+			this.loadMapTasks.add(() -> {
 				MapViewerPrewarm.queue(War3MapViewer.this, w3iFile, this);
 			});
 
@@ -2340,7 +2468,59 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		public boolean process() throws IOException {
 			final LoadMapTask nextTask = this.loadMapTasks.pollFirst();
 			nextTask.run();
+			if (hasDeferredTextures()) {
+				addNextTask(this::loadDeferredTextures);
+			}
 			return this.loadMapTasks.isEmpty();
+		}
+
+		/**
+		 * Wraps a task that loads models, whose textures are then decoded and uploaded in frames of their own after
+		 * it, a slice at a time: one model's textures can take longer than an app that is paused may be held up.
+		 */
+		public LoadMapTask modelTask(final LoadMapTask task) {
+			return () -> {
+				final boolean before = setDeferTextureLoads(true);
+				try {
+					task.run();
+				}
+				finally {
+					setDeferTextureLoads(before);
+				}
+			};
+		}
+
+		private void loadDeferredTextures() {
+			final long end = System.nanoTime() + SLICE_NANOS;
+			do {
+				loadNextDeferredTexture();
+			}
+			while (hasDeferredTextures() && (System.nanoTime() < end));
+		}
+
+		/**
+		 * Runs the items in slices of a frame each, ahead of the tasks still waiting, and then the task that follows.
+		 */
+		public <T> void addSlices(final Iterator<T> items, final Consumer<T> each, final LoadMapTask after)
+				throws IOException {
+			if (!items.hasNext()) {
+				after.run();
+				return;
+			}
+			addNextTask(modelTask(() -> {
+				final long end = System.nanoTime() + SLICE_NANOS;
+				do {
+					each.accept(items.next());
+				}
+				while (items.hasNext() && (System.nanoTime() < end));
+				addSlices(items, each, after);
+			}));
+		}
+
+		/** Puts a task ahead of those waiting, for the rest of work a task spreads over several frames. */
+		public void addNextTask(final LoadMapTask task) {
+			this.loadMapTasks.addFirst(task);
+			this.startingTaskCount++;
 		}
 
 		public void addLoadTask(final LoadMapTask task) {

@@ -56,9 +56,7 @@ public class EmitterGroup extends GenericGroup {
 		instancedArrays.glVertexAttribDivisorANGLE(shader.getAttributeLocation("a_tail"), 1);
 		instancedArrays.glVertexAttribDivisorANGLE(shader.getAttributeLocation("a_leftRightTop"), 1);
 
-		for (final int index : getObjectArray()) {
-			GeometryEmitterFuncs.renderEmitter((MdxEmitter<?, ?, ?>) nodes[index].object, shader);
-		}
+		GeometryEmitterFuncs.renderEmitters(nodes, getObjectArray(), shader);
 
 		instancedArrays.glVertexAttribDivisorANGLE(shader.getAttributeLocation("a_leftRightTop"), 0);
 		instancedArrays.glVertexAttribDivisorANGLE(shader.getAttributeLocation("a_tail"), 0);

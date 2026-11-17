@@ -20,8 +20,11 @@ import com.etheller.warsmash.launcher.CampaignChoice;
 import com.etheller.warsmash.launcher.LauncherImages;
 import com.etheller.warsmash.launcher.LauncherLog;
 import com.etheller.warsmash.launcher.SkinArt;
+import com.etheller.warsmash.units.DataTable;
+import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.util.DataSourceFileHandle;
+import com.etheller.warsmash.util.StringBundle;
 
 /**
  * The launcher's art on the desktop: the same files of the game data the Android launcher prepares into its cache,
@@ -51,6 +54,8 @@ final class LauncherArt {
 		}
 	}
 
+	/** Stands for the data's own font among the font generators. */
+	private static final String LANGUAGE_FONT = "language";
 	/** Fonts of the bold face are kept under their size plus this. */
 	private static final int BOLD_KEY = 1 << 16;
 
@@ -63,6 +68,8 @@ final class LauncherArt {
 	private final Map<String, Texture> owned = new HashMap<>();
 	private final Map<String, FreeTypeFontGenerator> generators = new HashMap<>();
 	private Map<String, String> missionPictures;
+	/** The font file the data's own skin names where it is not Friz Quadrata; empty for none, null until read. */
+	private String languageFont;
 	/** While set, the pictures made are made without colour and darker. */
 	private boolean muting;
 
@@ -318,6 +325,8 @@ final class LauncherArt {
 				parameter.size = size % BOLD_KEY;
 				parameter.flip = true;
 				parameter.characters = CHARACTERS;
+				// Names and strings of the data may use signs the preset lacks (Chinese, Korean, Cyrillic).
+				parameter.incremental = true;
 				parameter.minFilter = Texture.TextureFilter.Linear;
 				parameter.magFilter = Texture.TextureFilter.Linear;
 				font = generator.generateFont(parameter);
@@ -334,10 +343,10 @@ final class LauncherArt {
 		final String name = fontName(bold);
 		if (!this.generators.containsKey(name)) {
 			FreeTypeFontGenerator generator = null;
-			final SkinArt.Item item = this.items.get(name);
+			final String path = name.equals(LANGUAGE_FONT) ? this.languageFont : pathOf(name);
 			try {
-				if ((item != null) && this.data.has(item.path)) {
-					generator = new FreeTypeFontGenerator(new DataSourceFileHandle(this.data, item.path));
+				if ((path != null) && this.data.has(path)) {
+					generator = new FreeTypeFontGenerator(new DataSourceFileHandle(this.data, path));
 				}
 			}
 			catch (final RuntimeException e) {
@@ -348,13 +357,55 @@ final class LauncherArt {
 		return this.generators.get(name);
 	}
 
-	/** The skin's font file: the Reforged interface's own where the game data has it, else Friz Quadrata. */
+	private String pathOf(final String name) {
+		final SkinArt.Item item = this.items.get(name);
+		return item == null ? null : item.path;
+	}
+
+	/**
+	 * The skin's font file: the one the game's own skin names when it is not one of the launcher's Latin fonts (they
+	 * have no Chinese, Korean or Cyrillic signs), else the Reforged interface's where the game data has it, else Friz
+	 * Quadrata.
+	 */
 	private String fontName(final boolean bold) {
+		if (languageFont().length() > 0) {
+			return LANGUAGE_FONT;
+		}
 		final String own = bold ? SkinArt.FONT_BOLD : SkinArt.FONT_MASTER;
 		if (this.reforged && this.items.containsKey(own) && this.data.has(this.items.get(own).path)) {
 			return own;
 		}
 		return SkinArt.FONT;
+	}
+
+	/** Whether a font file is one the launcher's skin uses for Latin text, which the data's skin may name as well. */
+	private static boolean isLatinFont(final String path) {
+		for (final SkinArt.Item item : SkinArt.items(true)) {
+			if ((SkinArt.FONT.equals(item.name) || SkinArt.FONT_MASTER.equals(item.name)
+					|| SkinArt.FONT_BOLD.equals(item.name)) && item.path.equalsIgnoreCase(path)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private String languageFont() {
+		if (this.languageFont == null) {
+			this.languageFont = "";
+			try (InputStream stream = this.data.getResourceAsStream("UI\\war3skins.txt")) {
+				final DataTable skins = new DataTable(StringBundle.EMPTY);
+				skins.readTXT(stream, true);
+				final Element defaults = skins.get("Default");
+				final String font = defaults == null ? null : defaults.getField("MasterFont");
+				if ((font != null) && !font.isEmpty() && !isLatinFont(font) && this.data.has(font)) {
+					this.languageFont = font;
+				}
+			}
+			catch (final IOException | RuntimeException e) {
+				LauncherLog.w("Unable to read the skin's font", e);
+			}
+		}
+		return this.languageFont;
 	}
 
 	/** Fonts are made for a scale; a new scale makes them again. */

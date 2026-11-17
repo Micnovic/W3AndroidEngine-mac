@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
+import java.util.Locale;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -38,6 +39,11 @@ final class HeroBarIcon extends MultiSelectionIcon {
 		this.pointsGlow = pointsGlow;
 	}
 
+	/** The skill point mark on the button, ORIGIN_FRAME_HERO_BUTTON_INDICATOR. */
+	UIFrame getPointsOverlay() {
+		return this.pointsOverlay;
+	}
+
 	/** The idle worker button shows its count on the same number overlay. */
 	void setCount(final int count) {
 		setSkillPoints(count, false);
@@ -74,7 +80,7 @@ final class HeroBarIcon extends MultiSelectionIcon {
 			name += " (|cfffed312F" + (index + 1) + "|r)";
 		}
 		setToolTip(name);
-		setInfoTip(String.format(strings.getDecoratedString("INFOPANEL_LEVEL").replace("%u", "%d"), level));
+		setInfoTip(String.format(Locale.ROOT, strings.getDecoratedString("INFOPANEL_LEVEL").replace("%u", "%d"), level));
 		setUberTip("");
 	}
 

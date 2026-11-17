@@ -113,10 +113,6 @@ public class CUnitAttackMissileSplash extends CUnitAttackMissile {
 		this.areaOfEffectSmallDamage = areaOfEffectSmallDamage;
 	}
 
-	public void setAreaOfEffectTargets(final EnumSet<CTargetType> areaOfEffectTargets) {
-		this.areaOfEffectTargets = areaOfEffectTargets;
-	}
-
 	public void setDamageFactorMedium(final float damageFactorMedium) {
 		this.damageFactorMedium = damageFactorMedium;
 	}

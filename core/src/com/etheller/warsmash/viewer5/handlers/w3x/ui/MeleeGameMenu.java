@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.util.GameDataConstants;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.frames.GlueTextButtonFrame;
@@ -103,7 +104,9 @@ final class MeleeGameMenu {
 		this.tipsBack = (GlueTextButtonFrame) rootFrame.getFrameByName("TipsBackButton", 0);
 		this.tipsNext = (GlueTextButtonFrame) rootFrame.getFrameByName("TipsNextButton", 0);
 		this.tips = readTips(dataSource);
-		this.help = readHelp(dataSource);
+		// The data's help is about playing; the port's own name and address lead it, so every build shows them.
+		this.help = ProjectInfo.NAME + " by " + ProjectInfo.AUTHOR + "\n" + ProjectInfo.SOURCE_URL + "\n\n"
+				+ readHelp(dataSource);
 
 		this.saveButton = button("SaveGameButton", () -> {
 			hideMain();

@@ -12,6 +12,7 @@ import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Camera;
 import com.etheller.warsmash.viewer5.ModelViewer;
 import com.etheller.warsmash.viewer5.Scene;
+import com.etheller.warsmash.viewer5.SkeletalNode;
 import com.etheller.warsmash.viewer5.Texture;
 import com.etheller.warsmash.viewer5.TextureMapper;
 import com.etheller.warsmash.viewer5.gl.ANGLEInstancedArrays;
@@ -81,10 +82,12 @@ public class GeometryEmitterFuncs {
 	private static final Vector3 startHeap = new Vector3();
 	private static final Vector3 endHeap = new Vector3();
 	private static final float[] vectorTemp = new float[3];
+	private static int[] drawCounts = new int[8];
 	private static final Vector3[] vector3Heap = { new Vector3(), new Vector3(), new Vector3(), new Vector3(),
 			new Vector3(), new Vector3() };
 
-	public static void bindParticleEmitter2Buffer(final ParticleEmitter2 emitter, final ClientBuffer buffer) {
+	public static void bindParticleEmitter2Buffer(final ParticleEmitter2 emitter, final ClientBuffer buffer,
+			final int base) {
 		final MdxComplexInstance instance = emitter.instance;
 		final List<Particle2> objects = emitter.objects;
 		final float[] staging = buffer.staging;
@@ -100,7 +103,7 @@ public class GeometryEmitterFuncs {
 			final boolean head = tailness.isIncludesHead();
 
 			if (head) {
-				final int floatOffset = offset * FLOATS_PER_OBJECT;
+				final int floatOffset = (base + offset) * FLOATS_PER_OBJECT;
 				final int p0Offset = floatOffset + FLOAT_OFFSET_P0;
 				Vector3 location = object.location;
 				final Vector3 scale = object.scale;
@@ -137,7 +140,7 @@ public class GeometryEmitterFuncs {
 				offset += 1;
 			}
 			if (tail) {
-				final int floatOffset = offset * FLOATS_PER_OBJECT;
+				final int floatOffset = (base + offset) * FLOATS_PER_OBJECT;
 				final int p0Offset = floatOffset + FLOAT_OFFSET_P0;
 				final Vector3 location = object.location;
 				final Vector3 scale = object.scale;
@@ -178,7 +181,7 @@ public class GeometryEmitterFuncs {
 
 		}
 
-		buffer.commitStaging(offset * FLOATS_PER_OBJECT);
+		buffer.commitStaging(base * FLOATS_PER_OBJECT, offset * FLOATS_PER_OBJECT);
 	}
 
 
@@ -226,9 +229,7 @@ public class GeometryEmitterFuncs {
 		shader.setUniformf("u_teamColored", emitterObject.teamColored);
 		shader.setUniformi("u_unshaded", emitterObject.emitterUsesMdlOrUnshaded != 0 ? 1 : 0);
 		shader.setUniformi("u_unfogged", emitterObject.unfogged != 0 ? 1 : 0);
-		shader.setUniformf("u_fogColor", scene.fogSettings.color);
-		shader.setUniformf("u_fogParams", scene.fogSettings.style.ordinal(), scene.fogSettings.start,
-				scene.fogSettings.end, scene.fogSettings.density);
+		scene.fogSettings.uploadUniforms(shader);
 
 		final W3xSceneLightManager lightManager = (W3xSceneLightManager) scene.getLightManager();
 		final DataTexture unitLightsTexture = lightManager.getUnitLightsTexture();
@@ -259,7 +260,7 @@ public class GeometryEmitterFuncs {
 		shader.setUniform3fv("u_cameraZ", asFloatArray(camera.billboardedVectors[6]), 0, 3);
 	}
 
-	public static void bindRibbonEmitterBuffer(final RibbonEmitter emitter, final ClientBuffer buffer) {
+	public static void bindRibbonEmitterBuffer(final RibbonEmitter emitter, final ClientBuffer buffer, final int base) {
 		Ribbon object = emitter.first;
 		final ByteBuffer byteView = buffer.byteView;
 		final float[] staging = buffer.staging;
@@ -271,7 +272,7 @@ public class GeometryEmitterFuncs {
 
 		while (object.next != null) {
 			final float[] next = object.next.vertices;
-			final int floatOffset = offset * FLOATS_PER_OBJECT;
+			final int floatOffset = (base + offset) * FLOATS_PER_OBJECT;
 			final int p0Offset = floatOffset + FLOAT_OFFSET_P0;
 			final float[] vertices = object.vertices;
 
@@ -295,11 +296,11 @@ public class GeometryEmitterFuncs {
 		}
 
 		// The color and left/right/top bytes go in after the float copy, over the zeros it leaves in their slots.
-		buffer.commitStaging(offset * FLOATS_PER_OBJECT);
+		buffer.commitStaging(base * FLOATS_PER_OBJECT, offset * FLOATS_PER_OBJECT);
 		offset = 0;
 		object = emitter.first;
 		while (object.next != null) {
-			final int byteOffset = offset * BYTES_PER_OBJECT;
+			final int byteOffset = (base + offset) * BYTES_PER_OBJECT;
 			final int colorOffset = byteOffset + BYTE_OFFSET_COLOR;
 			final int leftRightTopOffset = byteOffset + BYTE_OFFSET_LEFT_RIGHT_TOP;
 			final float left = ((object.slot % columns) + (1 - (offset * chainLengthFactor) - chainLengthFactor))
@@ -345,14 +346,15 @@ public class GeometryEmitterFuncs {
 	}
 
 	public static void bindEventObjectSplEmitterBuffer(
-			final EventObjectEmitter<EventObjectEmitterObject, EventObjectSpl> emitter, final ClientBuffer buffer) {
+			final EventObjectEmitter<EventObjectEmitterObject, EventObjectSpl> emitter, final ClientBuffer buffer,
+			final int base) {
 		final List<EventObjectSpl> objects = emitter.objects;
 		final ByteBuffer byteView = buffer.byteView;
 		final float[] staging = buffer.staging;
 		int offset = 0;
 
 		for (final EventObjectSpl object : objects) {
-			final int floatOffset = offset * FLOATS_PER_OBJECT;
+			final int floatOffset = (base + offset) * FLOATS_PER_OBJECT;
 
 			// Once one object does not fit, none of the later ones do either.
 			if (staging.length < (floatOffset + FLOATS_PER_OBJECT)) {
@@ -368,12 +370,12 @@ public class GeometryEmitterFuncs {
 			offset += 1;
 		}
 
-		buffer.commitStaging(offset * FLOATS_PER_OBJECT);
+		buffer.commitStaging(base * FLOATS_PER_OBJECT, offset * FLOATS_PER_OBJECT);
 
 		// The normal bytes go in after the float copy, over the zeros it leaves in their slots.
 		for (int i = 0; i < offset; i++) {
 			final IVec3 normal = objects.get(i).normal;
-			final int leftRightTopOffset = (i * BYTES_PER_OBJECT) + BYTE_OFFSET_LEFT_RIGHT_TOP;
+			final int leftRightTopOffset = ((base + i) * BYTES_PER_OBJECT) + BYTE_OFFSET_LEFT_RIGHT_TOP;
 			byteView.put(leftRightTopOffset + 0, (byte) (normal.x));
 			byteView.put(leftRightTopOffset + 1, (byte) (normal.y));
 			byteView.put(leftRightTopOffset + 2, (byte) (normal.z));
@@ -429,13 +431,14 @@ public class GeometryEmitterFuncs {
 	}
 
 	public static void bindEventObjectUbrEmitterBuffer(
-			final EventObjectEmitter<EventObjectEmitterObject, EventObjectUbr> emitter, final ClientBuffer buffer) {
+			final EventObjectEmitter<EventObjectEmitterObject, EventObjectUbr> emitter, final ClientBuffer buffer,
+			final int base) {
 		final List<EventObjectUbr> objects = emitter.objects;
 		final float[] staging = buffer.staging;
 		int offset = 0;
 
 		for (final EventObjectUbr object : objects) {
-			final int floatOffset = offset * FLOATS_PER_OBJECT;
+			final int floatOffset = (base + offset) * FLOATS_PER_OBJECT;
 
 			System.arraycopy(object.vertices, 0, staging, floatOffset + FLOAT_OFFSET_P0, 12);
 
@@ -446,7 +449,7 @@ public class GeometryEmitterFuncs {
 			offset += 1;
 		}
 
-		buffer.commitStaging(offset * FLOATS_PER_OBJECT);
+		buffer.commitStaging(base * FLOATS_PER_OBJECT, offset * FLOATS_PER_OBJECT);
 	}
 
 	public static void bindEventObjectUbrEmitterShader(final EventObjectUbrEmitter emitter,
@@ -478,7 +481,8 @@ public class GeometryEmitterFuncs {
 		shader.setUniform4fv("u_colors[2]", colors[2], 0, 4);
 	}
 
-	public static void renderEmitter(final MdxEmitter<?, ?, ?> emitter, final ShaderProgram shader) {
+	/** How many instances the emitter draws this frame; 0 when it draws nothing. */
+	private static int drawCount(final MdxEmitter<?, ?, ?> emitter) {
 		int alive = emitter.alive;
 		final EmitterObject emitterObject = emitter.emitterObject;
 		final int emitterType = emitterObject.getGeometryEmitterType();
@@ -493,52 +497,110 @@ public class GeometryEmitterFuncs {
 			alive -= 1;
 		}
 		else if (emitterType == EMITTER_SPN) {
+			return 0;
+		}
+		return Math.max(alive, 0);
+	}
+
+	/**
+	 * Draws the emitters of one model instance. Their instance data goes into the shared buffer one emitter after the
+	 * other and is uploaded once, instead of giving the buffer fresh storage for every emitter.
+	 */
+	public static void renderEmitters(final SkeletalNode[] nodes, final int[] emitterNodes, final ShaderProgram shader) {
+		final int count = emitterNodes.length;
+		if (drawCounts.length < count) {
+			drawCounts = new int[count];
+		}
+		final int[] counts = drawCounts;
+		int total = 0;
+		ModelViewer viewer = null;
+
+		for (int i = 0; i < count; i++) {
+			final MdxEmitter<?, ?, ?> emitter = (MdxEmitter<?, ?, ?>) nodes[emitterNodes[i]].object;
+			final int alive = drawCount(emitter);
+			counts[i] = alive;
+			if (alive > 0) {
+				total += alive;
+				viewer = emitter.instance.model.viewer;
+			}
+		}
+		if (total == 0) {
 			return;
 		}
 
-		if (alive > 0) {
-			final ModelViewer viewer = emitter.instance.model.viewer;
-			final ANGLEInstancedArrays instancedArrays = viewer.webGL.instancedArrays;
-			final ClientBuffer buffer = viewer.buffer;
-			final GL20 gl = viewer.gl;
-			final int size = alive * BYTES_PER_OBJECT;
+		final ANGLEInstancedArrays instancedArrays = viewer.webGL.instancedArrays;
+		final ClientBuffer buffer = viewer.buffer;
 
-			buffer.reserve(size);
+		buffer.reserve(total * BYTES_PER_OBJECT);
 
-			switch (emitterType) {
-			case EMITTER_PARTICLE2:
-				bindParticleEmitter2Buffer((ParticleEmitter2) emitter, buffer);
-				bindParticleEmitter2Shader((ParticleEmitter2) emitter, shader);
-				break;
-			case EMITTER_RIBBON:
-				bindRibbonEmitterBuffer((RibbonEmitter) emitter, buffer);
-				bindRibbonEmitterShader((RibbonEmitter) emitter, shader);
-				break;
-			case EMITTER_SPLAT:
-				bindEventObjectSplEmitterBuffer((EventObjectSplEmitter) emitter, buffer);
-				bindEventObjectSplEmitterShader((EventObjectSplEmitter) emitter, shader);
-				break;
-			default:
-				bindEventObjectUbrEmitterBuffer((EventObjectUbrEmitter) emitter, buffer);
-				bindEventObjectUbrEmitterShader((EventObjectUbrEmitter) emitter, shader);
-				break;
+		int base = 0;
+		for (int i = 0; i < count; i++) {
+			if (counts[i] > 0) {
+				final MdxEmitter<?, ?, ?> emitter = (MdxEmitter<?, ?, ?>) nodes[emitterNodes[i]].object;
+				switch (emitter.emitterObject.getGeometryEmitterType()) {
+				case EMITTER_PARTICLE2:
+					bindParticleEmitter2Buffer((ParticleEmitter2) emitter, buffer, base);
+					break;
+				case EMITTER_RIBBON:
+					bindRibbonEmitterBuffer((RibbonEmitter) emitter, buffer, base);
+					break;
+				case EMITTER_SPLAT:
+					bindEventObjectSplEmitterBuffer((EventObjectSplEmitter) emitter, buffer, base);
+					break;
+				default:
+					bindEventObjectUbrEmitterBuffer((EventObjectUbrEmitter) emitter, buffer, base);
+					break;
+				}
+				base += counts[i];
 			}
+		}
 
-			buffer.bindAndReplace(size);
+		buffer.bindAndReplace(total * BYTES_PER_OBJECT);
 
-			shader.setUniformf("u_emitter", emitterType);
+		base = 0;
+		for (int i = 0; i < count; i++) {
+			final int alive = counts[i];
+			if (alive > 0) {
+				final MdxEmitter<?, ?, ?> emitter = (MdxEmitter<?, ?, ?>) nodes[emitterNodes[i]].object;
+				final int emitterType = emitter.emitterObject.getGeometryEmitterType();
+				final int byteBase = base * BYTES_PER_OBJECT;
 
-			shader.setVertexAttribute("a_p0", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, BYTE_OFFSET_P0);
-			shader.setVertexAttribute("a_p1", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, BYTE_OFFSET_P1);
-			shader.setVertexAttribute("a_p2", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, BYTE_OFFSET_P2);
-			shader.setVertexAttribute("a_p3", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, BYTE_OFFSET_P3);
-			shader.setVertexAttribute("a_health", 1, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, BYTE_OFFSET_HEALTH);
-			shader.setVertexAttribute("a_color", 4, GL20.GL_UNSIGNED_BYTE, true, BYTES_PER_OBJECT, BYTE_OFFSET_COLOR);
-			shader.setVertexAttribute("a_tail", 1, GL20.GL_UNSIGNED_BYTE, false, BYTES_PER_OBJECT, BYTE_OFFSET_TAIL);
-			shader.setVertexAttribute("a_leftRightTop", 3, GL20.GL_UNSIGNED_BYTE, false, BYTES_PER_OBJECT,
-					BYTE_OFFSET_LEFT_RIGHT_TOP);
+				switch (emitterType) {
+				case EMITTER_PARTICLE2:
+					bindParticleEmitter2Shader((ParticleEmitter2) emitter, shader);
+					break;
+				case EMITTER_RIBBON:
+					bindRibbonEmitterShader((RibbonEmitter) emitter, shader);
+					break;
+				case EMITTER_SPLAT:
+					bindEventObjectSplEmitterShader((EventObjectSplEmitter) emitter, shader);
+					break;
+				default:
+					bindEventObjectUbrEmitterShader((EventObjectUbrEmitter) emitter, shader);
+					break;
+				}
 
-			instancedArrays.glDrawArraysInstancedANGLE(GL20.GL_TRIANGLES, 0, 6, alive);
+				// Binding the textures and layers above may have changed the bound array buffer.
+				buffer.bind();
+
+				shader.setUniformf("u_emitter", emitterType);
+
+				shader.setVertexAttribute("a_p0", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, byteBase + BYTE_OFFSET_P0);
+				shader.setVertexAttribute("a_p1", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, byteBase + BYTE_OFFSET_P1);
+				shader.setVertexAttribute("a_p2", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, byteBase + BYTE_OFFSET_P2);
+				shader.setVertexAttribute("a_p3", 3, GL20.GL_FLOAT, false, BYTES_PER_OBJECT, byteBase + BYTE_OFFSET_P3);
+				shader.setVertexAttribute("a_health", 1, GL20.GL_FLOAT, false, BYTES_PER_OBJECT,
+						byteBase + BYTE_OFFSET_HEALTH);
+				shader.setVertexAttribute("a_color", 4, GL20.GL_UNSIGNED_BYTE, true, BYTES_PER_OBJECT,
+						byteBase + BYTE_OFFSET_COLOR);
+				shader.setVertexAttribute("a_tail", 1, GL20.GL_UNSIGNED_BYTE, false, BYTES_PER_OBJECT,
+						byteBase + BYTE_OFFSET_TAIL);
+				shader.setVertexAttribute("a_leftRightTop", 3, GL20.GL_UNSIGNED_BYTE, false, BYTES_PER_OBJECT,
+						byteBase + BYTE_OFFSET_LEFT_RIGHT_TOP);
+
+				instancedArrays.glDrawArraysInstancedANGLE(GL20.GL_TRIANGLES, 0, 6, alive);
+				base += alive;
+			}
 		}
 	}
 
