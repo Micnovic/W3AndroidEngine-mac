@@ -11,6 +11,7 @@ import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.datamodel.TextJustify;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 
 public class TextAreaFrame extends ControlFrame implements ScrollBarFrame.ScrollBarChangeListener {
 	// TODO where are these colors in the UI definition files?
@@ -113,6 +114,7 @@ public class TextAreaFrame extends ControlFrame implements ScrollBarFrame.Scroll
 	 * goes on in the next.
 	 */
 	public void setText(final String text, final GameUI gameUI, final Viewport viewport) {
+		SimThreadGuard.assertGl();
 		final List<String> lines = new ArrayList<>();
 		float width = this.renderBounds.width - (this.inset * 2);
 		if (this.scrollBarFrame != null) {

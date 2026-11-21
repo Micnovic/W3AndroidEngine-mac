@@ -15,6 +15,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.SimSound;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -721,11 +722,13 @@ public final class SavedGame {
 			rules.nameDestructable(destructable.getValue(), destructable.getKey());
 		}
 		final Root root;
+		final List<SimSound> restoredSounds;
 		try (DataInputStream bodies = gunzip(bodyBytes)) {
 			final SavedObjectGraph.Reader reader = new SavedObjectGraph.Reader(rules, table, bodies,
 					header.formatVersion);
 			root = (Root) reader.readRoot();
 			restoreHandleIds(reader, simulation, header.formatVersion);
+			restoredSounds = reader.objectsOf(SimSound.class);
 			if (mapping != null) {
 				mapping.apply(reader.objectsOf(JassThread.class), reader.objectsOf(CodeJassValue.class), programs,
 						header.scopeSizes);
@@ -747,6 +750,7 @@ public final class SavedGame {
 			CGameCache.restoreAll(caches);
 		}
 		viewer.finishLoadingSavedGame(placedDestructables.values());
+		viewer.restoreSoundVoices(restoredSounds);
 		for (final SavedEffect effect : root.effects) {
 			effect.show(viewer);
 		}

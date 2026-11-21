@@ -182,7 +182,13 @@ public final class LockstepTurnManager implements GameTurnManager {
 		if (this.play != null && this.restarter != null && this.play.takeRestart()) {
 			this.restarting = true;
 			this.leaving = true;
-			this.restarter.run();
+			if (this.viewer != null) {
+				// it leaves the game's screen, which the render thread does, outside the step
+				this.viewer.onRenderThreadLater(this.restarter);
+			}
+			else {
+				this.restarter.run();
+			}
 			return true;
 		}
 		return false;

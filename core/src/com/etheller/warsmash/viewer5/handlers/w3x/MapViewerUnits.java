@@ -26,6 +26,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderShadowType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitTypeData;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldPeerData;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
@@ -93,99 +95,140 @@ final class MapViewerUnits {
 	static CWidget createNewUnit(final War3MapViewer viewer, final Warcraft3MapRuntimeObjectData modifications, final War3ID unitId, float unitX,
 			float unitY, final int playerIndex, int customTeamColor, final float unitAngle,
 			int editorConfigHitPointPercent, int editorConfigManaAmount) {
-		Splat buildingUberSplat = null;
-		SplatMover buildingUberSplatDynamicIngame = null;
-		ArgbImage buildingPathingPixelMap = null;
-		BuildingShadow buildingShadowInstance = null;
+		final Object made = spawn(viewer, modifications, unitId, unitX, unitY, playerIndex, customTeamColor, unitAngle,
+				editorConfigHitPointPercent, editorConfigManaAmount, false);
+		if (made instanceof WorldPeerData.Unit) {
+			final WorldPeerData.Unit data = (WorldPeerData.Unit) made;
+			buildUnitPeer(viewer, data);
+			return data.unit;
+		}
+		if (made instanceof WorldPeerData.Item) {
+			final WorldPeerData.Item data = (WorldPeerData.Item) made;
+			buildItemPeer(viewer, data);
+			return data.item;
+		}
+		return null;
+	}
 
+	/**
+	 * The simulation's part of making a unit or item: the object, made in the simulation, and what its peer is built
+	 * from. It reads the object data and the simulation only, so the simulation thread can do it.
+	 *
+	 * @param trackCreeps whether to note a creep of the first tick for the minimap's camps
+	 * @return {@link WorldPeerData.Unit}, {@link WorldPeerData.Item}, or null (a start location, or an unknown type)
+	 */
+	static Object spawn(final War3MapViewer viewer, final Warcraft3MapRuntimeObjectData modifications, final War3ID unitId,
+			final float unitX, final float unitY, final int playerIndex, final int customTeamColor,
+			final float unitAngle, final int editorConfigHitPointPercent, final int editorConfigManaAmount,
+			final boolean trackCreeps) {
 		// Hardcoded?
 		if (War3MapViewer.sloc.equals(unitId)) {
 			// path = "Objects\\StartLocation\\StartLocation.mdx";
 			viewer.startLocations[playerIndex] = new Vector2(unitX, unitY);
 		} else {
-			final RenderUnitType renderUnitType = viewer.renderUnitTypeData.get(unitId);
-			if (renderUnitType == null) {
-				final RenderItemType renderItemType = viewer.renderItemTypeData.get(unitId);
-				if (renderItemType != null) {
-
+			if (modifications.getUnits().get(unitId) == null) {
+				if (modifications.getItems().get(unitId) != null) {
 					final CItem simulationItem = viewer.simulation.internalCreateItem(unitId, unitX, unitY);
-					final float unitZ = Math.max(viewer.getWalkableRenderHeight(unitX, unitY),
-							viewer.terrain.getGroundHeight(unitX, unitY));
-					final RenderItem renderItem = new RenderItem(viewer, renderItemType, unitX, unitY, unitZ, unitAngle,
-							simulationItem);
-					viewer.widgets.add(renderItem);
-					viewer.itemToRenderPeer.put(simulationItem, renderItem);
-
-					renderItem.shadow = createBlobShadow(viewer, renderItemType.getRenderShadowType(), unitX, unitY);
-					return simulationItem;
-
+					return new WorldPeerData.Item(simulationItem, unitId, unitX, unitY, unitAngle);
 				} else {
 					DataErrors.report(DataErrors.UNKNOWN_ID, "unit " + unitId, "Unknown unit ID: " + unitId);
 				}
 			} else {
-				buildingPathingPixelMap = renderUnitType.getBuildingPathingPixelMap();
+				final ArgbImage buildingPathingPixelMap = viewer.renderUnitTypeData.getBuildingPathingPixelMap(unitId);
 
 				final float angle = (float) Math.toDegrees(unitAngle);
 				final CUnit simulationUnit = viewer.simulation.internalCreateUnit(unitId, playerIndex, unitX, unitY,
 						angle, buildingPathingPixelMap, editorConfigHitPointPercent, editorConfigManaAmount);
-				unitX = simulationUnit.getX();
-				unitY = simulationUnit.getY();
-				if (!renderUnitType.isAllowCustomTeamColor() || (customTeamColor == -1)) {
-					if (renderUnitType.getTeamColor() != -1) {
-						customTeamColor = renderUnitType.getTeamColor();
-					} else {
-						customTeamColor = viewer.simulation.getPlayer(playerIndex).getColor();
-					}
-				}
-				final float unitZ = Math.max(viewer.getWalkableRenderHeight(unitX, unitY),
-						viewer.terrain.getGroundHeight(unitX, unitY)) + simulationUnit.getFlyHeight();
-
-				final String texturePath = renderUnitType.getUberSplat();
-				final float s = renderUnitType.getUberSplatScaleValue();
-				if (texturePath != null) {
-					if (viewer.unitsReady) {
-						buildingUberSplatDynamicIngame = addUberSplatIngame(viewer, unitX, unitY, texturePath, s);
-					} else {
-						if (!viewer.terrain.splats.containsKey(texturePath)) {
-							viewer.terrain.splats.put(texturePath, new Splat());
-						}
-						final float x = unitX;
-						final float y = unitY;
-						buildingUberSplat = viewer.terrain.splats.get(texturePath);
-						buildingUberSplat.locations.add(new float[] { x - s, y - s, x + s, y + s, 1 });
-					}
-				}
-
-				final String buildingShadow = renderUnitType.getBuildingShadow();
-				if (buildingShadow != null) {
-					buildingShadowInstance = viewer.terrain.addShadow(buildingShadow, unitX, unitY);
-				}
-
-				final RenderUnit renderUnit = new RenderUnit(viewer, unitX, unitY, unitZ, customTeamColor, simulationUnit,
-						renderUnitType, buildingShadowInstance, viewer.selectionCircleScaleFactor,
-						renderUnitType.getAnimationWalkSpeed(), renderUnitType.getAnimationRunSpeed(),
-						renderUnitType.getScalingValue());
-				viewer.unitToRenderPeer.put(simulationUnit, renderUnit);
-				viewer.widgets.add(renderUnit);
-				viewer.units.add(renderUnit);
-				renderUnit.shadow = createUnitShadow(viewer, renderUnitType.getRenderShadowType(), unitX, unitY);
-				if (buildingUberSplat != null) {
-					buildingUberSplat.unitMapping.add(new Consumer<SplatModel.SplatMover>() {
-
-						@Override
-						public void accept(final SplatMover t) {
-							renderUnit.uberSplat = t;
-						}
-					});
-				}
-				if (buildingUberSplatDynamicIngame != null) {
-					renderUnit.uberSplat = buildingUberSplatDynamicIngame;
-				}
-				return simulationUnit;
-
+				// The minimap's creep camps start from the creeps the map placed in its first tick, also those that the
+				// melee setup then removes around the start locations.
+				final int creepLevel = trackCreeps && (viewer.simulation.getGameTurnTick() <= 1)
+						&& viewer.simulation.isNeutralAggressive(playerIndex) && !simulationUnit.isBuilding()
+								? simulationUnit.getUnitType().getLevel() : WorldPeerData.NO_CREEP;
+				return new WorldPeerData.Unit(simulationUnit, unitId, simulationUnit.getX(), simulationUnit.getY(),
+						unitX, unitY, simulationUnit.getFlyHeight(), playerIndex, customTeamColor,
+						viewer.simulation.getPlayer(playerIndex).getColor(), creepLevel);
 			}
 		}
 		return null;
+	}
+
+	/** The render side of {@link #spawn} for a unit: the peer, the shadows and the splat. */
+	static RenderUnit buildUnitPeer(final War3MapViewer viewer, final WorldPeerData.Unit data) {
+		Splat buildingUberSplat = null;
+		SplatMover buildingUberSplatDynamicIngame = null;
+		BuildingShadow buildingShadowInstance = null;
+
+		final RenderUnitType renderUnitType = viewer.renderUnitTypeData.get(data.typeId);
+		final CUnit simulationUnit = data.unit;
+		final float unitX = data.x;
+		final float unitY = data.y;
+		int customTeamColor = data.customTeamColor;
+		if (!renderUnitType.isAllowCustomTeamColor() || (customTeamColor == -1)) {
+			if (renderUnitType.getTeamColor() != -1) {
+				customTeamColor = renderUnitType.getTeamColor();
+			} else {
+				customTeamColor = data.playerColor;
+			}
+		}
+		final float unitZ = Math.max(viewer.getWalkableRenderHeight(unitX, unitY),
+				viewer.terrain.getGroundHeight(unitX, unitY)) + data.flyHeight;
+
+		final String texturePath = renderUnitType.getUberSplat();
+		final float s = renderUnitType.getUberSplatScaleValue();
+		if (texturePath != null) {
+			if (viewer.unitsReady) {
+				buildingUberSplatDynamicIngame = addUberSplatIngame(viewer, unitX, unitY, texturePath, s);
+			} else {
+				if (!viewer.terrain.splats.containsKey(texturePath)) {
+					viewer.terrain.splats.put(texturePath, new Splat());
+				}
+				final float x = unitX;
+				final float y = unitY;
+				buildingUberSplat = viewer.terrain.splats.get(texturePath);
+				buildingUberSplat.locations.add(new float[] { x - s, y - s, x + s, y + s, 1 });
+			}
+		}
+
+		final String buildingShadow = renderUnitType.getBuildingShadow();
+		if (buildingShadow != null) {
+			buildingShadowInstance = viewer.terrain.addShadow(buildingShadow, unitX, unitY);
+		}
+
+		final RenderUnit renderUnit = new RenderUnit(viewer, unitX, unitY, unitZ, customTeamColor, simulationUnit,
+				renderUnitType, buildingShadowInstance, viewer.selectionCircleScaleFactor,
+				renderUnitType.getAnimationWalkSpeed(), renderUnitType.getAnimationRunSpeed(),
+				renderUnitType.getScalingValue());
+		viewer.unitToRenderPeer.put(simulationUnit, renderUnit);
+		viewer.widgets.add(renderUnit);
+		viewer.units.add(renderUnit);
+		renderUnit.shadow = createUnitShadow(viewer, renderUnitType.getRenderShadowType(), unitX, unitY);
+		if (buildingUberSplat != null) {
+			buildingUberSplat.unitMapping.add(new Consumer<SplatModel.SplatMover>() {
+
+				@Override
+				public void accept(final SplatMover t) {
+					renderUnit.uberSplat = t;
+				}
+			});
+		}
+		if (buildingUberSplatDynamicIngame != null) {
+			renderUnit.uberSplat = buildingUberSplatDynamicIngame;
+		}
+		return renderUnit;
+	}
+
+	/** The render side of {@link #spawn} for an item. */
+	static RenderItem buildItemPeer(final War3MapViewer viewer, final WorldPeerData.Item data) {
+		final RenderItemType renderItemType = viewer.renderItemTypeData.get(data.typeId);
+		final float unitZ = Math.max(viewer.getWalkableRenderHeight(data.x, data.y),
+				viewer.terrain.getGroundHeight(data.x, data.y));
+		final RenderItem renderItem = new RenderItem(viewer, renderItemType, data.x, data.y, unitZ, data.angleRadians,
+				data.item);
+		viewer.widgets.add(renderItem);
+		viewer.itemToRenderPeer.put(data.item, renderItem);
+
+		renderItem.shadow = createBlobShadow(viewer, renderItemType.getRenderShadowType(), data.x, data.y);
+		return renderItem;
 	}
 
 	static SplatMover createUnitShadow(final War3MapViewer viewer, final RenderShadowType renderShadowType, final float unitX, final float unitY) {
@@ -218,6 +261,16 @@ final class MapViewerUnits {
 	}
 
 	static void clearRenderPeersForSavedGame(final War3MapViewer viewer) {
+		SimThreadGuard.renderOwnsSimulation(true);
+		try {
+			clearRenderPeers(viewer);
+		}
+		finally {
+			SimThreadGuard.renderOwnsSimulation(false);
+		}
+	}
+
+	private static void clearRenderPeers(final War3MapViewer viewer) {
 		final CSimulation game = viewer.simulation;
 		final SimulationRenderController controller = game.getSimulationRenderController();
 		for (final CUnit unit : new ArrayList<>(game.getUnits())) {
@@ -239,6 +292,16 @@ final class MapViewerUnits {
 	 * made); units and items get new ones.
 	 */
 	static void finishLoadingSavedGame(final War3MapViewer viewer, final Collection<CDestructable> preparedDestructables) {
+		SimThreadGuard.renderOwnsSimulation(true);
+		try {
+			finishLoading(viewer, preparedDestructables);
+		}
+		finally {
+			SimThreadGuard.renderOwnsSimulation(false);
+		}
+	}
+
+	private static void finishLoading(final War3MapViewer viewer, final Collection<CDestructable> preparedDestructables) {
 		final Set<CDestructable> current = new HashSet<>(viewer.simulation.getDestructables());
 		for (final CDestructable destructable : preparedDestructables) {
 			if (!current.contains(destructable) || destructable.isRemovedFromGame()) {

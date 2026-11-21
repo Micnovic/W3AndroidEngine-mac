@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEvent;
 import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
@@ -8,19 +9,19 @@ import com.etheller.interpreter.ast.value.visitor.ObjectJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.parsers.jass.Jass2.CommonEnvironment;
 import com.etheller.warsmash.util.War3ID;
-import com.etheller.warsmash.viewer5.handlers.w3x.UnitSound;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CMIDISound;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSound;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFromLabel;
 
 /**
  * Sound and music natives.
  */
 final class SoundNatives extends CommonNatives {
+	private final SoundVoices voices;
+
 	SoundNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.voices = new SoundVoices(this.war3MapViewer, this.meleeUI, this.link);
+		this.war3MapViewer.setSoundVoiceRestorer(this.voices::restoreVoices);
 	}
 
 	@Override
@@ -31,8 +32,8 @@ final class SoundNatives extends CommonNatives {
 		// libGDX, Android) have no reverb to set, so the mixer only keeps the name.
 		jassProgramVisitor.getJassNativeManager().createNative("NewSoundEnvironment",
 				(arguments, globalScope, triggerScope) -> {
-					war3MapViewer.getSoundMixer()
-							.setEnvironment(arguments.get(0).visit(StringJassValueVisitor.getInstance()));
+					final String environment = arguments.get(0).visit(StringJassValueVisitor.getInstance());
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> war3MapViewer.getSoundMixer().setEnvironment(environment));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateMIDISound",
@@ -40,22 +41,13 @@ final class SoundNatives extends CommonNatives {
 					final String soundLabel = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					final int fadeInRate = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
-					final UnitSound sound = war3MapViewer.getUiSounds().getSound(soundLabel);
-					if ((sound == null) || (sound.getSoundCount() == 0)) {
-						return newHandle(soundType, new CMIDISound(soundLabel, fadeInRate, fadeOutRate));
-					}
-					sound.preload();
-					return newHandle(soundType, new CSoundFromLabel(sound,
-							meleeUI.getUiScene().audioContext, true, false, false, fadeInRate, fadeOutRate));
+					return newHandle(soundType, this.voices.createMidi(soundLabel, fadeInRate, fadeOutRate));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("StartSound",
 				(arguments, globalScope, triggerScope) -> {
 					final CSound soundHandle = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (soundHandle != null) {
-						soundHandle.start(this.simulation.getGameTurnTick());
-						if (soundHandle instanceof CSoundFilename) {
-							meleeUI.dialogueSoundStarted(((CSoundFilename) soundHandle).getFileName());
-						}
+						this.voices.start(soundHandle, this.simulation.getGameTurnTick());
 					}
 					return null;
 				});
@@ -64,7 +56,7 @@ final class SoundNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CSound soundHandle = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (soundHandle != null) {
-						soundHandle.stop();
+						this.voices.apply(soundHandle, CSound::stop);
 					}
 					return null;
 				});
@@ -74,16 +66,16 @@ final class SoundNatives extends CommonNatives {
 					final boolean random = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 					final int index = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 
-					final String musicField = this.gameUI.trySkinField(musicName);
-					meleeUI.setMapMusic(musicField, random, index);
+					this.link.send(RenderEvent.FRAME_COMMAND,
+							() -> meleeUI.setMapMusic(this.gameUI.trySkinField(musicName), random, index));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PlayMusic",
 				(arguments, globalScope, triggerScope) -> {
 					final String musicName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 
-					final String musicField = this.gameUI.trySkinField(musicName);
-					meleeUI.playMusic(musicField, true, 0);
+					this.link.send(RenderEvent.FRAME_COMMAND,
+							() -> meleeUI.playMusic(this.gameUI.trySkinField(musicName), true, 0));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PlayMusicEx",
@@ -92,58 +84,60 @@ final class SoundNatives extends CommonNatives {
 					final int frommsecs = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeInMSecs = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 
-					final String musicField = this.gameUI.trySkinField(musicName);
-					meleeUI.playMusicEx(musicField, true, 0, frommsecs, fadeInMSecs);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI
+							.playMusicEx(this.gameUI.trySkinField(musicName), true, 0, frommsecs, fadeInMSecs));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("StopMusic",
 				(arguments, globalScope, triggerScope) -> {
 					final boolean fadeOut = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
-					meleeUI.stopMusic(fadeOut);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.stopMusic(fadeOut));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ResumeMusic",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.resumeMusic();
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.resumeMusic());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PlayThematicMusic",
 				(arguments, globalScope, triggerScope) -> {
 					final String musicName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
-					final String musicField = this.gameUI.trySkinField(musicName);
-					meleeUI.playMusic(musicField, true, 0);
+					this.link.send(RenderEvent.FRAME_COMMAND,
+							() -> meleeUI.playMusic(this.gameUI.trySkinField(musicName), true, 0));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PlayThematicMusicEx",
 				(arguments, globalScope, triggerScope) -> {
 					final String musicName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
-					final String musicField = this.gameUI.trySkinField(musicName);
 					final int frommsecs = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
-					meleeUI.playMusicEx(musicField, true, 0, frommsecs, -1);
+					this.link.send(RenderEvent.FRAME_COMMAND,
+							() -> meleeUI.playMusicEx(this.gameUI.trySkinField(musicName), true, 0, frommsecs, -1));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("EndThematicMusic",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.stopMusic(false);
-					meleeUI.playMapMusic();
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+						meleeUI.stopMusic(false);
+						meleeUI.playMapMusic();
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetMusicVolume",
 				(arguments, globalScope, triggerScope) -> {
 					final int volume = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
-					meleeUI.setMusicVolume(volume);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.setMusicVolume(volume));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetMusicPlayPosition",
 				(arguments, globalScope, triggerScope) -> {
 					final int millisecs = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
-					meleeUI.setMusicPlayPosition(millisecs);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.setMusicPlayPosition(millisecs));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetThematicMusicPlayPosition",
 				(arguments, globalScope, triggerScope) -> {
 					final int millisecs = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
-					meleeUI.setMusicPlayPosition(millisecs);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.setMusicPlayPosition(millisecs));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetSoundDuration",
@@ -163,16 +157,8 @@ final class SoundNatives extends CommonNatives {
 							.visit(BooleanJassValueVisitor.getInstance());
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
-					final UnitSound sound = war3MapViewer.getUiSounds().getSound(soundLabel);
-					if ((sound != null) && (looping || sound.isLooping())) {
-						// a loop's sound is wanted whole when it starts, so it is made while the script goes on
-						sound.preload();
-					}
-					return newHandle(soundType,
-							new CSoundFromLabel(sound,
-									is3D ? war3MapViewer.worldScene.audioContext
-											: meleeUI.getUiScene().audioContext,
-									looping, is3D, stopWhenOutOfRange, fadeInRate, fadeOutRate));
+					return newHandle(soundType, this.voices.createLabel(soundLabel, looping, is3D, stopWhenOutOfRange,
+							fadeInRate, fadeOutRate));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateSound",
 				(arguments, globalScope, triggerScope) -> {
@@ -184,17 +170,8 @@ final class SoundNatives extends CommonNatives {
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
 					final String eaxSetting = arguments.get(6).visit(StringJassValueVisitor.getInstance());
-					final UnitSound.ScriptFile file = war3MapViewer.getScriptSoundFile(fileName);
-					final float fileDuration = file.getDuration();
-					final CSoundFilename soundHandle = new CSoundFilename(null, fileDuration,
-							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
-							stopWhenOutOfRange, fadeInRate, fadeOutRate, eaxSetting);
-					soundHandle.setFileName(fileName);
-					soundHandle.setOwner(war3MapViewer.getFileSoundOwner());
-					soundHandle.awaitSound();
-					war3MapViewer.getFileSoundLater(fileName,
-							sound -> soundHandle.bindSound(sound, this.simulation.getGameTurnTick()));
-					return newHandle(soundType, soundHandle);
+					return newHandle(soundType, this.voices.createFile(fileName, looping, is3D, stopWhenOutOfRange,
+							fadeInRate, fadeOutRate, eaxSetting, null));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateSoundFilenameWithLabel",
 				(arguments, globalScope, triggerScope) -> {
@@ -206,25 +183,15 @@ final class SoundNatives extends CommonNatives {
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
 					final String label = arguments.get(6).visit(StringJassValueVisitor.getInstance());
-					final UnitSound.ScriptFile file = war3MapViewer.getScriptSoundFile(fileName);
-					final float fileDuration = file.getDuration();
-					final CSoundFilename soundHandle = new CSoundFilename(null, fileDuration,
-							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
-							stopWhenOutOfRange, fadeInRate, fadeOutRate, "");
-					soundHandle.setFileName(fileName);
-					soundHandle.setOwner(war3MapViewer.getFileSoundOwner());
-					soundHandle.awaitSound();
-					war3MapViewer.getFileSoundLater(fileName,
-							sound -> soundHandle.bindSound(sound, this.simulation.getGameTurnTick()));
-					CampaignNatives.applyLabelParameters(soundHandle, war3MapViewer.getSoundLabel(label));
-					return newHandle(soundType, soundHandle);
+					return newHandle(soundType, this.voices.createFile(fileName, looping, is3D, stopWhenOutOfRange,
+							fadeInRate, fadeOutRate, "", label == null ? "" : label));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetSoundDuration",
 				(arguments, globalScope, triggerScope) -> {
 					final CSound sound = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-					final int duration = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+					final float seconds = arguments.get(1).visit(IntegerJassValueVisitor.getInstance()) / 1000f;
 					if (sound != null) {
-						sound.setDuration(duration / 1000f);
+						this.voices.apply(sound, target -> target.setDuration(seconds));
 					}
 					return null;
 				});

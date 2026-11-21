@@ -283,6 +283,16 @@ public class MeleeToggleUI implements WarsmashUI {
 	}
 
 	@Override
+	public void runSimulationCalls() {
+		this.meleeUI.runSimulationCalls();
+	}
+
+	@Override
+	public boolean hasSimulationCalls() {
+		return this.meleeUI.hasSimulationCalls();
+	}
+
+	@Override
 	public void scriptSelectUnit(final CUnit unit, final boolean select) {
 		this.meleeUI.scriptSelectUnit(unit, select);
 	}

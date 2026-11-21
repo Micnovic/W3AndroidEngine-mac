@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import com.badlogic.gdx.math.Rectangle;
@@ -16,6 +17,8 @@ import com.etheller.interpreter.ast.value.visitor.RealJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDoodad;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDoodadTable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColor;
@@ -27,10 +30,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColo
 final class ReforgedDoodadNatives {
 	private final JassProgram program;
 	private final War3MapViewer viewer;
+	private final RenderCommands commands;
 
 	private ReforgedDoodadNatives(final JassProgram program, final War3MapViewer viewer) {
 		this.program = program;
 		this.viewer = viewer;
+		this.commands = new RenderCommands(LocalUiLink.of(viewer, null));
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer) {
@@ -41,6 +46,15 @@ final class ReforgedDoodadNatives {
 
 	private void add(final String name, final JassFunction function) {
 		this.program.getJassNativeManager().createNative(name, function);
+	}
+
+	/** A native that colours or animates doodads and returns nothing: it runs on the render side in the frame's order. */
+	private void addCommand(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> {
+			final List<JassValue> copy = new ArrayList<>(arguments);
+			this.commands.send(() -> function.call(copy, globalScope, triggerScope));
+			return null;
+		});
 	}
 
 	private static <T> T object(final List<JassValue> arguments, final int index) {
@@ -107,7 +121,7 @@ final class ReforgedDoodadNatives {
 	}
 
 	private void registerSetters() {
-		add("BlzSetSingleDoodadColor", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetSingleDoodadColor", (arguments, globalScope, triggerScope) -> {
 			final RenderDoodad doodad = doodad(arguments);
 			final Object color = object(arguments, 1);
 			if ((doodad != null) && (color instanceof CPlayerColor)) {
@@ -115,7 +129,7 @@ final class ReforgedDoodadNatives {
 			}
 			return null;
 		});
-		add("BlzSetSingleDoodadAnimation", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetSingleDoodadAnimation", (arguments, globalScope, triggerScope) -> {
 			final RenderDoodad doodad = doodad(arguments);
 			final String animation = string(arguments, 1);
 			if ((doodad != null) && (animation != null)) {
@@ -123,7 +137,7 @@ final class ReforgedDoodadNatives {
 			}
 			return null;
 		});
-		add("SetDoodadColor", (arguments, globalScope, triggerScope) -> {
+		addCommand("SetDoodadColor", (arguments, globalScope, triggerScope) -> {
 			final Object color = object(arguments, 5);
 			if (color instanceof CPlayerColor) {
 				this.viewer.setDoodadColor(new War3ID(integer(arguments, 3)).toString(), null, real(arguments, 0),
@@ -131,7 +145,7 @@ final class ReforgedDoodadNatives {
 			}
 			return null;
 		});
-		add("SetDoodadColorRect", (arguments, globalScope, triggerScope) -> {
+		addCommand("SetDoodadColorRect", (arguments, globalScope, triggerScope) -> {
 			final Rectangle area = object(arguments, 0);
 			final Object color = object(arguments, 2);
 			if ((area != null) && (color instanceof CPlayerColor)) {

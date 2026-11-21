@@ -118,9 +118,8 @@ public interface SimulationRenderController {
 
 	void unitCancelUpgradingEvent(CUnit unit, War3ID upgradeIdType);
 
-	void setBlight(float x, float y, float radius, boolean blighted);
-
-	void setBlightSquare(float x, float y, float halfSize, boolean blighted);
+	/** The blight of these terrain corners (x, y pairs, world coordinates) changed; the simulation has applied it. */
+	void blightChanged(float[] cornerPositions, boolean blighted);
 
 	void unitUpdatedType(CUnit unit, War3ID typeId, boolean updatePortrait);
 

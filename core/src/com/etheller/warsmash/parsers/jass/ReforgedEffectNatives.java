@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -21,6 +22,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.SecondaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.IndexedSequence;
 import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderSpellEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ScriptEffect;
@@ -34,10 +37,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 final class ReforgedEffectNatives {
 	private final JassProgram program;
 	private final War3MapViewer viewer;
+	private final RenderCommands commands;
 
 	private ReforgedEffectNatives(final JassProgram program, final War3MapViewer viewer) {
 		this.program = program;
 		this.viewer = viewer;
+		this.commands = new RenderCommands(LocalUiLink.of(viewer, null));
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer) {
@@ -49,6 +54,21 @@ final class ReforgedEffectNatives {
 
 	private void add(final String name, final JassFunction function) {
 		this.program.getJassNativeManager().createNative(name, function);
+	}
+
+	/** A native that changes the drawn effect and returns nothing: it runs on the render side in the frame's order. */
+	private void addCommand(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> {
+			final List<JassValue> copy = new ArrayList<>(arguments);
+			this.commands.send(() -> function.call(copy, globalScope, triggerScope));
+			return null;
+		});
+	}
+
+	/** A native that reads the render side: the render thread runs it, after the commands sent before it. */
+	private void addCall(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> this.commands.call(name,
+				() -> function.call(arguments, globalScope, triggerScope)));
 	}
 
 	private static <T> T object(final List<JassValue> arguments, final int index) {
@@ -80,21 +100,21 @@ final class ReforgedEffectNatives {
 			final String name = ScriptAnimTypes.animName(constant(arguments, 0));
 			return new StringJassValue(name == null ? "" : name);
 		});
-		add("BlzSetSpecialEffectAnimation", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetSpecialEffectAnimation", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.playScriptAnimation(string(arguments, 1));
 			}
 			return null;
 		});
-		add("BlzQueueSpecialEffectAnimation", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzQueueSpecialEffectAnimation", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.queueScriptAnimation(string(arguments, 1));
 			}
 			return null;
 		});
-		add("BlzPlaySpecialEffect", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzPlaySpecialEffect", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			final String name = ScriptAnimTypes.animName(constant(arguments, 1));
 			if ((effect != null) && (name != null)) {
@@ -102,7 +122,7 @@ final class ReforgedEffectNatives {
 			}
 			return null;
 		});
-		add("BlzPlaySpecialEffectWithTimeScale", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzPlaySpecialEffectWithTimeScale", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			final String name = ScriptAnimTypes.animName(constant(arguments, 1));
 			if ((effect != null) && (name != null)) {
@@ -111,14 +131,14 @@ final class ReforgedEffectNatives {
 			}
 			return null;
 		});
-		add("BlzSetSpecialEffectAnimationBlendTime", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetSpecialEffectAnimationBlendTime", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.getModelInstance().setBlendTime(Math.max(0, real(arguments, 1)) * 1000.0f);
 			}
 			return null;
 		});
-		add("BlzSpecialEffectAddSubAnimation", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSpecialEffectAddSubAnimation", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			final SecondaryTag tag = ScriptAnimTypes.subAnim(constant(arguments, 1));
 			if ((effect != null) && (tag != null)) {
@@ -126,7 +146,7 @@ final class ReforgedEffectNatives {
 			}
 			return null;
 		});
-		add("BlzSpecialEffectRemoveSubAnimation", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSpecialEffectRemoveSubAnimation", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			final SecondaryTag tag = ScriptAnimTypes.subAnim(constant(arguments, 1));
 			if ((effect != null) && (tag != null)) {
@@ -134,7 +154,7 @@ final class ReforgedEffectNatives {
 			}
 			return null;
 		});
-		add("BlzSpecialEffectClearSubAnimations", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSpecialEffectClearSubAnimations", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.clearScriptSubAnimations();
@@ -144,21 +164,21 @@ final class ReforgedEffectNatives {
 	}
 
 	private void registerMatrix() {
-		add("BlzSetSpecialEffectMatrixScale", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetSpecialEffectMatrixScale", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.setScriptMatrixScale(real(arguments, 1), real(arguments, 2), real(arguments, 3));
 			}
 			return null;
 		});
-		add("BlzResetSpecialEffectMatrix", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzResetSpecialEffectMatrix", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			if (effect != null) {
 				effect.resetScriptMatrix();
 			}
 			return null;
 		});
-		add("BlzGetSpecialEffectScale", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzGetSpecialEffectScale", (arguments, globalScope, triggerScope) -> {
 			final RenderSpellEffect effect = effect(arguments);
 			return RealJassValue.of(effect == null ? 0 : effect.getScriptScale());
 		});
@@ -175,7 +195,7 @@ final class ReforgedEffectNatives {
 	}
 
 	private void registerAnimationDurations() {
-		add("BlzGetUnitAnimationDuration", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzGetUnitAnimationDuration", (arguments, globalScope, triggerScope) -> {
 			final CUnit unit = object(arguments, 0);
 			final RenderUnit peer = unit == null ? null : this.viewer.getRenderPeer(unit);
 			final String name = string(arguments, 1);
@@ -189,7 +209,7 @@ final class ReforgedEffectNatives {
 					((MdxModel) peer.instance.model).getSequences(), false);
 			return RealJassValue.of(sequence == null ? 0 : duration(peer.instance, sequence.index));
 		});
-		add("BlzGetUnitAnimationDurationByIndex", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzGetUnitAnimationDurationByIndex", (arguments, globalScope, triggerScope) -> {
 			final CUnit unit = object(arguments, 0);
 			final RenderUnit peer = unit == null ? null : this.viewer.getRenderPeer(unit);
 			return RealJassValue.of(peer == null ? 0

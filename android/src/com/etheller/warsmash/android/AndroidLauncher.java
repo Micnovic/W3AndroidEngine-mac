@@ -49,6 +49,7 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.WarsmashGdxMapScreen;
 import com.etheller.warsmash.WarsmashGdxMenuScreen;
@@ -115,6 +116,7 @@ public class AndroidLauncher extends AndroidApplication {
 	static final String EXTRA_TEST_PROFILE = "testprofile";
 	/** Memory tier a run started with a map plays as ("low", "medium", "high"), like the desktop -Dwarsmash.memtier. */
 	static final String EXTRA_MEMORY_TIER = "memtier";
+	static final String EXTRA_SIM_THREAD = "simthread";
 	private AndroidPointerSource pointerSource;
 	/** Started by the launcher: the game begins at once and the launcher comes back when it ends. */
 	private boolean fromLauncher;
@@ -259,6 +261,10 @@ public class AndroidLauncher extends AndroidApplication {
 		else {
 			System.clearProperty(GraphicsSettings.MEMORY_TIER_PROPERTY);
 		}
+		// Same for the simulation scheduling (off / serial / on): a test run names it, every other game takes the default,
+		// the simulation thread, unless the system property says otherwise.
+		final String simThread = this.fromLauncher || !testBuild ? null : getIntent().getStringExtra(EXTRA_SIM_THREAD);
+		SimThreadMode.set(SimThreadMode.parse(simThread != null ? simThread : System.getProperty(SimThreadMode.PROPERTY, "on")));
 		GraphicsSettings.applyDefaultTextureSize(warsmashIni, defaultTextureSize(this));
 		GraphicsSettings.setDeviceMemoryMb(totalMemoryMb(this));
 		final Element touchSettings = warsmashIni.get("Touch");

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UnitFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 
 /**
@@ -16,14 +17,23 @@ public final class ScriptMinimapIcon {
 	private final float green;
 	private final float blue;
 	private final int fogMask;
+	private final int unitHandle;
 	private boolean visible = true;
 	private boolean orphanDestroy;
+	// Where the unit was in the frames of the game, and whether any frame had it: a unit the frames no longer
+	// have is gone from the game.
+	private float followedX;
+	private float followedY;
+	private boolean seenInFrames;
 
 	public ScriptMinimapIcon(final float x, final float y, final CUnit unit, final int red, final int green,
 			final int blue, final String path, final int fogMask) {
 		this.fixedX = x;
 		this.fixedY = y;
 		this.unit = unit;
+		this.unitHandle = unit == null ? 0 : unit.getHandleId();
+		this.followedX = x;
+		this.followedY = y;
 		this.red = (red & 0xFF) / 255f;
 		this.green = (green & 0xFF) / 255f;
 		this.blue = (blue & 0xFF) / 255f;
@@ -38,6 +48,32 @@ public final class ScriptMinimapIcon {
 
 	public float getY() {
 		return this.unit == null ? this.fixedY : this.unit.getY();
+	}
+
+	/**
+	 * Takes the unit's place from the frame being shown, where the game is shown from frames; true once the icon is to
+	 * go with its unit and the unit is dead or gone. A unit that no frame has had yet leaves the icon where it was.
+	 */
+	public boolean follow(final UnitFrameState frameUnits) {
+		if (this.unit == null) {
+			return false;
+		}
+		final int row = frameUnits.indexOf(this.unitHandle);
+		if (row < 0) {
+			return this.orphanDestroy && this.seenInFrames;
+		}
+		this.seenInFrames = true;
+		this.followedX = frameUnits.x[row];
+		this.followedY = frameUnits.y[row];
+		return this.orphanDestroy && ((frameUnits.flags[row] & UnitFrameState.DEAD) != 0);
+	}
+
+	public float getFollowedX() {
+		return this.followedX;
+	}
+
+	public float getFollowedY() {
+		return this.followedY;
 	}
 
 	public CUnit getUnit() {

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEvent;
 import com.etheller.interpreter.ast.util.JassProgram;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.HandleJassType;
@@ -144,12 +145,12 @@ final class QuestNatives extends CommonNatives {
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("FlashQuestDialogButton",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.flashQuestDialogButton();
+					this.link.send(RenderEvent.DIALOG, () -> meleeUI.flashQuestDialogButton());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ForceQuestDialogUpdate",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.forceQuestDialogUpdate();
+					this.link.send(RenderEvent.DIALOG, () -> meleeUI.forceQuestDialogUpdate());
 					return null;
 				});
 	}
@@ -160,22 +161,27 @@ final class QuestNatives extends CommonNatives {
 
 		jassProgramVisitor.getJassNativeManager().createNative("DialogCreate",
 				(arguments, globalScope, triggerScope) -> {
-					return newHandle(dialogType, meleeUI.createScriptDialog(globalScope));
+					// the dialog holds frames of the render side; its handle is made here
+					final CScriptDialog dialog = this.link.onRender("DialogCreate", () -> meleeUI.createScriptDialog(globalScope));
+					return newHandle(dialogType, dialog);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DialogDestroy",
 				(arguments, globalScope, triggerScope) -> {
 					final CScriptDialog dialog = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
-					meleeUI.destroyDialog(dialog);
+					this.link.onRender("DialogDestroy", () -> {
+						meleeUI.destroyDialog(dialog);
+						return null;
+					});
 					release(dialog);
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("DialogClear",
+		createRenderNative("DialogClear",
 				(arguments, globalScope, triggerScope) -> {
 					final CScriptDialog dialog = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					meleeUI.clearDialog(dialog);
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("DialogSetMessage",
+		createRenderNative("DialogSetMessage",
 				(arguments, globalScope, triggerScope) -> {
 					final CScriptDialog dialog = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String messageText = this.gameUI
@@ -189,8 +195,9 @@ final class QuestNatives extends CommonNatives {
 					final String buttonText = this.gameUI
 							.getTrigStr(arguments.get(1).visit(StringJassValueVisitor.getInstance()));
 					final int hotkeyInt = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
-					return newHandle(buttonType,
-							meleeUI.createScriptDialogButton(dialog, buttonText, (char) hotkeyInt));
+					final CScriptDialogButton button = this.link.onRender("DialogAddButton",
+							() -> meleeUI.createScriptDialogButton(dialog, buttonText, (char) hotkeyInt));
+					return newHandle(buttonType, button);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DialogAddQuitButton",
 				(arguments, globalScope, triggerScope) -> {
@@ -200,10 +207,13 @@ final class QuestNatives extends CommonNatives {
 					final String buttonText = this.gameUI
 							.getTrigStr(arguments.get(2).visit(StringJassValueVisitor.getInstance()));
 					final int hotkeyInt = arguments.get(3).visit(IntegerJassValueVisitor.getInstance());
-					final CScriptDialogButton button = meleeUI.createScriptDialogButton(dialog, buttonText,
-							(char) hotkeyInt);
-					// The melee victory and defeat dialogs quit to the score screen.
-					button.setQuitAction(doScoreScreen, () -> meleeUI.endGame(doScoreScreen));
+					final CScriptDialogButton button = this.link.onRender("DialogAddQuitButton", () -> {
+						final CScriptDialogButton created = meleeUI.createScriptDialogButton(dialog, buttonText,
+								(char) hotkeyInt);
+						// The melee victory and defeat dialogs quit to the score screen.
+						created.setQuitAction(doScoreScreen, () -> meleeUI.endGame(doScoreScreen));
+						return created;
+					});
 					return newHandle(buttonType, button);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DialogDisplay",
@@ -213,7 +223,7 @@ final class QuestNatives extends CommonNatives {
 					final boolean flag = arguments.get(2).visit(BooleanJassValueVisitor.getInstance());
 					if ((player != null) && (whichDialog != null)
 							&& (player.getId() == war3MapViewer.getLocalPlayerIndex())) {
-						meleeUI.displayScriptDialog(whichDialog, flag);
+						this.link.send(RenderEvent.DIALOG, () -> meleeUI.displayScriptDialog(whichDialog, flag));
 					}
 					return null;
 				});
@@ -235,9 +245,10 @@ final class QuestNatives extends CommonNatives {
 		jassProgramVisitor.getJassNativeManager().createNative("CreateTimerDialog",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimer timer = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-					return newHandle(timerdialogType, meleeUI.createTimerDialog(timer));
+					final CTimerDialog created = this.link.onRender("CreateTimerDialog", () -> meleeUI.createTimerDialog(timer));
+					return newHandle(timerdialogType, created);
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("TimerDialogSetTitle",
+		createRenderNative("TimerDialogSetTitle",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimerDialog dialog = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (dialog != null) {
@@ -246,7 +257,7 @@ final class QuestNatives extends CommonNatives {
 					}
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("TimerDialogDisplay",
+		createRenderNative("TimerDialogDisplay",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimerDialog dialog = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (dialog != null) {
@@ -254,7 +265,7 @@ final class QuestNatives extends CommonNatives {
 					}
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("TimerDialogSetRealTimeRemaining",
+		createRenderNative("TimerDialogSetRealTimeRemaining",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimerDialog dialog = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (dialog != null) {
@@ -263,7 +274,7 @@ final class QuestNatives extends CommonNatives {
 					}
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("TimerDialogSetSpeed",
+		createRenderNative("TimerDialogSetSpeed",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimerDialog dialog = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (dialog != null) {
@@ -272,7 +283,7 @@ final class QuestNatives extends CommonNatives {
 					}
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("IsTimerDialogDisplayed",
+		createRenderNative("IsTimerDialogDisplayed",
 				(arguments, globalScope, triggerScope) -> {
 					final CTimerDialog dialog = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					return BooleanJassValue.of((dialog != null) && dialog.isVisible());

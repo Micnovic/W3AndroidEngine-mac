@@ -44,6 +44,13 @@ import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
  */
 class StaticStateTest {
 	private static final Set<String> ALLOWED = new HashSet<>(Arrays.asList(
+			// diagnostic counters, read only with -Dwarsmash.pathprof
+			"simulation.pathing.PathingProfile#TICK_EDGES_MS", "simulation.pathing.PathingProfile#partNs", "simulation.pathing.PathingProfile#counts", "simulation.pathing.PathingProfile#stack", "simulation.pathing.PathingProfile#depth", "simulation.pathing.PathingProfile#current", "simulation.pathing.PathingProfile#last", "simulation.pathing.PathingProfile#currentJob", "simulation.pathing.PathingProfile#clockCalls", "simulation.pathing.PathingProfile#updateStart", "simulation.pathing.PathingProfile#tick", "simulation.pathing.PathingProfile#firstTick", "simulation.pathing.PathingProfile#tickNs", "simulation.pathing.PathingProfile#tickIterations", "simulation.pathing.PathingProfile#tickMisses", "simulation.pathing.PathingProfile#sliceJob", "simulation.pathing.PathingProfile#sliceStartCost", "simulation.pathing.PathingProfile#slices", "simulation.pathing.PathingProfile#WORKERS", "simulation.pathing.PathingProfile#makespanNs", "simulation.pathing.PathingProfile#sliceTotalNs", "simulation.pathing.PathingProfile#multiSliceTicks", "simulation.pathing.PathingProfile#sliceCountHistogram", "simulation.pathing.PathingProfile#sliceCountNs", "simulation.pathing.PathingProfile#tickWallStart", "simulation.pathing.PathingProfile#wallTotal", "simulation.pathing.PathingProfile#WALL_EDGES_MS", "simulation.pathing.PathingProfile#wallCount", "simulation.pathing.PathingProfile#wallNs", "simulation.pathing.PathingProfile#wallPathNs", "simulation.pathing.PathingProfile#tickParts", "simulation.pathing.PathingProfile#tickHistogramNs", "simulation.pathing.PathingProfile#tickHistogramCount", "simulation.pathing.PathingProfile#pathTicks", "simulation.pathing.PathingProfile#topJobs", "simulation.pathing.PathingProfile#topTicks", "simulation.pathing.PathingProfile#byType", "simulation.pathing.PathingProfile#waitTicks", "simulation.pathing.PathingProfile#game", "simulation.pathing.PathingProfile#lastReportTick", "simulation.pathing.PathingProfile#jobsAll", "simulation.pathing.PathingProfile#distanceBuckets", "simulation.pathing.PathingProfile#byDistance", "simulation.pathing.PathingProfile#clockNanos",
+			"save.SavedObjectGraph#RETIRED_CLASSES",
+			// step and terrain tables filled once from constants
+			"simulation.pathing.CPathfindingProcessor#MOVEMENT_PATHABLE", "simulation.pathing.CPathfindingProcessor#STEP_X",
+			"simulation.pathing.CPathfindingProcessor#STEP_Y", "simulation.pathing.CPathfindingProcessor#STEP_LENGTH",
+			"simulation.pathing.CPathfindingProcessor#STEP_COST", "simulation.pathing.CPathfindingProcessor#STEP_COST_TURN",
 			// Scratch enumerators, reset before every use within one call.
 			"simulation.CUnitPlacement#regionCheckerImpl", "simulation.CUnitAcquisition#autoAttackTargetFinderEnum",
 			"simulation.CUnitAcquisition#autocastTargetFinderEnum",
@@ -158,23 +165,25 @@ class StaticStateTest {
 			"GameUI.java", "GameDataConstants.java"));
 
 	private static final Set<String> RENDER_ALLOWED = new HashSet<>(Arrays.asList(
+			"w3x.simthread.SimThreadGuard#simThread", "w3x.simthread.SimThreadGuard#glThread", "w3x.simthread.SimThreadGuard#renderOwnsSimulation",
+			"w3x.simthread.SimThreadGuard#renderHoldsSimulation", "w3x.simthread.SimThreadMode#current",
+			// Debug list of calls that crossed threads, only filled with -Dwarsmash.simthread.guard=collect.
+			"w3x.simthread.SimThreadGuard#VIOLATIONS", "w3x.simthread.SimThreadGuard#CROSSINGS", "w3x.simthread.SimThreadGuard#lastReport", "w3x.simthread.SimThreadGuard#hookInstalled",
 			// Scratch objects of the render thread, filled and read within one call.
 			"w3x.environment.Terrain#sizeHeap", "w3x.environment.Terrain#fourComponentHeap",
 			"w3x.rendersim.RenderDoodad#VERTEX_COLOR_HEAP", "w3x.rendersim.RenderUnit#heapZ",
 			"w3x.SplatModel#scratchFloatBuffer", "w3x.SplatModel#scratchShortBuffer", "w3x.TerrainDoodad#locationHeap",
 			"w3x.War3MapViewer#rayHeap", "mdx.AttachmentInstance#visbilityHeap", "mdx.BatchGroup#tempFloat3Array",
 			"mdx.EventObjectEmitter#valueHeap", "mdx.GeometryEmitterFuncs#vectorTemp", "mdx.GeometryEmitterFuncs#vector3Heap", "mdx.GeometryEmitterFuncs#drawCounts",
-			"mdx.LightInstance#vectorHeap", "mdx.LightInstance#scalarHeap", "mdx.MdxComplexInstance#visibilityHeap",
-			"mdx.MdxComplexInstance#translationHeap", "mdx.MdxComplexInstance#rotationHeap",
-			"mdx.MdxComplexInstance#scaleHeap", "mdx.MdxComplexInstance#colorHeap", "mdx.MdxComplexInstance#alphaHeap",
-			"mdx.MdxComplexInstance#textureIdHeap", "mdx.MdxComplexInstance#attachingModels", "mdx.MdxComplexInstance#boneUploadScratch", "mdx.MdxComplexInstance#UV_NOT_ANIMATED", "mdx.MdxComplexInstance#NO_REPLACEABLE_TEXTURES",
+			"mdx.LightInstance#vectorHeap", "mdx.LightInstance#scalarHeap",
+			"mdx.MdxComplexInstance#attachingModels", "mdx.MdxComplexInstance#boneUploadScratch", "mdx.MdxComplexInstance#UV_NOT_ANIMATED", "mdx.MdxComplexInstance#NO_REPLACEABLE_TEXTURES",
 			"mdx.Particle#latitudeHeap",
 			"mdx.Particle#lifeSpanHeap", "mdx.Particle#gravityHeap", "mdx.Particle#speedHeap", "mdx.Particle#tempVector",
 			"mdx.Particle2#widthHeap", "mdx.Particle2#lengthHeap", "mdx.Particle2#latitudeHeap", "mdx.Particle2#variationHeap",
 			"mdx.Particle2#speedHeap", "mdx.Particle2#gravityHeap", "mdx.ParticleEmitter#emissionRateHeap",
 			"mdx.ParticleEmitter2#emissionRateHeap", "mdx.Ribbon#vectorHeap", "mdx.Ribbon#colorHeap", "mdx.Ribbon#alphaHeap",
-			"mdx.Ribbon#slotHeap", "mdx.SdSequence#KEY_HEAP", "mdx.SdSequence#VALUES_HEAP", "mdx.SdSequence#IN_TANS_HEAP",
-			"mdx.SdSequence#OUT_TANS_HEAP", "mdx.SetupSimpleGroups#alphaHeap",
+			"mdx.Ribbon#slotHeap",
+			"mdx.SetupSimpleGroups#alphaHeap",
 			// Tables and shared values filled once from constants, never written.
 			"w3x.DialogueLabels#GROUPS", "w3x.environment.PathingGrid#movetpToMovementType",
 			"w3x.environment.Terrain#colorTags", "w3x.rendersim.ability.AbilityDataUI#CASTER_ART_ATTACHMENT_POINT",
@@ -214,6 +223,7 @@ class StaticStateTest {
 			"mdx.MdxModel#reportedStreamConversion"));
 
 	private static final Set<String> PROCESS_ALLOWED = new HashSet<>(Arrays.asList(
+			"core.util.PerfStats#simThreadSeen",
 			// Process-wide caches bounded by their key space or their size: the build info, the CASC mounts and parsed
 			// aliases, the data folder listings (one per data folder), the shared field names and values of object data
 			// (cleared past a size).
@@ -236,8 +246,12 @@ class StaticStateTest {
 			"core.viewer5.gl.Extensions#angleInstancedArrays", "core.viewer5.gl.Extensions#dynamicShadowExtension",
 			"core.viewer5.gl.Extensions#wireframeExtension", "core.viewer5.gl.Extensions#audio", "core.viewer5.SoundLoops#PLACED", "core.viewer5.SoundLoops#nextId", "core.viewer5.PositionalLoop#clock",
 			"core.viewer5.gl.Extensions#GL_LINE", "core.viewer5.gl.Extensions#GL_FILL", "core.WarsmashGdxGame#VAO",
-			"core.WarsmashPreviewApplication#VAO", "core.util.RenderMathUtils#sqlerpHeap1",
-			"core.util.RenderMathUtils#sqlerpHeap2", "core.viewer5.Node#previousWorldHeap", "core.util.SessionResources#OPEN",
+			"core.WarsmashPreviewApplication#VAO", "core.viewer5.Node#previousWorldHeap",
+			"core.util.SessionResources#OPEN",
+			// The scene update's worker threads, started by the render thread's first scene update, and what updating
+			// an instance took on that thread lately; no game's state.
+			"core.viewer5.SceneUpdateWorkers#configured", "core.viewer5.SceneUpdateWorkers#instance",
+			"core.viewer5.SceneUpdateWorkers#nanosPerInstance",
 			// Touch input of the one screen and the player's finger; owned by the input code, not by a game.
 			"core.input.touch.OnscreenKeyboard#coveredHeightPixels", "core.input.touch.TouchInputRouter#installed",
 			"core.input.touch.VirtualCursor#active", "core.input.touch.VirtualCursor#x", "core.input.touch.VirtualCursor#y",

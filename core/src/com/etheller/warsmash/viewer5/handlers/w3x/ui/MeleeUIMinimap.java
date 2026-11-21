@@ -19,6 +19,11 @@ import com.badlogic.gdx.math.Vector2;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderFogGhost;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UiFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UnitFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameSource;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
@@ -38,6 +43,8 @@ public class MeleeUIMinimap {
 	private String loadedTerrainTexturePath;
 	private Texture loadedTerrainTexture;
 	private Supplier<List<ScriptMinimapIcon>> scriptIcons;
+	private Supplier<PresentationClock> presentation;
+	private Supplier<UiFrameSource> uiFrames;
 	private final Map<String, Texture> scriptIconTextures = new HashMap<>();
 	private static final float HERO_STEP = 0.01f;
 	private final Rectangle minimap;
@@ -68,6 +75,7 @@ public class MeleeUIMinimap {
 	private long fogRefreshedMillis;
 	private final byte[] fogAlphaByCell = new byte[256];
 	private byte[] fogBytes;
+	private CPlayerFogOfWar lastFogOfWar;
 
 	public MeleeUIMinimap(final Rectangle displayArea, final Rectangle playableMapArea, final Texture minimapTexture,
 			final Texture[] teamColors, final Texture[] specialIcons) {
@@ -146,6 +154,15 @@ public class MeleeUIMinimap {
 		return this.loadedTerrainTexture == null ? this.minimapTexture : this.loadedTerrainTexture;
 	}
 
+	/**
+	 * Where the units come from when the game is shown from presented frames: the clock whose frame is on screen and
+	 * the interface state that goes with it. Without a clock the minimap reads the live simulation.
+	 */
+	public void setFrameSource(final Supplier<PresentationClock> presentation, final Supplier<UiFrameSource> uiFrames) {
+		this.presentation = presentation;
+		this.uiFrames = uiFrames;
+	}
+
 	/** The icons map scripts created (CreateMinimapIcon*); their textures come from the alternate icon's loader. */
 	public void setScriptIconSource(final Supplier<List<ScriptMinimapIcon>> scriptIcons) {
 		this.scriptIcons = scriptIcons;
@@ -199,6 +216,7 @@ public class MeleeUIMinimap {
 		if (!this.visible || !this.scriptVisible) {
 			return;
 		}
+		this.lastFogOfWar = fogOfWar;
 		if (this.terrainVisible) {
 			batch.draw(terrainTexture(), this.minimap.x, this.minimap.y, this.minimap.width, this.minimap.height);
 		}
@@ -284,35 +302,114 @@ public class MeleeUIMinimap {
 		}
 
 		this.iconCount = 0;
+		final PresentationClock clock = this.presentation == null ? null : this.presentation.get();
+		final UiFrameSource uiSource = this.uiFrames == null ? null : this.uiFrames.get();
+		final SimFrame frame = clock == null ? null : clock.frameBefore();
+		final UiFrameState ui = (uiSource != null) && uiSource.isPresented() ? uiSource.current() : null;
+		if (clock != null) {
+			// The game is shown from frames: nothing of the units is read from the simulation, and nothing is
+			// drawn for them until a frame and the interface state that goes with it have arrived.
+			if ((frame != null) && (ui != null) && ui.playersWritten) {
+				addIconsFromFrame(game, units, fogGhosts, pathingGrid, fogOfWar, player.getId(), frame.units, ui);
+			}
+		}
+		else {
+			addIconsFromSimulation(game, units, fogGhosts, pathingGrid, fogOfWar, player);
+		}
+		addScriptIcons(game, pathingGrid, fogOfWar, frame == null ? null : frame.units, clock != null);
+		drawIcons(batch);
+	}
+
+	private void addIconsFromSimulation(final CSimulation game, final Iterable<RenderUnit> units,
+			final List<RenderFogGhost> fogGhosts, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar,
+			final CPlayer player) {
 		for (final RenderUnit unit : units) {
 			final CUnit simUnit = unit.getSimulationUnit();
 			final boolean unitVisible = this.observerView || simUnit.isVisible(game, player.getId());
 			if (!(simUnit.isHidden() || simUnit.isHideMinimapIcon() || simUnit.isDead())
-					&& (unitVisible || (!unit.hasShownFogGhost() && isExploredLandmark(game, simUnit,
-							unit.getMinimapLandmarkKind(), pathingGrid, fogOfWar, this.maskedAreasPartiallyVisible)))) {
-				addUnitIcon(game, simUnit, unit.getMinimapLandmarkKind(), simUnit.isUsesAltMinimapIcon(),
-						simUnit.isBuilding(), simUnit.getFakePlayerIndex(),
-						unit.location[0], unit.location[1], player, 1f);
+					&& (unitVisible || (!unit.hasShownFogGhost() && isExploredLandmark(game, simUnit.getX(),
+							simUnit.getY(), unit.getMinimapLandmarkKind(), pathingGrid, fogOfWar,
+							this.maskedAreasPartiallyVisible)))) {
+				final int fakePlayerIndex = simUnit.getFakePlayerIndex();
+				final boolean hero = simUnit.isHero();
+				addUnitIcon(unit.getMinimapLandmarkKind(), simUnit.isUsesAltMinimapIcon(), simUnit.isBuilding(), hero,
+						hero && !player.hasAlliance(fakePlayerIndex, CAllianceType.PASSIVE), simUnit, fakePlayerIndex,
+						this.allyColorFilter == null ? null
+								: this.allyColorFilter.minimapColor(game, player.getId(), fakePlayerIndex),
+						unit.location[0], unit.location[1], player.getId(), 1f);
 			}
 		}
 		for (int i = 0, n = fogGhosts.size(); i < n; i++) {
 			final RenderFogGhost ghost = fogGhosts.get(i);
 			if (!ghost.isMinimapIconHidden() && ghost.isShown()) {
-				addUnitIcon(game, ghost.getUnit(), ghost.getMinimapLandmarkKind(), ghost.isUsesAltMinimapIcon(), true,
-						ghost.getFakePlayerIndex(), ghost.getX(), ghost.getY(), player, FOGGED_ICON_SHADE);
+				final int fakePlayerIndex = ghost.getFakePlayerIndex();
+				final boolean hero = ghost.getUnit().isHero();
+				addUnitIcon(ghost.getMinimapLandmarkKind(), ghost.isUsesAltMinimapIcon(), true, hero,
+						hero && !player.hasAlliance(fakePlayerIndex, CAllianceType.PASSIVE), ghost.getUnit(),
+						fakePlayerIndex,
+						this.allyColorFilter == null ? null
+								: this.allyColorFilter.minimapColor(game, player.getId(), fakePlayerIndex),
+						ghost.getX(), ghost.getY(), player.getId(), FOGGED_ICON_SHADE);
 			}
 		}
-		addScriptIcons(game, pathingGrid, fogOfWar);
-		drawIcons(batch);
 	}
 
-	private void addScriptIcons(final CSimulation game, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar) {
+	/** The same icons, from the units of the frame on screen: the peers give where they are drawn. */
+	private void addIconsFromFrame(final CSimulation game, final Iterable<RenderUnit> units,
+			final List<RenderFogGhost> fogGhosts,
+			final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar, final int localPlayer,
+			final UnitFrameState frameUnits, final UiFrameState ui) {
+		final int passiveWithLocal = ui.alliancePassive[localPlayer];
+		for (final RenderUnit unit : units) {
+			final CUnit simUnit = unit.getSimulationUnit();
+			final int row = frameUnits.indexOf(simUnit.getHandleId());
+			if (row < 0) {
+				continue;
+			}
+			final int flags = frameUnits.flags[row];
+			final boolean unitVisible = this.observerView || ((flags & UnitFrameState.VISIBLE_TO_LOCAL) != 0);
+			if (((flags & (UnitFrameState.HIDDEN | UnitFrameState.HIDE_MINIMAP_ICON | UnitFrameState.DEAD)) == 0)
+					&& (unitVisible || (!unit.hasShownFogGhost() && isExploredLandmark(game, unit.location[0],
+							unit.location[1], unit.getMinimapLandmarkKind(), pathingGrid, fogOfWar,
+							this.maskedAreasPartiallyVisible)))) {
+				final int fakePlayerIndex = frameUnits.teamPlayer[row];
+				final boolean hero = (flags & UnitFrameState.HERO) != 0;
+				addUnitIcon(unit.getMinimapLandmarkKind(), (flags & UnitFrameState.ALT_MINIMAP_ICON) != 0,
+						(flags & UnitFrameState.BUILDING) != 0, hero,
+						hero && (((passiveWithLocal >>> fakePlayerIndex) & 1) == 0), simUnit, fakePlayerIndex,
+						this.allyColorFilter == null ? null
+								: this.allyColorFilter.minimapColorOfRelation(frameUnits.relation[row]),
+						unit.location[0], unit.location[1], localPlayer, 1f);
+			}
+		}
+		for (int i = 0, n = fogGhosts.size(); i < n; i++) {
+			final RenderFogGhost ghost = fogGhosts.get(i);
+			if (!ghost.isMinimapIconHidden() && ghost.isShown()) {
+				// A ghost is a building, which is never a hero.
+				final int fakePlayerIndex = ghost.getFakePlayerIndex();
+				addUnitIcon(ghost.getMinimapLandmarkKind(), ghost.isUsesAltMinimapIcon(), true, false, false, null,
+						fakePlayerIndex,
+						this.allyColorFilter == null ? null
+								: this.allyColorFilter.minimapColorOfRelation(
+										AllyColorFilter.relation(ui, localPlayer, fakePlayerIndex)),
+						ghost.getX(), ghost.getY(), localPlayer, FOGGED_ICON_SHADE);
+			}
+		}
+	}
+
+	private void addScriptIcons(final CSimulation game, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar,
+			final UnitFrameState frameUnits, final boolean fromFrames) {
 		final List<ScriptMinimapIcon> icons = this.scriptIcons == null ? null : this.scriptIcons.get();
 		if (icons == null) {
 			return;
 		}
+		if (fromFrames && (frameUnits == null)) {
+			// the units' places are not known before the first frame
+			return;
+		}
 		for (int i = icons.size() - 1; i >= 0; i--) {
-			if (icons.get(i).isOrphaned()) {
+			final ScriptMinimapIcon icon = icons.get(i);
+			if (fromFrames ? icon.follow(frameUnits) : icon.isOrphaned()) {
 				icons.remove(i);
 			}
 		}
@@ -321,8 +418,8 @@ public class MeleeUIMinimap {
 			if (!icon.isVisible()) {
 				continue;
 			}
-			final float x = icon.getX();
-			final float y = icon.getY();
+			final float x = fromFrames ? icon.getFollowedX() : icon.getX();
+			final float y = fromFrames ? icon.getFollowedY() : icon.getY();
 			final CFogState fogState = fogOfWar.getFogState(game, pathingGrid.getFogOfWarIndexX(x),
 					pathingGrid.getFogOfWarIndexY(y));
 			if (!this.observerView && ((icon.getFogMask() & fogState.getId()) == 0)) {
@@ -344,9 +441,9 @@ public class MeleeUIMinimap {
 		}
 	}
 
-	private void addUnitIcon(final CSimulation game, final CUnit simUnit, final int landmarkKind,
-			final boolean usesAltIcon, final boolean building,
-			final int fakePlayerIndex, final float x, final float y, final CPlayer player, final float shade) {
+	private void addUnitIcon(final int landmarkKind, final boolean usesAltIcon, final boolean building,
+			final boolean hero, final boolean hostileHero, final CUnit heroUnit, final int fakePlayerIndex,
+			final float[] filteredColor, final float x, final float y, final int localPlayer, final float shade) {
 		int dimensions = 4;
 		float red = 1f;
 		float green = 1f;
@@ -368,13 +465,13 @@ public class MeleeUIMinimap {
 		} else if (landmarkKind == RenderUnit.LANDMARK_NEUTRAL_BUILDING) {
 			minimapIcon = this.specialIcons[1];
 			dimensions = 21;
-		} else if (simUnit.isHero()) {
-			if (!player.hasAlliance(fakePlayerIndex, CAllianceType.PASSIVE)) {
+		} else if (hero) {
+			if (hostileHero) {
 				green = 0.2f;
 				blue = 0.2f;
 			}
 			alpha = this.heroAlpha;
-			if ((this.heroAlertShown != null) && this.heroAlertShown.test(simUnit)) {
+			if ((this.heroAlertShown != null) && (heroUnit != null) && this.heroAlertShown.test(heroUnit)) {
 				green = 0f;
 				blue = 0f;
 				alpha = 1f;
@@ -387,15 +484,13 @@ public class MeleeUIMinimap {
 				dimensions = 10;
 			}
 			layer = 0;
-			final float[] filtered = this.allyColorFilter == null ? null
-					: this.allyColorFilter.minimapColor(game, player.getId(), fakePlayerIndex);
-			if (filtered != null) {
+			if (filteredColor != null) {
 				minimapIcon = this.specialIcons[5];
-				red = filtered[0];
-				green = filtered[1];
-				blue = filtered[2];
+				red = filteredColor[0];
+				green = filteredColor[1];
+				blue = filteredColor[2];
 			}
-			else if (fakePlayerIndex == player.getId()) {
+			else if (fakePlayerIndex == localPlayer) {
 				minimapIcon = this.specialIcons[5];
 			}
 			else {
@@ -418,11 +513,12 @@ public class MeleeUIMinimap {
 				dimensions, red, green, blue, alpha);
 	}
 
-	private static boolean isExploredLandmark(final CSimulation game, final CUnit unit, final int landmarkKind,
-			final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar, final boolean maskedAreasPartiallyVisible) {
+	private static boolean isExploredLandmark(final CSimulation game, final float x, final float y,
+			final int landmarkKind, final PathingGrid pathingGrid, final CPlayerFogOfWar fogOfWar,
+			final boolean maskedAreasPartiallyVisible) {
 		return (landmarkKind != RenderUnit.LANDMARK_NONE)
-				&& (maskedAreasPartiallyVisible || !CFogState.MASKED.equals(fogOfWar.getFogState(game, pathingGrid.getFogOfWarIndexX(unit.getX()),
-						pathingGrid.getFogOfWarIndexY(unit.getY()))));
+				&& (maskedAreasPartiallyVisible || !CFogState.MASKED.equals(fogOfWar.getFogState(game,
+						pathingGrid.getFogOfWarIndexX(x), pathingGrid.getFogOfWarIndexY(y))));
 	}
 
 	// Icons are drawn grouped by texture, since every texture change is a separate draw call and the dots of
@@ -469,6 +565,11 @@ public class MeleeUIMinimap {
 			}
 		}
 		batch.setColor(1, 1, 1, 1);
+	}
+
+	/** The fog of war the minimap was last drawn with: the one place the interface takes it from the viewer. */
+	CPlayerFogOfWar getFogOfWar() {
+		return this.lastFogOfWar;
 	}
 
 	public float[] getCameraFootprint() {

@@ -50,8 +50,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.PathingFlags;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
-import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityDataUI;
-import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.IconUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.OrderButtonUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
@@ -110,6 +108,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.BooleanAbility
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CWidgetAbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.ExternStringMsgAbilityActivationReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.ExternStringMsgTargetCheckReceiver;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UiFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.CommandButtonModel;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.CommandCardModel;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameSource;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameWriter;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UnitDetailsModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.CommandCardCommandListener;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxLayer.FilterMode;
 
@@ -138,8 +142,143 @@ final class MeleeUICommands {
 
 	final MeleeUI ui;
 
+	private UiFrameSource frames;
+	private final PanelIcons icons = new PanelIcons();
+	private int[] pushedSelection = new int[0];
+	private int pushedActive;
+	private int pushedSubMenu;
+	private int pushedExitMenu;
+	private boolean pushedTargeting;
+	private int pushedHovered;
+	private int pushedReserved = -1;
+	private long pushedGroupsHash;
+
 	MeleeUICommands(final MeleeUI ui) {
 		this.ui = ui;
+	}
+
+	/** The source the panels draw from; made on first use, when the viewer's data exists. */
+	UiFrameSource frames() {
+		if (this.frames == null) {
+			final War3MapViewer viewer = this.ui.war3MapViewer;
+			if (viewer instanceof UiFrameSource.Holder) {
+				this.frames = ((UiFrameSource.Holder) viewer).uiFrameSource();
+			}
+			if (this.frames == null) {
+				this.frames = new UiFrameSource(new UiFrameWriter(viewer.getAbilityDataUI(),
+						this.ui.rootFrame.getTemplates(), viewer.miscData, viewer.getAllObjectData().getUnits(),
+						viewer.getLocalPlayerIndex()));
+			}
+		}
+		return this.frames;
+	}
+
+	/**
+	 * The state every panel draws from. The render side's inputs to the writer (what is selected, which menu is open,
+	 * what is under the pointer) are handed over first; the state is brought up to date when it is written here.
+	 *
+	 * @param force write again even when no step and no input changed
+	 */
+	UiFrameState frameState(final boolean force) {
+		final UiFrameSource source = frames();
+		final UiFrameWriter writer = source.writer();
+		final War3MapViewer viewer = this.ui.war3MapViewer;
+		writer.setLocalPlayerIndex(viewer.getLocalPlayerIndex());
+		writer.setViewingPlayerIndex(viewer.getViewingPlayerIndex());
+		boolean changed = false;
+		final List<RenderUnit> selection = this.ui.selectedUnits;
+		final int count = Math.min(selection.size(), UiFrameState.MAX_SELECTED);
+		boolean sameSelection = count == this.pushedSelection.length;
+		final int[] handles = new int[count];
+		for (int i = 0; i < count; i++) {
+			handles[i] = selection.get(i).getSimulationUnit().getHandleId();
+			if (sameSelection && (handles[i] != this.pushedSelection[i])) {
+				sameSelection = false;
+			}
+		}
+		final int active = this.ui.selectedUnit == null ? 0 : this.ui.selectedUnit.getSimulationUnit().getHandleId();
+		final List<Integer> stack = this.ui.subMenuOrderIdStack;
+		final int subMenu = stack.isEmpty() ? 0 : stack.get(stack.size() - 1);
+		final int exitMenu = stack.size() > 1 ? stack.get(stack.size() - 2) : 0;
+		final boolean targeting = (this.ui.activeCommand != null) && (this.ui.draggingItem == null);
+		final RenderWidget hovered = this.ui.mouseOverUnit;
+		final int hoveredHandle = hovered == null ? 0 : hovered.getSimulationWidget().getHandleId();
+		if (!sameSelection || (active != this.pushedActive)) {
+			this.pushedSelection = handles;
+			this.pushedActive = active;
+			writer.setSelection(handles, handles.length, active);
+			changed = true;
+		}
+		if ((subMenu != this.pushedSubMenu) || (exitMenu != this.pushedExitMenu)) {
+			this.pushedSubMenu = subMenu;
+			this.pushedExitMenu = exitMenu;
+			writer.setSubMenu(subMenu, exitMenu);
+			changed = true;
+		}
+		if (targeting != this.pushedTargeting) {
+			this.pushedTargeting = targeting;
+			writer.setTargeting(targeting);
+			changed = true;
+		}
+		if (hoveredHandle != this.pushedHovered) {
+			this.pushedHovered = hoveredHandle;
+			writer.setHoveredUnit(hoveredHandle);
+			changed = true;
+		}
+		final int reserved = this.ui.groups.reservedLocalHeroButtons();
+		if (reserved != this.pushedReserved) {
+			this.pushedReserved = reserved;
+			writer.setReservedHeroButtons(reserved);
+			changed = true;
+		}
+		long groupsHash = 1;
+		for (int group = 0; group < this.ui.controlGroups.size(); group++) {
+			for (final RenderUnit member : this.ui.controlGroups.get(group)) {
+				groupsHash = (groupsHash * 31) + member.getSimulationUnit().getHandleId() + (group << 20);
+			}
+			groupsHash = (groupsHash * 31) + group;
+		}
+		if (groupsHash != this.pushedGroupsHash) {
+			this.pushedGroupsHash = groupsHash;
+			final int[][] members = new int[UiFrameState.CONTROL_GROUPS][];
+			for (int group = 0; group < members.length; group++) {
+				final List<RenderUnit> list = group < this.ui.controlGroups.size() ? this.ui.controlGroups.get(group)
+						: Collections.<RenderUnit>emptyList();
+				members[group] = new int[list.size()];
+				for (int i = 0; i < members[group].length; i++) {
+					members[group][i] = list.get(i).getSimulationUnit().getHandleId();
+				}
+			}
+			writer.setControlGroups(members);
+			changed = true;
+		}
+		if (changed) {
+			source.inputsChanged();
+		}
+		source.refresh(viewer.simulation, force);
+		return source.current();
+	}
+
+	/** The render peer of a unit by handle, null when it has none. */
+	RenderUnit renderUnitOf(final int handle) {
+		if (handle == 0) {
+			return null;
+		}
+		for (final RenderUnit unit : this.ui.war3MapViewer.units) {
+			if (unit.getSimulationUnit().getHandleId() == handle) {
+				return unit;
+			}
+		}
+		return null;
+	}
+
+	/** Icon textures by path; the disabled art is the same name under the skin's disabled path. */
+	Texture icon(final String path) {
+		return this.icons.get(this.ui.rootFrame, path);
+	}
+
+	Texture iconDisabled(final String path) {
+		return this.icons.getDisabled(this.ui.rootFrame, path);
 	}
 
 	void createInventory() {
@@ -1049,43 +1188,45 @@ final class MeleeUICommands {
 					.getItemIconPathForDragging();
 			this.ui.cursorFrame.setReplaceableId(21, this.ui.war3MapViewer.blp(iconPath));
 
-			int index = 0;
-			final CAbilityInventory inventory = this.ui.selectedUnit.getSimulationUnit().getInventoryData();
-			for (int i = 0; i < MeleeUI.INVENTORY_HEIGHT; i++) {
-				for (int j = 0; j < this.ui.inventoryWidth; j++) {
-					final CommandCardIcon inventoryIcon = this.ui.inventoryIcons[i][j];
-					final CItem item = inventory.getItemInSlot(index);
-					if (item == null) {
-						if (index < inventory.getItemCapacity()) {
+			final UnitDetailsModel inventory = inventoryOfSelected();
+			if (inventory != null) {
+				int index = 0;
+				for (int i = 0; i < MeleeUI.INVENTORY_HEIGHT; i++) {
+					for (int j = 0; j < this.ui.inventoryWidth; j++) {
+						final CommandCardIcon inventoryIcon = this.ui.inventoryIcons[i][j];
+						if ((inventory.itemTypeIds[index] == 0) && (index < inventory.inventoryCapacity)) {
 							inventoryIcon.setCommandButtonData(null, 0, 0, index + 1, true, false, false, null, null,
 									'\0', 0, 0, 0, 0, false, 0, 0, -1);
 						}
+						index++;
 					}
-					index++;
 				}
 			}
 		}
 		else {
-			if (this.ui.selectedUnit != null) {
-				final CAbilityInventory inventory = this.ui.selectedUnit.getSimulationUnit().getInventoryData();
-				if (inventory != null) {
-					int index = 0;
-					for (int i = 0; i < MeleeUI.INVENTORY_HEIGHT; i++) {
-						for (int j = 0; j < this.ui.inventoryWidth; j++) {
-							final CommandCardIcon inventoryIcon = this.ui.inventoryIcons[i][j];
-							final CItem item = inventory.getItemInSlot(index);
-							if (item == null) {
-								if (index < inventory.getItemCapacity()) {
-									inventoryIcon.clear();
-								}
-							}
-							index++;
+			final UnitDetailsModel inventory = inventoryOfSelected();
+			if (inventory != null) {
+				int index = 0;
+				for (int i = 0; i < MeleeUI.INVENTORY_HEIGHT; i++) {
+					for (int j = 0; j < this.ui.inventoryWidth; j++) {
+						final CommandCardIcon inventoryIcon = this.ui.inventoryIcons[i][j];
+						if ((inventory.itemTypeIds[index] == 0) && (index < inventory.inventoryCapacity)) {
+							inventoryIcon.clear();
 						}
+						index++;
 					}
 				}
 			}
-
 		}
+	}
+
+	/** The selected unit's own inventory in the frame, null when it has none (or none is shown yet). */
+	private UnitDetailsModel inventoryOfSelected() {
+		if (this.ui.selectedUnit == null) {
+			return null;
+		}
+		final UnitDetailsModel active = frameState(false).active;
+		return active.inventoryShown ? active : null;
 	}
 
 	public void rallyPointChanged() {
@@ -1209,75 +1350,66 @@ final class MeleeUICommands {
 		return hint.replace("Left-Click", "Tap").replace("Drop item on shop", "Drag item onto a shop");
 	}
 
+	/** The card is shown from its model by {@link #showCommandCard}; nothing calls the per-button listener any more. */
 	public void commandButton(final int buttonPositionX, final int buttonPositionY, final Texture icon,
 			final int abilityHandleId, final int orderId, final int autoCastId, final boolean active,
 			final boolean autoCastActive, final boolean menuButton, final String tip, final String uberTip,
 			final char hotkey, final int goldCost, final int lumberCost, final int foodCost, final int manaCost,
 			final float cooldownRemaining, final float cooldownMax, final int numberOverlay) {
-		if ((buttonPositionX == -11) || (buttonPositionY == -11)) {
-			// NOTE some guys said they liked to do this as a hack to hide icons or whatever
-			return;
-		}
-		int x = Math.max(0, Math.min(MeleeUI.COMMAND_CARD_WIDTH - 1, buttonPositionX));
-		int y = Math.max(0, Math.min(MeleeUI.COMMAND_CARD_HEIGHT - 1, buttonPositionY));
-		while ((x >= 0) && (y >= 0) && this.ui.commandCard[y][x].isVisible()) {
-			x--;
-			if ((x < 0) && (y != 0)) {
-				x = MeleeUI.COMMAND_CARD_WIDTH - 1;
-				y--;
+	}
+
+	/**
+	 * Shows the buttons of the card model on the card; the model has placed each one on its slot. The unit's own
+	 * mana tints a button blue when it cannot pay for it.
+	 */
+	void showCommandCard(final CommandCardModel card, final UnitDetailsModel unit) {
+		for (int i = 0; i < card.buttonCount; i++) {
+			final CommandButtonModel button = card.buttons[i];
+			final int x = button.slot % MeleeUI.COMMAND_CARD_WIDTH;
+			final int y = button.slot / MeleeUI.COMMAND_CARD_WIDTH;
+			if ((y >= MeleeUI.COMMAND_CARD_HEIGHT) || (button.slot < 0)) {
+				continue;
 			}
-		}
-		if ((y < 0) || (x < 0)) {
-			if (y < 0) {
-				y = 0;
+			final Texture texture;
+			if (button.iconPath != null) {
+				texture = button.enabled ? icon(button.iconPath) : iconDisabled(button.iconPath);
 			}
-			if (x < 0) {
-				x = 0;
+			else {
+				texture = button.enabled ? button.iconTexture : button.iconTextureDisabled;
 			}
-			while ((x < MeleeUI.COMMAND_CARD_WIDTH) && (y < MeleeUI.COMMAND_CARD_HEIGHT)
-					&& this.ui.commandCard[y][x].isVisible()) {
-				x++;
-				if (x >= MeleeUI.COMMAND_CARD_WIDTH) {
-					x = 0;
-					y++;
-				}
-			}
-		}
-		if ((x < MeleeUI.COMMAND_CARD_WIDTH) && (x >= 0) && (y < MeleeUI.COMMAND_CARD_HEIGHT) && (y >= 0)) {
-			this.ui.commandCard[y][x].setCommandButtonData(icon, abilityHandleId, orderId, autoCastId, active,
-					autoCastActive, menuButton, tip, uberTip, hotkey, goldCost, lumberCost, foodCost, manaCost,
-					this.ui.selectedUnit.getSimulationUnit().getMana() < manaCost, cooldownRemaining, cooldownMax,
-					numberOverlay);
-			this.ui.commandCard[y][x].setButtonEffect(hasButtonEffect(abilityHandleId, orderId));
+			final CommandCardIcon cardIcon = this.ui.commandCard[y][x];
+			cardIcon.setCommandButtonData(texture, button.abilityHandleId, button.enabled ? button.id : 0,
+					button.autoCastOrderId, button.toggledOn, button.autocastOn, button.kind == CommandButtonModel.KIND_MENU,
+					button.tooltip.title, button.tooltip.body, (char) button.hotkey, button.goldCost, button.lumberCost,
+					button.foodCost, button.manaCost, unit.mana < button.manaCost, button.cooldownRemaining,
+					button.cooldownTotal, button.charges);
+			cardIcon.setButtonEffect(hasButtonEffect(card, button));
 		}
 	}
 
 	/** Whether a command button effect of a map script points at this button of the selected unit. */
-	private boolean hasButtonEffect(final int abilityHandleId, final int orderId) {
+	private boolean hasButtonEffect(final CommandCardModel card, final CommandButtonModel button) {
 		final List<CommandButtonEffect> effects = this.ui.war3MapViewer.scriptUiState.getCommandButtonEffects();
 		if (effects.isEmpty()) {
 			return false;
 		}
-		final CUnit unit = this.ui.selectedUnit.getSimulationUnit();
-		int alias = 0;
-		CAbilityHero hero = null;
-		for (final CAbility ability : unit.getAbilities()) {
-			if (ability.getHandleId() == abilityHandleId) {
-				alias = ability.getAlias().getValue();
-				if (ability instanceof CAbilityHero) {
-					hero = (CAbilityHero) ability;
-				}
-				break;
-			}
-		}
+		final boolean heroButton = (card.heroAbilityHandle != 0) && (button.abilityHandleId == card.heroAbilityHandle);
 		for (final CommandButtonEffect effect : effects) {
-			if (effect.matches(alias, orderId)) {
+			if (effect.matches(button.abilityAlias, button.id)) {
 				return true;
 			}
 			// A skill to learn is first reached through the hero's skill button.
-			if ((effect.getKind() == CommandButtonEffect.Kind.LEARN) && (hero != null)
-					&& (orderId == OrderIds.skillmenu) && (hero.getSkillPoints() > 0)
-					&& hero.getSkillsAvailable().contains(new War3ID(effect.getId()))) {
+			if ((effect.getKind() == CommandButtonEffect.Kind.LEARN) && heroButton && (button.id == OrderIds.skillmenu)
+					&& (card.heroSkillPoints > 0) && cardHasSkill(card, effect.getId())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean cardHasSkill(final CommandCardModel card, final int skillId) {
+		for (int i = 0; i < card.heroSkillCount; i++) {
+			if (card.heroSkillIds[i] == skillId) {
 				return true;
 			}
 		}
@@ -1286,27 +1418,31 @@ final class MeleeUICommands {
 
 	void clearAndRepopulateCommandCard() {
 		clearCommandCard();
-		final AbilityDataUI abilityDataUI = this.ui.war3MapViewer.getAbilityDataUI();
-		final int menuOrderId = getSubMenuOrderId();
-		if ((this.ui.activeCommand != null) && (this.ui.draggingItem == null)) {
-			final IconUI cancelUI = abilityDataUI.getCancelUI();
-			commandButton(cancelUI.getButtonPositionX(), cancelUI.getButtonPositionY(), cancelUI.getIcon(), 0,
-					menuOrderId, 0, false, false, true, cancelUI.getToolTip(), cancelUI.getUberTip(),
-					cancelUI.getHotkey(), 0, 0, 0, 0, 0, 0, -1);
+		if (this.ui.selectedUnit == null) {
+			return;
 		}
-		else {
-			if (menuOrderId != 0) {
-				final int exitOrderId = this.ui.subMenuOrderIdStack.size() > 1
-						? this.ui.subMenuOrderIdStack.get(this.ui.subMenuOrderIdStack.size() - 2)
-						: 0;
-				final IconUI cancelUI = abilityDataUI.getCancelUI();
-				commandButton(cancelUI.getButtonPositionX(), cancelUI.getButtonPositionY(), cancelUI.getIcon(), 0,
-						exitOrderId, 0, false, false, true, cancelUI.getToolTip(), cancelUI.getUberTip(),
-						cancelUI.getHotkey(), 0, 0, 0, 0, 0, 0, -1);
+		final UiFrameState state = frameState(true);
+		final UnitDetailsModel active = state.active;
+		if ((state.activeUnit == 0) || (active.unitHandle != state.activeUnit)
+				|| (state.activeUnit != this.ui.selectedUnit.getSimulationUnit().getHandleId())) {
+			return;
+		}
+		showCommandCard(state.commandCard, active);
+		showBuffs(active);
+	}
+
+	/** The buff bar and the timed life bar of the active unit. */
+	void showBuffs(final UnitDetailsModel active) {
+		if (!active.building) {
+			for (int i = 0; (i < active.buffCount) && (this.ui.currentBuffBarIconIndex < this.ui.buffBarIcons.length);
+					i++) {
+				this.ui.buffBarIcons[this.ui.currentBuffBarIconIndex++].set(icon(active.buffIconPaths[i]),
+						active.buffTips[i], active.buffUberTips[i], active.buffPositive[i], active.buffLeveled[i],
+						active.buffLevels[i]);
 			}
-			this.ui.selectedUnit.populateCommandCard(this.ui.war3MapViewer.simulation, this.ui.rootFrame, this.ui,
-					abilityDataUI, menuOrderId, this.ui.selectedUnits.size() > 1,
-					this.ui.war3MapViewer.getLocalPlayerIndex());
+		}
+		if (active.timedLifeLabel != null) {
+			this.ui.infoPanel.timedLifeBar(0, active.timedLifeLabel, active.timedLifeRemaining, active.timedLifeMax);
 		}
 	}
 

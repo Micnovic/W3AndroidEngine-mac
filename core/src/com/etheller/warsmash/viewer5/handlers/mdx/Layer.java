@@ -76,10 +76,19 @@ public class Layer extends AnimatedObject {
 	}
 
 	public void bind(final ShaderProgram shader) {
-		final GL20 gl = this.model.viewer.gl;
-
 		// gl.uniform1f(shader.uniforms.u_unshaded, this.unshaded);
 		shader.setUniformf("u_filterMode", this.filterMode);
+		bindState();
+	}
+
+	/** @param filterModeLocation where the shader has its u_filterMode */
+	void bind(final ShaderProgram shader, final int filterModeLocation) {
+		shader.setUniformf(filterModeLocation, this.filterMode);
+		bindState();
+	}
+
+	private void bindState() {
+		final GL20 gl = this.model.viewer.gl;
 
 		if (this.blended) {
 			gl.glEnable(GL20.GL_BLEND);
@@ -112,10 +121,19 @@ public class Layer extends AnimatedObject {
 	}
 
 	public void bindBlended(final ShaderProgram shader) {
-		final GL20 gl = this.model.viewer.gl;
-
 		// gl.uniform1f(shader.uniforms.u_unshaded, this.unshaded);
 		shader.setUniformf("u_filterMode", this.filterMode);
+		bindBlendedState();
+	}
+
+	/** @param filterModeLocation where the shader has its u_filterMode */
+	void bindBlended(final ShaderProgram shader, final int filterModeLocation) {
+		shader.setUniformf(filterModeLocation, this.filterMode);
+		bindBlendedState();
+	}
+
+	private void bindBlendedState() {
+		final GL20 gl = this.model.viewer.gl;
 
 		gl.glEnable(GL20.GL_BLEND);
 		if ((this.blendSrc == 0) && (this.blendDst == 0)) {

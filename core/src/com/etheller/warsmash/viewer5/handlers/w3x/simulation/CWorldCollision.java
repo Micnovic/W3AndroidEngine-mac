@@ -12,6 +12,7 @@ import com.etheller.warsmash.util.Quadtree;
 import com.etheller.warsmash.util.QuadtreeIntersector;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 
 public class CWorldCollision {
@@ -36,6 +37,9 @@ public class CWorldCollision {
 	// The largest footprint (in cells) of any unit that was put in: units above MaxCollisionRadius have a square
 	// clamped to it, but their footprint is not.
 	private int maxRegisteredCells = 1;
+	/** Counts the units put in, taken out and moved, so that what was gathered from the trees can tell it is stale. */
+	@SavedTransient
+	private int unitChanges;
 	private final List<Set<CUnit>> enumSets = new ArrayList<>();
 	private int enumSetDepth;
 	private final List<Set<Object>> otherEnumSets = new ArrayList<>();
@@ -60,6 +64,7 @@ public class CWorldCollision {
 	}
 
 	public void addUnit(final CUnit unit) {
+		this.unitChanges++;
 		Rectangle bounds = unit.getCollisionRectangle();
 		if ((bounds != null) && (unit.placement.collisionTrees != 0)) {
 			// Still registered (a hero revived from its own death trigger or from its bones): taken out first, so
@@ -138,6 +143,7 @@ public class CWorldCollision {
 	}
 
 	private void removeFromTrees(final CUnit unit, final Rectangle bounds, final int trees) {
+		this.unitChanges++;
 		if ((trees & ANY_TREE) != 0) {
 			this.anyUnitEnumerableCollision.remove(unit, bounds);
 		}
@@ -453,6 +459,34 @@ public class CWorldCollision {
 		}
 	}
 
+	public int getUnitChanges() {
+		return this.unitChanges;
+	}
+
+	/** The reach intersectsFootprintOtherThan looks as far as around a point for a footprint of that many cells. */
+	public float footprintCandidateReach(final int footprintCells) {
+		return footprintReach(footprintCells);
+	}
+
+	/**
+	 * Adds the units whose square overlaps the area and that count for a footprint test at all (all but the ones the
+	 * caller leaves out itself and the footprint comparison): what intersectsFootprintOtherThan goes through.
+	 */
+	public void collectFootprintCandidates(final Rectangle area, final boolean amphibious, final int gameTurnTick,
+			final List<CUnit> out) {
+		final AnyUnitExceptTwoIntersector intersector = this.anyUnitExceptTwoIntersector;
+		intersector.ignoreControlledBy(null, -1);
+		intersector.reset(null, null, false);
+		intersector.footprint(null, 0, 0, 0);
+		intersector.walkingTick = gameTurnTick;
+		try {
+			collectPassing(area, intersector, amphibious, out);
+		}
+		finally {
+			intersector.walkingTick = NOT_A_TICK;
+		}
+	}
+
 	/**
 	 * Half the side of the square that holds every unit whose footprint can share a cell with one of footprintCells.
 	 * A unit of c cells stands within 32 * (f / 2 + c / 2 + 1) of the point, and its collision square reaches c * 16 -
@@ -501,6 +535,7 @@ public class CWorldCollision {
 	}
 
 	public void translate(final CUnit unit, final float xShift, final float yShift) {
+		this.unitChanges++;
 		final Rectangle bounds = unit.getCollisionRectangle();
 		if (bounds != null) {
 			// Also the trees it belongs in now: one put in while it could not move goes into the ground tree once it

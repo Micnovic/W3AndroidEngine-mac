@@ -2,9 +2,11 @@ package com.etheller.warsmash.viewer5.handlers.mdx;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import com.etheller.warsmash.util.ParseUtils;
 import com.etheller.warsmash.util.RenderMathUtils;
+import com.etheller.warsmash.viewer5.SceneUpdateWorkers;
 import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
 import com.hiveworkshop.rms.parsers.mdlx.timeline.MdlxTimeline;
 
@@ -28,21 +30,11 @@ public final class SdSequence<TYPE> {
 	private final SharedKeys[] keys;
 	private final SharedKeys sameKeys;
 	// For a rotation timeline that is played: the slerp setups of every pair of keys a sequence goes between, made
-	// when first needed (the sequences of a model that are never played do not get one).
-	private float[][] slerpSetups;
-	// Keys taken out of the flat arrays for the interpolation; like the interpolation's own heaps, only for the
-	// rendering thread. One set for each key length.
-	private static final float[][][] KEY_HEAP = new float[5][][];
-	private static final float[][] VALUES_HEAP = new float[2][];
-	private static final float[][] IN_TANS_HEAP = new float[2][];
-	private static final float[][] OUT_TANS_HEAP = new float[2][];
+	// when first needed (the sequences of a model that are never played do not get one). The scene update's worker
+	// threads may make them at the same time; they all make the same ones.
+	private volatile AtomicReferenceArray<float[]> slerpSetups;
+	// Keys taken out of the flat arrays for the interpolation are put in the calling thread's own heaps.
 	private static final float[][] NO_TANS = new float[0][];
-
-	static {
-		for (int i = 1; i < KEY_HEAP.length; i++) {
-			KEY_HEAP[i] = new float[][] { new float[i], new float[i], new float[i], new float[i] };
-		}
-	}
 
 	public int size() {
 		return this.starts.length;
@@ -317,7 +309,7 @@ public final class SdSequence<TYPE> {
 			return 0;
 		}
 		final int stride = ((float[]) values.get(0)).length;
-		if ((stride < 1) || (stride >= KEY_HEAP.length)) {
+		if ((stride < 1) || (stride > SceneUpdateWorkers.Heaps.MAX_KEY_LENGTH)) {
 			return 0;
 		}
 		for (int i = 0; i < keys; i++) {
@@ -392,8 +384,12 @@ public final class SdSequence<TYPE> {
 		final int start = this.starts[sequence];
 
 		if (((run & 1) != 0) || (frame < start)) {
-			sd.copy(out, keys.values != null ? (TYPE) unpack(keys.values, first, KEY_HEAP[keys.stride][0])
-					: (TYPE) keys.objectValues[0]);
+			if (keys.values == null) {
+				sd.copy(out, (TYPE) keys.objectValues[0]);
+			}
+			else if (!copyPacked(sd, keys, out, first)) {
+				sd.copy(out, (TYPE) unpack(keys.values, first, SceneUpdateWorkers.heaps().keys[keys.stride][0]));
+			}
 
 			return -1;
 		}
@@ -425,13 +421,9 @@ public final class SdSequence<TYPE> {
 			}
 			final float t = ((timeBetweenFrames) == 0 ? 0 : ((frame - startFrame) / (float) (timeBetweenFrames)));
 			if (keys.values != null) {
-				final int type = sd.interpolationType;
-				if ((keys.stride == 4) && (sd instanceof QuaternionSd) && (type >= 1) && (type <= 3)
-						&& ((type == 1) || (keys.inTans != null))) {
-					interpolateRotation(sequence, type, keys, (float[]) out, startFrameIndex,
-							first + startFrameIndex, first + endFrameIndex, t);
-				}
-				else {
+				if (!interpolateRotation(sd, sequence, keys, out, startFrameIndex, first + startFrameIndex,
+						first + endFrameIndex, t)
+						&& !interpolateFlat(sd, keys, out, first + startFrameIndex, first + endFrameIndex, t)) {
 					interpolatePacked(sd, keys, out, first + startFrameIndex, first + endFrameIndex, t);
 				}
 			}
@@ -443,68 +435,175 @@ public final class SdSequence<TYPE> {
 		}
 	}
 
+	/*
+	 * What copy and interpolate of the three float timelines do, read straight from the flat arrays: the scratch
+	 * arrays of the general path below are the calling thread's, and finding the calling thread costs more than the
+	 * whole interpolation on Android. The cases left out (unusual key lengths, tangent interpolation without
+	 * tangents) take the general path.
+	 */
+	private static boolean copyPacked(final Sd<?> sd, final SharedKeys keys, final Object out, final int index) {
+		final int stride = keys.stride;
+		final float[] values = keys.values;
+		if (sd instanceof ScalarSd) {
+			((float[]) out)[0] = values[index * stride];
+			return true;
+		}
+		if ((sd instanceof VectorSd) || (sd instanceof QuaternionSd)) {
+			System.arraycopy(values, index * stride, out, 0, stride);
+			return true;
+		}
+		return false;
+	}
+
+	private static boolean interpolateFlat(final Sd<?> sd, final SharedKeys keys, final Object target,
+			final int startIndex, final int endIndex, final float t) {
+		final int type = sd.interpolationType;
+		final int stride = keys.stride;
+		final float[] values = keys.values;
+		final boolean tangents = keys.inTans != null;
+		if (sd instanceof ScalarSd) {
+			if (stride != 1) {
+				return false;
+			}
+			final float[] out = (float[]) target;
+			final float startValue = values[startIndex];
+			switch (type) {
+			case 0:
+				out[0] = startValue;
+				break;
+			case 1:
+				out[0] = RenderMathUtils.lerp(startValue, values[endIndex], t);
+				break;
+			case 2:
+				out[0] = RenderMathUtils.hermite(startValue, tangents ? keys.outTans[startIndex] : 0f,
+						tangents ? keys.inTans[endIndex] : 0f, values[endIndex], t);
+				break;
+			case 3:
+				out[0] = RenderMathUtils.bezier(startValue, tangents ? keys.outTans[startIndex] : 0f,
+						tangents ? keys.inTans[endIndex] : 0f, values[endIndex], t);
+				break;
+			}
+			return true;
+		}
+		if (type == 0) {
+			if ((sd instanceof VectorSd) || (sd instanceof QuaternionSd)) {
+				System.arraycopy(values, startIndex * stride, target, 0, stride);
+				return true;
+			}
+			return false;
+		}
+		if (sd instanceof VectorSd) {
+			if ((stride != 3) || ((type != 1) && !tangents) || (type > 3)) {
+				return false;
+			}
+			final float[] out = (float[]) target;
+			final int a = startIndex * 3;
+			final int d = endIndex * 3;
+			if (type == 1) {
+				out[0] = RenderMathUtils.lerp(values[a], values[d], t);
+				out[1] = RenderMathUtils.lerp(values[a + 1], values[d + 1], t);
+				out[2] = RenderMathUtils.lerp(values[a + 2], values[d + 2], t);
+			}
+			else {
+				final float[] outTans = keys.outTans;
+				final float[] inTans = keys.inTans;
+				if (type == 2) {
+					out[0] = RenderMathUtils.hermite(values[a], outTans[a], inTans[d], values[d], t);
+					out[1] = RenderMathUtils.hermite(values[a + 1], outTans[a + 1], inTans[d + 1], values[d + 1], t);
+					out[2] = RenderMathUtils.hermite(values[a + 2], outTans[a + 2], inTans[d + 2], values[d + 2], t);
+				}
+				else {
+					out[0] = RenderMathUtils.bezier(values[a], outTans[a], inTans[d], values[d], t);
+					out[1] = RenderMathUtils.bezier(values[a + 1], outTans[a + 1], inTans[d + 1], values[d + 1], t);
+					out[2] = RenderMathUtils.bezier(values[a + 2], outTans[a + 2], inTans[d + 2], values[d + 2], t);
+				}
+			}
+			return true;
+		}
+		if ((sd instanceof QuaternionSd) && (stride == 4)) {
+			final int a = startIndex * 4;
+			final int d = endIndex * 4;
+			if (type == 1) {
+				RenderMathUtils.slerp((float[]) target, values, a, values, d, t);
+				return true;
+			}
+			if (((type == 2) || (type == 3)) && tangents) {
+				RenderMathUtils.sqlerp((float[]) target, values, a, keys.outTans, a, keys.inTans, d, values, d, t);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** The keys are put at 0 and 1 of arrays shaped as the unpacked ones, so the interpolation is the same. */
 	@SuppressWarnings("unchecked")
 	private void interpolatePacked(final Sd<TYPE> sd, final SharedKeys keys, final TYPE out, final int startIndex,
 			final int endIndex, final float t) {
-		final float[][] heap = KEY_HEAP[keys.stride];
-		VALUES_HEAP[0] = unpack(keys.values, startIndex, heap[0]);
-		VALUES_HEAP[1] = unpack(keys.values, endIndex, heap[1]);
+		final SceneUpdateWorkers.Heaps heaps = SceneUpdateWorkers.heaps();
+		final float[][] heap = heaps.keys[keys.stride];
+		final float[][] valuesHeap = heaps.values;
+		valuesHeap[0] = unpack(keys.values, startIndex, heap[0]);
+		valuesHeap[1] = unpack(keys.values, endIndex, heap[1]);
 		float[][] inTans = NO_TANS;
 		float[][] outTans = NO_TANS;
 		if (keys.inTans != null) {
-			OUT_TANS_HEAP[0] = unpack(keys.outTans, startIndex, heap[2]);
-			IN_TANS_HEAP[1] = unpack(keys.inTans, endIndex, heap[3]);
-			inTans = IN_TANS_HEAP;
-			outTans = OUT_TANS_HEAP;
+			heaps.outTans[0] = unpack(keys.outTans, startIndex, heap[2]);
+			heaps.inTans[1] = unpack(keys.inTans, endIndex, heap[3]);
+			inTans = heaps.inTans;
+			outTans = heaps.outTans;
 		}
-		sd.interpolate(out, (TYPE[]) VALUES_HEAP, (TYPE[]) inTans, (TYPE[]) outTans, 0, 1, t);
+		sd.interpolate(out, (TYPE[]) valuesHeap, (TYPE[]) inTans, (TYPE[]) outTans, 0, 1, t);
 	}
 
 	/**
 	 * What {@link QuaternionSd#interpolate} does with the keys of the segment that starts at key index segment
-	 * (the last one goes back to the first), with the slerp setups of the segment's pairs of keys kept.
+	 * (the last one goes back to the first), with the slerp setups of the segment's pairs of keys kept; false when
+	 * the sequence is not one of those.
 	 */
-	private void interpolateRotation(final int sequence, final int interpolationType, final SharedKeys keys,
-			final float[] out, final int segment, final int startIndex, final int endIndex, final float t) {
-		final float[] setups = slerpSetups(sequence, interpolationType, keys);
+	private boolean interpolateRotation(final Sd<?> sd, final int sequence, final SharedKeys keys, final Object out,
+			final int segment, final int startIndex, final int endIndex, final float t) {
+		final int type = sd.interpolationType;
+		if ((keys.stride != 4) || !(sd instanceof QuaternionSd) || (type < 1) || (type > 3)
+				|| ((type != 1) && (keys.inTans == null))) {
+			return false;
+		}
+		final float[] setups = slerpSetups(sequence, type, keys);
 		final int offset = segment * 2 * RenderMathUtils.SLERP_SETUP_SIZE;
-		final float[][] heap = KEY_HEAP[4];
-		final float[] a = unpack(keys.values, startIndex, heap[0]);
-		final float[] d = unpack(keys.values, endIndex, heap[1]);
-		if (interpolationType == 1) {
-			RenderMathUtils.slerp(out, a, d, t, setups, offset);
+		final int a = startIndex * 4;
+		final int d = endIndex * 4;
+		if (type == 1) {
+			RenderMathUtils.slerp((float[]) out, keys.values, a, keys.values, d, t, setups, offset);
 		}
 		else {
-			final float[] b = unpack(keys.outTans, startIndex, heap[2]);
-			final float[] c = unpack(keys.inTans, endIndex, heap[3]);
-			RenderMathUtils.sqlerp(out, a, b, c, d, t, setups, offset);
+			RenderMathUtils.sqlerp((float[]) out, keys.values, a, keys.outTans, a, keys.inTans, d, keys.values, d, t,
+					setups, offset);
 		}
+		return true;
 	}
 
 	/** The slerp setups of the pairs of keys of every segment, (key, next key) and (out tangent, next in tangent). */
 	private float[] slerpSetups(final int sequence, final int interpolationType, final SharedKeys keys) {
-		if (this.slerpSetups == null) {
-			this.slerpSetups = new float[this.starts.length][];
+		AtomicReferenceArray<float[]> all = this.slerpSetups;
+		if (all == null) {
+			all = new AtomicReferenceArray<>(this.starts.length);
+			this.slerpSetups = all;
 		}
-		float[] setups = this.slerpSetups[sequence];
+		float[] setups = all.get(sequence);
 		if (setups == null) {
 			final int count = this.runs[(sequence * 2) + 1] >>> 1;
 			final int first = this.runs[sequence * 2];
 			setups = new float[count * 2 * RenderMathUtils.SLERP_SETUP_SIZE];
-			final float[][] heap = KEY_HEAP[4];
 			for (int segment = 0; segment < count; segment++) {
 				final int start = first + segment;
 				final int end = segment == (count - 1) ? first : start + 1;
 				final int offset = segment * 2 * RenderMathUtils.SLERP_SETUP_SIZE;
-				RenderMathUtils.slerpSetup(unpack(keys.values, start, heap[0]), unpack(keys.values, end, heap[1]), setups,
-						offset);
+				RenderMathUtils.slerpSetup(keys.values, start * 4, keys.values, end * 4, setups, offset);
 				if (interpolationType != 1) {
-					RenderMathUtils.slerpSetup(unpack(keys.outTans, start, heap[2]), unpack(keys.inTans, end, heap[3]),
-							setups, offset + RenderMathUtils.SLERP_SETUP_SIZE);
+					RenderMathUtils.slerpSetup(keys.outTans, start * 4, keys.inTans, end * 4, setups,
+							offset + RenderMathUtils.SLERP_SETUP_SIZE);
 				}
 			}
-			this.slerpSetups[sequence] = setups;
+			all.set(sequence, setups);
 		}
 		return setups;
 	}

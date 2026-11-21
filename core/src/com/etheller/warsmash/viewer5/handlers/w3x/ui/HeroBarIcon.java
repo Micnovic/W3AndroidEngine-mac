@@ -11,8 +11,7 @@ import com.etheller.warsmash.parsers.fdf.frames.SingleStringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.SpriteFrame;
 import com.etheller.warsmash.parsers.fdf.frames.TextureFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UnitDetailsModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.MultiSelectionIconListener;
 
 /**
@@ -24,7 +23,7 @@ final class HeroBarIcon extends MultiSelectionIcon {
 	private SingleStringFrame pointsText;
 	private SpriteFrame pointsGlow;
 	private int shownPoints = -1;
-	private CUnit tipHero;
+	private int tipHeroHandle;
 	private int tipLevel;
 
 	HeroBarIcon(final String name, final UIFrame parent, final MultiSelectionIconListener clickListener,
@@ -67,15 +66,14 @@ final class HeroBarIcon extends MultiSelectionIcon {
 	}
 
 	/** The tool tip: the hero's name with its key, the level in gray below. */
-	void setHero(final int index, final CUnit hero, final FrameTemplateEnvironment strings) {
-		final CAbilityHero heroData = hero.getHeroData();
-		final int level = heroData.getHeroLevel();
-		if ((hero == this.tipHero) && (level == this.tipLevel)) {
+	void setHero(final int index, final UnitDetailsModel hero, final FrameTemplateEnvironment strings) {
+		final int level = hero.level;
+		if ((hero.unitHandle == this.tipHeroHandle) && (level == this.tipLevel)) {
 			return;
 		}
-		this.tipHero = hero;
+		this.tipHeroHandle = hero.unitHandle;
 		this.tipLevel = level;
-		String name = heroData.getProperName();
+		String name = hero.name;
 		if (index < MeleeUIControlGroups.HERO_HOTKEYS) {
 			name += " (|cfffed312F" + (index + 1) + "|r)";
 		}

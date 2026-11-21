@@ -6,17 +6,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.RenderMathUtils;
 
 public abstract class SkeletalNode extends GenericNode {
-	protected static final Vector3 cameraRayHeap = new Vector3();
-	protected static final Vector3 billboardAxisHeap = new Vector3();
-	protected static final Quaternion rotationHeap = new Quaternion();
-	protected static final Quaternion rotationHeap2 = new Quaternion();
-	protected static final Vector3 scalingHeap = new Vector3();
-	protected static final Quaternion inverseRotationHeap = new Quaternion();
-	protected static final Vector3 inverseScaleHeap = new Vector3();
-	protected static final Matrix4 localMatrixHeap = new Matrix4();
-	protected static final Vector3 blendHeap = new Vector3();
-	protected static final Vector3 blendScaleHeap = new Vector3();
-
 	// The local pose of a node that no timeline moves is the same default for all of them: they read these, and a
 	// node that is ever driven from outside takes a pose of its own first.
 	private static final Vector3 NO_TRANSLATION = new Vector3();
@@ -72,7 +61,19 @@ public abstract class SkeletalNode extends GenericNode {
 		this.billboardedZ = false;
 	}
 
-	public void recalculateTransformation(final Scene scene, final float blendTimeRatio) {
+	/** @param heaps the scratch values of the calling thread ({@link SceneUpdateWorkers#heaps()}) */
+	public void recalculateTransformation(final Scene scene, final float blendTimeRatio,
+			final SceneUpdateWorkers.Heaps heaps) {
+		final Vector3 cameraRayHeap = heaps.cameraRay;
+		final Vector3 billboardAxisHeap = heaps.billboardAxis;
+		final Quaternion rotationHeap = heaps.rotation;
+		final Quaternion rotationHeap2 = heaps.rotation2;
+		final Vector3 scalingHeap = heaps.scaling;
+		final Quaternion inverseRotationHeap = heaps.inverseRotation;
+		final Vector3 inverseScaleHeap = heaps.inverseScale;
+		final Matrix4 localMatrixHeap = heaps.localMatrix;
+		final Vector3 blendHeap = heaps.blend;
+		final Vector3 blendScaleHeap = heaps.blendScale;
 		final float inverseBlendRatio = 1 - blendTimeRatio;
 		final Quaternion computedRotation;
 		Vector3 computedScaling;
@@ -149,7 +150,7 @@ public abstract class SkeletalNode extends GenericNode {
 
 				rotationHeap2.mul(this.parent.getInverseWorldRotation(inverseRotationHeap));
 
-				rotationHeap2.transform(cameraRayHeap);
+				transform(heaps, rotationHeap2, cameraRayHeap);
 
 				billboardAxisHeap.set(1, 0, 0);
 				final float angle = (float) Math.atan2(cameraRayHeap.z, cameraRayHeap.y);
@@ -169,7 +170,7 @@ public abstract class SkeletalNode extends GenericNode {
 
 				rotationHeap2.mul(this.parent.getInverseWorldRotation(inverseRotationHeap));
 
-				rotationHeap2.transform(cameraRayHeap);
+				transform(heaps, rotationHeap2, cameraRayHeap);
 
 				billboardAxisHeap.set(0, 1, 0);
 				final float angle = (float) Math.atan2(-cameraRayHeap.z, cameraRayHeap.x);
@@ -189,7 +190,7 @@ public abstract class SkeletalNode extends GenericNode {
 
 				rotationHeap2.mul(this.parent.getInverseWorldRotation(inverseRotationHeap));
 
-				rotationHeap2.transform(cameraRayHeap);
+				transform(heaps, rotationHeap2, cameraRayHeap);
 
 				billboardAxisHeap.set(0, 0, 1);
 				final float angle = (float) Math.atan2(cameraRayHeap.y, cameraRayHeap.x);
@@ -220,6 +221,16 @@ public abstract class SkeletalNode extends GenericNode {
 				+ (this.worldMatrix.val[Matrix4.M12] * z) + this.worldMatrix.val[Matrix4.M13];
 		this.worldLocation.z = (this.worldMatrix.val[Matrix4.M20] * x) + (this.worldMatrix.val[Matrix4.M21] * y)
 				+ (this.worldMatrix.val[Matrix4.M22] * z) + this.worldMatrix.val[Matrix4.M23];
+	}
+
+	/** What {@link Quaternion#transform(Vector3)} does, with the thread's own temporaries. */
+	private static void transform(final SceneUpdateWorkers.Heaps heaps, final Quaternion rotation, final Vector3 v) {
+		final Quaternion conjugate = heaps.transformTmp2.set(rotation);
+		conjugate.conjugate();
+		conjugate.mulLeft(heaps.transformTmp1.set(v.x, v.y, v.z, 0)).mulLeft(rotation);
+		v.x = conjugate.x;
+		v.y = conjugate.y;
+		v.z = conjugate.z;
 	}
 
 	public void beginBlending() {

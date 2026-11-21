@@ -389,20 +389,40 @@ public enum RenderMathUtils {
 	public static final float EPSILON = 0.000001f;
 
 	public static float[] slerp(final float[] out, final float[] a, final float[] b, final float t) {
-		final float ax = a[0], ay = a[1], az = a[2], aw = a[3];
-		float bx = b[0], by = b[1], bz = b[2], bw = b[3];
+		return slerp(out, a, 0, b, 0, t);
+	}
 
+	/** {@link #slerp(float[], float[], float[], float)} of the quaternions at the given offsets of a and b. */
+	public static float[] slerp(final float[] out, final float[] a, final int aOffset, final float[] b,
+			final int bOffset, final float t) {
+		final float ax = a[aOffset], ay = a[aOffset + 1], az = a[aOffset + 2], aw = a[aOffset + 3];
+		final float bx = b[bOffset], by = b[bOffset + 1], bz = b[bOffset + 2], bw = b[bOffset + 3];
+		final long weights = slerpWeights(ax, ay, az, aw, bx, by, bz, bw, t);
+		final float scale0 = Float.intBitsToFloat((int) (weights >>> 32));
+		final float scale1 = Float.intBitsToFloat((int) weights);
+		// calculate final values
+		out[0] = (scale0 * ax) + (scale1 * bx);
+		out[1] = (scale0 * ay) + (scale1 * by);
+		out[2] = (scale0 * az) + (scale1 * bz);
+		out[3] = (scale0 * aw) + (scale1 * bw);
+
+		return out;
+	}
+
+	/**
+	 * The two weights of a slerp from a to b, packed in a long (the first in the high half). When b has to be taken
+	 * negated to go the shorter way, the second weight is negated instead, which gives the same products.
+	 */
+	private static long slerpWeights(final float ax, final float ay, final float az, final float aw, final float bx,
+			final float by, final float bz, final float bw, final float t) {
 		float omega, cosom, sinom, scale0, scale1;
 
 		// calc cosine
 		cosom = (ax * bx) + (ay * by) + (az * bz) + (aw * bw);
 		// adjust signs (if necessary)
-		if (cosom < 0.0) {
+		final boolean negated = cosom < 0.0;
+		if (negated) {
 			cosom = -cosom;
-			bx = -bx;
-			by = -by;
-			bz = -bz;
-			bw = -bw;
 		}
 		// calculate coefficients
 		if ((1.0 - cosom) > EPSILON) {
@@ -418,13 +438,10 @@ public enum RenderMathUtils {
 			scale0 = 1.0f - t;
 			scale1 = t;
 		}
-		// calculate final values
-		out[0] = (scale0 * ax) + (scale1 * bx);
-		out[1] = (scale0 * ay) + (scale1 * by);
-		out[2] = (scale0 * az) + (scale1 * bz);
-		out[3] = (scale0 * aw) + (scale1 * bw);
-
-		return out;
+		if (negated) {
+			scale1 = -scale1;
+		}
+		return ((long) Float.floatToRawIntBits(scale0) << 32) | (Float.floatToRawIntBits(scale1) & 0xFFFFFFFFL);
 	}
 
 	/** Size of what {@link #slerpSetup} keeps for a pair of quaternions. */
@@ -434,13 +451,56 @@ public enum RenderMathUtils {
 	private static final float LERP = 3;
 	private static final float LERP_FLIPPED = 4;
 
+	public static float[] sqlerp(final float[] out, final float[] a, final float[] b, final float[] c, final float[] d,
+			final float t) {
+		return sqlerp(out, a, 0, b, 0, c, 0, d, 0, t);
+	}
+
+	/**
+	 * {@link #sqlerp(float[], float[], float[], float[], float[], float)} of the quaternions at the given offsets;
+	 * the two intermediate quaternions are kept in locals, so any thread can run it.
+	 */
+	public static float[] sqlerp(final float[] out, final float[] a, final int aOffset, final float[] b,
+			final int bOffset, final float[] c, final int cOffset, final float[] d, final int dOffset, final float t) {
+		final float ax = a[aOffset], ay = a[aOffset + 1], az = a[aOffset + 2], aw = a[aOffset + 3];
+		final float dx = d[dOffset], dy = d[dOffset + 1], dz = d[dOffset + 2], dw = d[dOffset + 3];
+		final long weights1 = slerpWeights(ax, ay, az, aw, dx, dy, dz, dw, t);
+		final float scale10 = Float.intBitsToFloat((int) (weights1 >>> 32));
+		final float scale11 = Float.intBitsToFloat((int) weights1);
+		final float x1 = (scale10 * ax) + (scale11 * dx);
+		final float y1 = (scale10 * ay) + (scale11 * dy);
+		final float z1 = (scale10 * az) + (scale11 * dz);
+		final float w1 = (scale10 * aw) + (scale11 * dw);
+
+		final float bx = b[bOffset], by = b[bOffset + 1], bz = b[bOffset + 2], bw = b[bOffset + 3];
+		final float cx = c[cOffset], cy = c[cOffset + 1], cz = c[cOffset + 2], cw = c[cOffset + 3];
+		final long weights2 = slerpWeights(bx, by, bz, bw, cx, cy, cz, cw, t);
+		final float scale20 = Float.intBitsToFloat((int) (weights2 >>> 32));
+		final float scale21 = Float.intBitsToFloat((int) weights2);
+		final float x2 = (scale20 * bx) + (scale21 * cx);
+		final float y2 = (scale20 * by) + (scale21 * cy);
+		final float z2 = (scale20 * bz) + (scale21 * cz);
+		final float w2 = (scale20 * bw) + (scale21 * cw);
+
+		final long weights = slerpWeights(x1, y1, z1, w1, x2, y2, z2, w2, 2 * t * (1 - t));
+		final float scale0 = Float.intBitsToFloat((int) (weights >>> 32));
+		final float scale1 = Float.intBitsToFloat((int) weights);
+		out[0] = (scale0 * x1) + (scale1 * x2);
+		out[1] = (scale0 * y1) + (scale1 * y2);
+		out[2] = (scale0 * z1) + (scale1 * z2);
+		out[3] = (scale0 * w1) + (scale1 * w2);
+		return out;
+	}
+
 	/**
 	 * The part of {@link #slerp} that depends only on the two quaternions (the angle between them and its sine, with
 	 * the way they are combined), kept at offset in setup; the keys of an animation are fixed, so it is worked out
 	 * once for each pair of them.
 	 */
-	public static void slerpSetup(final float[] a, final float[] b, final float[] setup, final int offset) {
-		float cosom = (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]) + (a[3] * b[3]);
+	public static void slerpSetup(final float[] a, final int aOffset, final float[] b, final int bOffset,
+			final float[] setup, final int offset) {
+		float cosom = (a[aOffset] * b[bOffset]) + (a[aOffset + 1] * b[bOffset + 1]) + (a[aOffset + 2] * b[bOffset + 2])
+				+ (a[aOffset + 3] * b[bOffset + 3]);
 		final boolean flipped = cosom < 0.0;
 		if (flipped) {
 			cosom = -cosom;
@@ -456,17 +516,9 @@ public enum RenderMathUtils {
 		}
 	}
 
-	/** The same as {@link #slerp}, with the part of it that depends only on a and b taken from {@link #slerpSetup}. */
-	public static float[] slerp(final float[] out, final float[] a, final float[] b, final float t, final float[] setup,
-			final int offset) {
+	/** The weights of a slerp whose angle terms come from {@link #slerpSetup}, packed as {@link #slerpWeights} does. */
+	private static long slerpWeights(final float t, final float[] setup, final int offset) {
 		final float kind = setup[offset + 2];
-		float bx = b[0], by = b[1], bz = b[2], bw = b[3];
-		if ((kind == SLERP_FLIPPED) || (kind == LERP_FLIPPED)) {
-			bx = -bx;
-			by = -by;
-			bz = -bz;
-			bw = -bw;
-		}
 		final float scale0, scale1;
 		if ((kind == SLERP) || (kind == SLERP_FLIPPED)) {
 			final float omega = setup[offset];
@@ -478,33 +530,60 @@ public enum RenderMathUtils {
 			scale0 = 1.0f - t;
 			scale1 = t;
 		}
-		out[0] = (scale0 * a[0]) + (scale1 * bx);
-		out[1] = (scale0 * a[1]) + (scale1 * by);
-		out[2] = (scale0 * a[2]) + (scale1 * bz);
-		out[3] = (scale0 * a[3]) + (scale1 * bw);
-		return out;
+		final float second = ((kind == SLERP_FLIPPED) || (kind == LERP_FLIPPED)) ? -scale1 : scale1;
+		return ((long) Float.floatToRawIntBits(scale0) << 32) | (Float.floatToRawIntBits(second) & 0xFFFFFFFFL);
 	}
 
-	private static final float[] sqlerpHeap1 = new float[4];
-	private static final float[] sqlerpHeap2 = new float[4];
-
-	public static float[] sqlerp(final float[] out, final float[] a, final float[] b, final float[] c, final float[] d,
-			final float t) {
-		slerp(sqlerpHeap1, a, d, t);
-		slerp(sqlerpHeap2, b, c, t);
-		slerp(out, sqlerpHeap1, sqlerpHeap2, 2 * t * (1 - t));
+	/**
+	 * The same as {@link #slerp(float[], float[], int, float[], int, float)}, with the part of it that depends only on
+	 * a and b taken from {@link #slerpSetup}.
+	 */
+	public static float[] slerp(final float[] out, final float[] a, final int aOffset, final float[] b,
+			final int bOffset, final float t, final float[] setup, final int offset) {
+		final long weights = slerpWeights(t, setup, offset);
+		final float scale0 = Float.intBitsToFloat((int) (weights >>> 32));
+		final float scale1 = Float.intBitsToFloat((int) weights);
+		out[0] = (scale0 * a[aOffset]) + (scale1 * b[bOffset]);
+		out[1] = (scale0 * a[aOffset + 1]) + (scale1 * b[bOffset + 1]);
+		out[2] = (scale0 * a[aOffset + 2]) + (scale1 * b[bOffset + 2]);
+		out[3] = (scale0 * a[aOffset + 3]) + (scale1 * b[bOffset + 3]);
 		return out;
 	}
 
 	/**
-	 * The same as {@link #sqlerp}, with the setups of the pairs (a, d) at offset and (b, c) after it in setup, both
-	 * from {@link #slerpSetup}.
+	 * The same as {@link #sqlerp(float[], float[], int, float[], int, float[], int, float[], int, float)}, with the
+	 * setups of the pairs (a, d) at offset and (b, c) after it in setup, both from {@link #slerpSetup}.
 	 */
-	public static float[] sqlerp(final float[] out, final float[] a, final float[] b, final float[] c, final float[] d,
-			final float t, final float[] setup, final int offset) {
-		slerp(sqlerpHeap1, a, d, t, setup, offset);
-		slerp(sqlerpHeap2, b, c, t, setup, offset + SLERP_SETUP_SIZE);
-		slerp(out, sqlerpHeap1, sqlerpHeap2, 2 * t * (1 - t));
+	public static float[] sqlerp(final float[] out, final float[] a, final int aOffset, final float[] b,
+			final int bOffset, final float[] c, final int cOffset, final float[] d, final int dOffset, final float t,
+			final float[] setup, final int offset) {
+		final float ax = a[aOffset], ay = a[aOffset + 1], az = a[aOffset + 2], aw = a[aOffset + 3];
+		final float dx = d[dOffset], dy = d[dOffset + 1], dz = d[dOffset + 2], dw = d[dOffset + 3];
+		final long weights1 = slerpWeights(t, setup, offset);
+		final float scale10 = Float.intBitsToFloat((int) (weights1 >>> 32));
+		final float scale11 = Float.intBitsToFloat((int) weights1);
+		final float x1 = (scale10 * ax) + (scale11 * dx);
+		final float y1 = (scale10 * ay) + (scale11 * dy);
+		final float z1 = (scale10 * az) + (scale11 * dz);
+		final float w1 = (scale10 * aw) + (scale11 * dw);
+
+		final float bx = b[bOffset], by = b[bOffset + 1], bz = b[bOffset + 2], bw = b[bOffset + 3];
+		final float cx = c[cOffset], cy = c[cOffset + 1], cz = c[cOffset + 2], cw = c[cOffset + 3];
+		final long weights2 = slerpWeights(t, setup, offset + SLERP_SETUP_SIZE);
+		final float scale20 = Float.intBitsToFloat((int) (weights2 >>> 32));
+		final float scale21 = Float.intBitsToFloat((int) weights2);
+		final float x2 = (scale20 * bx) + (scale21 * cx);
+		final float y2 = (scale20 * by) + (scale21 * cy);
+		final float z2 = (scale20 * bz) + (scale21 * cz);
+		final float w2 = (scale20 * bw) + (scale21 * cw);
+
+		final long weights = slerpWeights(x1, y1, z1, w1, x2, y2, z2, w2, 2 * t * (1 - t));
+		final float scale0 = Float.intBitsToFloat((int) (weights >>> 32));
+		final float scale1 = Float.intBitsToFloat((int) weights);
+		out[0] = (scale0 * x1) + (scale1 * x2);
+		out[1] = (scale0 * y1) + (scale1 * y2);
+		out[2] = (scale0 * z1) + (scale1 * z2);
+		out[3] = (scale0 * w1) + (scale1 * w2);
 		return out;
 	}
 

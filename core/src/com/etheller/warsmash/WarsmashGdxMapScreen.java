@@ -123,6 +123,16 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 	private static final long BACK_DEBOUNCE_MILLIS = 400;
 	private boolean disposed;
 	private long lastBackMillis = -BACK_DEBOUNCE_MILLIS;
+	/** The longest the app's pause waits for a step that runs on the simulation thread. */
+	private static final long BACKGROUND_PARK_MILLIS = 200;
+	/**
+	 * A pointer move that came while the simulation thread was in a step: the interface reads the simulation for it,
+	 * so it is handled at the start of the next frame (only the newest one counts).
+	 */
+	private boolean moveDeferred;
+	private int deferredMoveX;
+	private int deferredMoveY;
+	private int deferredDragPointer = -1;
 	private boolean scriptFailed;
 	private static final float MAX_INTERFACE_FRAME_TIME = 3 * WarsmashConstants.SIMULATION_STEP_TIME;
 
@@ -496,6 +506,9 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		// black before it is ever seen.
 		final float deltaTime = Math.min(Gdx.graphics.getDeltaTime(), MAX_INTERFACE_FRAME_TIME);
 		Gdx.gl30.glBindVertexArray(WarsmashGdxGame.VAO);
+		if (this.moveDeferred) {
+			this.viewer.tryWhileSimulationHeld(this::runDeferredMove);
+		}
 		this.meleeUI.update(deltaTime);
 		PerfStats.end(PerfStats.Section.MELEE_UI);
 		this.viewer.updateAndRender();
@@ -670,6 +683,13 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 
 	@Override
 	public boolean keyDown(final int keycode) {
+		// what a key does is decided from the game as it stands: no step runs meanwhile
+		final boolean[] handled = new boolean[1];
+		this.viewer.whileSimulationHeld(() -> handled[0] = keyDownHeld(keycode));
+		return handled[0];
+	}
+
+	private boolean keyDownHeld(final int keycode) {
 		if (keycode == Input.Keys.BACK) {
 			// One Back press can arrive twice (Android 16 with the Samsung keyboard sends it again to the game view), and the
 			// second would close the game menu the first opened.
@@ -703,56 +723,90 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 
 	@Override
 	public boolean keyUp(final int keycode) {
-		this.meleeUI.keyUp(keycode);
+		this.viewer.whileSimulationHeld(() -> this.meleeUI.keyUp(keycode));
 		return true;
 	}
 
 	@Override
 	public boolean keyTyped(final char character) {
-		return this.baseMeleeUI != null ? this.baseMeleeUI.keyTyped(character) : false;
+		if (this.baseMeleeUI == null) {
+			return false;
+		}
+		final boolean[] handled = new boolean[1];
+		this.viewer.whileSimulationHeld(() -> handled[0] = this.baseMeleeUI.keyTyped(character));
+		return handled[0];
 	}
 
 	@Override
 	public boolean touchDown(final int screenX, final int screenY, final int pointer, final int button) {
 		final float worldScreenY = this.viewer.canvas.getHeight() - screenY;
-
-		if (this.meleeUI.touchDown(screenX, screenY, worldScreenY, button)) {
-			return false;
-		}
+		// a click is decided from the game as it stands (what is under it, what may be targeted)
+		this.viewer.whileSimulationHeld(() -> {
+			runDeferredMove();
+			this.meleeUI.touchDown(screenX, screenY, worldScreenY, button);
+		});
 		return false;
 	}
 
 	@Override
 	public boolean touchUp(final int screenX, final int screenY, final int pointer, final int button) {
 		final float worldScreenY = this.viewer.canvas.getHeight() - screenY;
-
-		if (this.meleeUI.touchUp(screenX, screenY, worldScreenY, button)) {
-			return false;
-		}
+		this.viewer.whileSimulationHeld(() -> {
+			runDeferredMove();
+			this.meleeUI.touchUp(screenX, screenY, worldScreenY, button);
+		});
 		return false;
 	}
 
 	@Override
 	public boolean touchDragged(final int screenX, final int screenY, final int pointer) {
-		final float worldScreenY = this.viewer.canvas.getHeight() - screenY;
-		if (this.meleeUI.touchDragged(screenX, screenY, worldScreenY, pointer)) {
-			return false;
-		}
+		deferMove(screenX, screenY, pointer);
+		this.viewer.tryWhileSimulationHeld(this::runDeferredMove);
 		return false;
 	}
 
 	@Override
 	public boolean mouseMoved(final int screenX, final int screenY) {
-		final float worldScreenY = this.viewer.canvas.getHeight() - screenY;
-		if (this.meleeUI.mouseMoved(screenX, screenY, worldScreenY)) {
-			return false;
-		}
+		deferMove(screenX, screenY, -1);
+		this.viewer.tryWhileSimulationHeld(this::runDeferredMove);
 		return false;
+	}
+
+	private void deferMove(final int screenX, final int screenY, final int dragPointer) {
+		if (this.moveDeferred && (this.deferredDragPointer != dragPointer)) {
+			// a move of another kind (a drag after a hover) is not merged into this one
+			runDeferredMoveNow();
+		}
+		this.moveDeferred = true;
+		this.deferredMoveX = screenX;
+		this.deferredMoveY = screenY;
+		this.deferredDragPointer = dragPointer;
+	}
+
+	private void runDeferredMoveNow() {
+		this.viewer.whileSimulationHeld(this::runDeferredMove);
+	}
+
+	/** The newest pointer move not yet handled; the caller holds the simulation. */
+	private void runDeferredMove() {
+		if (!this.moveDeferred) {
+			return;
+		}
+		this.moveDeferred = false;
+		final int screenX = this.deferredMoveX;
+		final int screenY = this.deferredMoveY;
+		final float worldScreenY = this.viewer.canvas.getHeight() - screenY;
+		if (this.deferredDragPointer >= 0) {
+			this.meleeUI.touchDragged(screenX, screenY, worldScreenY, this.deferredDragPointer);
+		}
+		else {
+			this.meleeUI.mouseMoved(screenX, screenY, worldScreenY);
+		}
 	}
 
 	@Override
 	public boolean scrolled(final float amountX, final float amountY) {
-		this.meleeUI.scrolled(amountX, amountY);
+		this.viewer.whileSimulationHeld(() -> this.meleeUI.scrolled(amountX, amountY));
 		return false;
 	}
 
@@ -953,6 +1007,8 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		// player. The desktop backend calls this whenever the window loses focus, and a game there keeps running.
 		if ((Gdx.app.getType() == ApplicationType.Android) && !this.viewer.isNetworkGame()) {
 			this.viewer.setGamePaused(War3MapViewer.PauseSource.BACKGROUND, true);
+			// a step the simulation thread is in ends before the app goes away (a lost context saves the game)
+			this.viewer.parkSimulation(BACKGROUND_PARK_MILLIS);
 			Gdx.app.log("Warsmash", "Game paused in the background at step " + gameStep());
 		}
 	}
@@ -963,6 +1019,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			this.viewer.scriptUiState.setClientActive(true);
 		}
 		if ((this.viewer != null) && this.viewer.isGamePaused(War3MapViewer.PauseSource.BACKGROUND)) {
+			this.viewer.unparkSimulation();
 			this.viewer.setGamePaused(War3MapViewer.PauseSource.BACKGROUND, false);
 			Gdx.app.log("Warsmash", "Game resumed at step " + gameStep());
 		}
@@ -984,7 +1041,9 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			return false;
 		}
 		try {
-			return SavedGame.save(this.viewer, file);
+			final boolean[] saved = new boolean[1];
+			this.viewer.whileSimulationHeld(() -> saved[0] = SavedGame.save(this.viewer, file));
+			return saved[0];
 		}
 		catch (final RuntimeException e) {
 			Log.error(e);

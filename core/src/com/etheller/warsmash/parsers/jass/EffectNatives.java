@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import java.util.List;
 
 import com.etheller.interpreter.ast.value.BooleanJassValue;
@@ -30,8 +31,16 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRend
  * Special effect and lightning natives.
  */
 final class EffectNatives extends CommonNatives {
+	private final RenderCommands commands;
+
 	EffectNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.commands = new RenderCommands(this.link);
+	}
+
+	/** Work on render objects whose result the script needs now; the commands sent before it have run first. */
+	private <T> T onRender(final String why, final java.util.function.Supplier<T> work) {
+		return this.commands.call(why, work);
 	}
 
 	@Override
@@ -44,24 +53,24 @@ final class EffectNatives extends CommonNatives {
 					final String modelName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					final CWidget targetWidget = arguments.get(1).visit(ObjectJassValueVisitor.getInstance());
 					final String attachPointName = arguments.get(2).visit(StringJassValueVisitor.getInstance());
-					return newHandle(effectType,
-							war3MapViewer.addSpecialEffectTarget(modelName, targetWidget, attachPointName));
+					return newHandle(effectType, onRender("AddSpecialEffectTarget",
+							() -> war3MapViewer.addSpecialEffectTarget(modelName, targetWidget, attachPointName)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddSpecialEffectLoc",
 				(arguments, globalScope, triggerScope) -> {
 					final String modelName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					final AbilityPointTarget positionLoc = arguments.get(1)
 							.visit(ObjectJassValueVisitor.getInstance());
-					return newHandle(effectType, war3MapViewer.addSpecialEffect(modelName, positionLoc.x,
-							positionLoc.y, 0 /* facing */));
+					return newHandle(effectType, onRender("AddSpecialEffectLoc",
+							() -> war3MapViewer.addSpecialEffect(modelName, positionLoc.x, positionLoc.y, 0 /* facing */)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddSpecialEffect",
 				(arguments, globalScope, triggerScope) -> {
 					final String modelName = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					final float x = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
-					return newHandle(effectType,
-							war3MapViewer.addSpecialEffect(modelName, x, y, 0 /* facing */));
+					return newHandle(effectType, onRender("AddSpecialEffect",
+							() -> war3MapViewer.addSpecialEffect(modelName, x, y, 0 /* facing */)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddSpellEffectById",
 				(arguments, globalScope, triggerScope) -> {
@@ -70,8 +79,8 @@ final class EffectNatives extends CommonNatives {
 							.visit(ObjectJassValueVisitor.getInstance());
 					final double x = arguments.get(2).visit(RealJassValueVisitor.getInstance());
 					final double y = arguments.get(3).visit(RealJassValueVisitor.getInstance());
-					return newHandle(effectType, war3MapViewer.spawnSpellEffectEx((float) x, (float) y,
-							0 /* facing */, new War3ID(rawcode), whichEffectType, 0));
+					return newHandle(effectType, onRender("AddSpellEffectById", () -> war3MapViewer
+							.spawnSpellEffectEx((float) x, (float) y, 0 /* facing */, new War3ID(rawcode), whichEffectType, 0)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddSpellEffectTargetById",
 				(arguments, globalScope, triggerScope) -> {
@@ -85,12 +94,12 @@ final class EffectNatives extends CommonNatives {
 						return newHandle(effectType, null);
 					}
 					if (attachmentPoint != null) {
-						return newHandle(effectType, war3MapViewer.spawnSpellEffectOnUnitEx(target,
-								new War3ID(rawcode), whichEffectType, 0, attachmentPoint));
+						return newHandle(effectType, onRender("AddSpellEffectTargetById", () -> war3MapViewer
+								.spawnSpellEffectOnUnitEx(target, new War3ID(rawcode), whichEffectType, 0, attachmentPoint)));
 					}
 					else {
-						return newHandle(effectType, war3MapViewer.spawnSpellEffectOnUnitEx(target,
-								new War3ID(rawcode), whichEffectType, 0));
+						return newHandle(effectType, onRender("AddSpellEffectTargetById", () -> war3MapViewer
+								.spawnSpellEffectOnUnitEx(target, new War3ID(rawcode), whichEffectType, 0)));
 					}
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddSpellEffectByIdLoc",
@@ -101,8 +110,8 @@ final class EffectNatives extends CommonNatives {
 					final AbilityPointTarget loc = arguments.get(2).visit(ObjectJassValueVisitor.getInstance());
 					final float x = loc.x;
 					final float y = loc.y;
-					return newHandle(effectType, war3MapViewer.spawnSpellEffectEx(x, y, 0 /* facing */,
-							new War3ID(rawcode), whichEffectType, 0));
+					return newHandle(effectType, onRender("AddSpellEffectByIdLoc", () -> war3MapViewer
+							.spawnSpellEffectEx(x, y, 0 /* facing */, new War3ID(rawcode), whichEffectType, 0)));
 				});
 		// Measured: the versions that take the ability as a string make no effect and read nothing, even for abilities
 		// that exist; only the rawcode versions work.
@@ -119,9 +128,10 @@ final class EffectNatives extends CommonNatives {
 					final double x2 = arguments.get(4).visit(RealJassValueVisitor.getInstance());
 					final double y2 = arguments.get(5).visit(RealJassValueVisitor.getInstance());
 					return newLightning(lightningType,
-							war3MapViewer.createLightning(War3ID.fromString(rawcode), (float) x, (float) y,
-									war3MapViewer.terrain.getGroundHeight((float) x, (float) y), (float) x2,
-									(float) y2, war3MapViewer.terrain.getGroundHeight((float) x2, (float) y2), checkVisibility));
+							onRender("AddLightning", () -> war3MapViewer.createLightning(War3ID.fromString(rawcode),
+									(float) x, (float) y, war3MapViewer.terrain.getGroundHeight((float) x, (float) y),
+									(float) x2, (float) y2,
+									war3MapViewer.terrain.getGroundHeight((float) x2, (float) y2), checkVisibility)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddLightningEx",
 				(arguments, globalScope, triggerScope) -> {
@@ -134,8 +144,9 @@ final class EffectNatives extends CommonNatives {
 					final double y2 = arguments.get(6).visit(RealJassValueVisitor.getInstance());
 					final double z2 = arguments.get(7).visit(RealJassValueVisitor.getInstance());
 					return newLightning(lightningType,
-							war3MapViewer.createLightning(War3ID.fromString(rawcode), (float) x, (float) y,
-									(float) z, (float) x2, (float) y2, (float) z2, checkVisibility));
+							onRender("AddLightningEx", () -> war3MapViewer.createLightning(War3ID.fromString(rawcode),
+									(float) x, (float) y, (float) z, (float) x2, (float) y2, (float) z2,
+									checkVisibility)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("MoveLightning",
 				(arguments, globalScope, triggerScope) -> {
@@ -145,11 +156,13 @@ final class EffectNatives extends CommonNatives {
 					final double y = arguments.get(3).visit(RealJassValueVisitor.getInstance());
 					final double x2 = arguments.get(4).visit(RealJassValueVisitor.getInstance());
 					final double y2 = arguments.get(5).visit(RealJassValueVisitor.getInstance());
-					if ((lightning != null) && !lightning.isRemoved()) {
-						lightning.move((float) x, (float) y, (float) x2, (float) y2);
-						return BooleanJassValue.TRUE;
-					}
-					return BooleanJassValue.FALSE;
+					return onRender("MoveLightning", () -> {
+						if ((lightning != null) && !lightning.isRemoved()) {
+							lightning.move((float) x, (float) y, (float) x2, (float) y2);
+							return BooleanJassValue.TRUE;
+						}
+						return BooleanJassValue.FALSE;
+					});
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("MoveLightningEx",
 				(arguments, globalScope, triggerScope) -> {
@@ -161,22 +174,25 @@ final class EffectNatives extends CommonNatives {
 					final double x2 = arguments.get(5).visit(RealJassValueVisitor.getInstance());
 					final double y2 = arguments.get(6).visit(RealJassValueVisitor.getInstance());
 					final double z2 = arguments.get(7).visit(RealJassValueVisitor.getInstance());
-					if ((lightning != null) && !lightning.isRemoved()) {
-						lightning.move((float) x, (float) y, (float) z, (float) x2, (float) y2, (float) z2);
-						return BooleanJassValue.TRUE;
-					}
-					return BooleanJassValue.FALSE;
+					return onRender("MoveLightningEx", () -> {
+						if ((lightning != null) && !lightning.isRemoved()) {
+							lightning.move((float) x, (float) y, (float) z, (float) x2, (float) y2, (float) z2);
+							return BooleanJassValue.TRUE;
+						}
+						return BooleanJassValue.FALSE;
+					});
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DestroyLightning",
 				(arguments, globalScope, triggerScope) -> {
 					final SimulationRenderComponentLightning lightning = nullable(arguments, 0,
 							ObjectJassValueVisitor.getInstance());
-					BooleanJassValue wasRemoved = BooleanJassValue.FALSE;
-					if ((lightning != null) && !lightning.isRemoved()) {
-						lightning.remove();
-						wasRemoved = BooleanJassValue.TRUE;
-					}
-					return wasRemoved;
+					return onRender("DestroyLightning", () -> {
+						if ((lightning != null) && !lightning.isRemoved()) {
+							lightning.remove();
+							return BooleanJassValue.TRUE;
+						}
+						return BooleanJassValue.FALSE;
+					});
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetLightningColor",
 				(arguments, globalScope, triggerScope) -> {
@@ -186,11 +202,13 @@ final class EffectNatives extends CommonNatives {
 					final double g = arguments.get(2).visit(RealJassValueVisitor.getInstance());
 					final double b = arguments.get(3).visit(RealJassValueVisitor.getInstance());
 					final double a = arguments.get(4).visit(RealJassValueVisitor.getInstance());
-					if ((lightning != null) && !lightning.isRemoved()) {
-						lightning.setColor((float) r, (float) g, (float) b, (float) a);
-						return BooleanJassValue.TRUE;
-					}
-					return BooleanJassValue.FALSE;
+					return onRender("SetLightningColor", () -> {
+						if ((lightning != null) && !lightning.isRemoved()) {
+							lightning.setColor((float) r, (float) g, (float) b, (float) a);
+							return BooleanJassValue.TRUE;
+						}
+						return BooleanJassValue.FALSE;
+					});
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetAbilityEffectById",
 				(arguments, globalScope, triggerScope) -> {
@@ -221,7 +239,7 @@ final class EffectNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final ScriptEffect fx = nullable(arguments, 0, ObjectJassValueVisitor.<ScriptEffect>getInstance());
 					if (fx != null) {
-						fx.setKillWhenDone(true);
+						commands.send(() -> fx.setKillWhenDone(true));
 						release(fx);
 					}
 					return null;
@@ -230,7 +248,7 @@ final class EffectNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final ScriptEffect fx = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					if (fx != null) {
-						fx.removeWithoutDeath();
+						commands.send(fx::removeWithoutDeath);
 					}
 					return null;
 				});
@@ -268,13 +286,13 @@ final class EffectNatives extends CommonNatives {
 	 * Measured: a lightning keeps its colour as a byte per channel (the product with 255 cut to a whole number and
 	 * wrapped, so 2.0 reads back as 254 / 255), also after it was destroyed; one never coloured is white, null is 0.
 	 */
-	private static RealJassValue lightningColor(final List<JassValue> arguments, final int channel) {
+	private RealJassValue lightningColor(final List<JassValue> arguments, final int channel) {
 		final SimulationRenderComponentLightning lightning = nullable(arguments, 0,
 				ObjectJassValueVisitor.getInstance());
 		if (lightning == null) {
 			return RealJassValue.of(0f);
 		}
-		final float[] color = lightning.getColor();
+		final float[] color = onRender("GetLightningColor", lightning::getColor);
 		return RealJassValue.of(color == null ? 1f : ((int) (color[channel] * 255f) & 0xFF) / 255f);
 	}
 }

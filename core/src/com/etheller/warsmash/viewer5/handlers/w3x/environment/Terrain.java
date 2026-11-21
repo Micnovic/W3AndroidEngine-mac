@@ -178,9 +178,11 @@ public class Terrain {
 	private byte[] visualFogArray;
 	private byte[] fogStateArray;
 	private final byte[] fogStateMapping = new byte[256];
-	private byte[] settledFogStates;
-	private final byte[] settledFogMapping = new byte[256];
 	private boolean fogSettled;
+	private int settledFogVersion;
+	private byte[] lastReloadStates;
+	private byte[] lastReloadMapping;
+	private int legacyFogVersion;
 
 	public Terrain(final War3MapW3e w3eFile, final War3MapWpm terrainPathing, final War3MapW3i w3iFile,
 			final WebGL webGL, final DataSource dataSource, final WorldEditStrings worldEditStrings,
@@ -1895,28 +1897,44 @@ public class Terrain {
 	 * @return false when the drawn fog already matched, so nothing was sent
 	 */
 	public boolean reloadFogOfWarDataToGPU(CFogMaskSettings fogMaskSettings) {
-		final GL30 gl = Gdx.gl30;
-		final ByteBuffer fogOfWarBuffer = this.fogOfWarData.getFogOfWarBuffer();
-		boolean changed = !this.fogOfWarMapAllocated;
 		final byte[] mapping = this.fogStateMapping;
 		for (int i = 0; i < 256; i++) {
 			mapping[i] = this.viewer.getFogShade(fogMaskSettings.getFogStateFromSettings((byte) i));
 		}
-		final byte[] visual = this.visualFogArray;
 		final byte[] states = this.fogStateArray;
-		final ByteBuffer source = fogOfWarBuffer.duplicate();
+		final ByteBuffer source = this.fogOfWarData.getFogOfWarBuffer().duplicate();
 		source.clear();
 		source.get(states, 0, Math.min(states.length, source.remaining()));
+		if ((this.lastReloadStates == null) || (this.lastReloadStates.length != states.length)
+				|| !Arrays.equals(states, this.lastReloadStates) || !Arrays.equals(mapping, this.lastReloadMapping)) {
+			this.lastReloadStates = states.clone();
+			this.lastReloadMapping = mapping.clone();
+			this.legacyFogVersion++;
+		}
+		return uploadFogOfWar(states, mapping, this.legacyFogVersion);
+	}
+
+	/**
+	 * Moves the drawn fog one fade step toward the given fog of war cells and sends it to the GPU when it changed.
+	 *
+	 * @param states the cells of the fog of war as the game keeps them
+	 * @param shadeByState the shade each cell value is drawn with
+	 * @param version changes whenever states or shadeByState do, so that an unchanged fog costs nothing
+	 * @return false when the drawn fog already matched, so nothing was sent
+	 */
+	public boolean uploadFogOfWar(final byte[] states, final byte[] shadeByState, final int version) {
+		final GL30 gl = Gdx.gl30;
+		boolean changed = !this.fogOfWarMapAllocated;
 		// The fade only depends on the drawn fog, the fog states and their shades: when a pass found nothing to fade
 		// and neither input has moved since, the next one cannot either.
-		if (this.fogSettled && !changed && Arrays.equals(states, this.settledFogStates)
-				&& Arrays.equals(mapping, this.settledFogMapping)) {
+		if (this.fogSettled && !changed && (version == this.settledFogVersion)) {
 			return false;
 		}
+		final byte[] visual = this.visualFogArray;
 		boolean faded = false;
-		for (int i = 0; i < visual.length; i++) {
+		for (int i = 0, n = Math.min(visual.length, states.length); i < n; i++) {
 			final byte previous = visual[i];
-			final byte next = War3MapViewer.fadeLineOfSightColor(previous, mapping[states[i] & 0xFF]);
+			final byte next = War3MapViewer.fadeLineOfSightColor(previous, shadeByState[states[i] & 0xFF]);
 			if (next != previous) {
 				visual[i] = next;
 				faded = true;
@@ -1924,13 +1942,7 @@ public class Terrain {
 		}
 		changed |= faded;
 		this.fogSettled = !faded;
-		if (!faded) {
-			if ((this.settledFogStates == null) || (this.settledFogStates.length != states.length)) {
-				this.settledFogStates = new byte[states.length];
-			}
-			System.arraycopy(states, 0, this.settledFogStates, 0, states.length);
-			System.arraycopy(mapping, 0, this.settledFogMapping, 0, mapping.length);
-		}
+		this.settledFogVersion = version;
 		// The fog fades for a moment after each fog of war update and then stays; sending the whole texture every
 		// tick anyway cost phones several milliseconds a frame.
 		if (!changed) {

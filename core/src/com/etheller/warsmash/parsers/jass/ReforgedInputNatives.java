@@ -21,6 +21,8 @@ import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.interpreter.ast.scope.trigger.Trigger;
 import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -42,12 +44,20 @@ final class ReforgedInputNatives {
 	private final War3MapViewer viewer;
 	private final CSimulation simulation;
 	private final WarsmashUI ui;
+	private final LocalUiLink link;
+	private final RenderCommands commands;
+	// what the script last set; the interface applies it when the frame is played
+	private boolean selectionEnabled = true;
+	private boolean selectionCircleEnabled = true;
+	private boolean targetIndicatorEnabled = true;
 
 	private ReforgedInputNatives(final JassProgram program, final War3MapViewer viewer, final WarsmashUI ui) {
 		this.program = program;
 		this.viewer = viewer;
 		this.simulation = viewer.simulation;
 		this.ui = ui;
+		this.link = LocalUiLink.of(viewer, ui);
+		this.commands = new RenderCommands(this.link);
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer, final WarsmashUI ui) {
@@ -168,76 +178,92 @@ final class ReforgedInputNatives {
 		// What this machine's keyboard holds now: a local read, like GetLocalPlayer.
 		add("BlzIsKeyPressed", (arguments, globalScope, triggerScope) -> {
 			final int gdxKey = OsKeys.toGdx(constant(arguments, 0));
-			return BooleanJassValue.of((Gdx.input != null) && (gdxKey >= 0) && Gdx.input.isKeyPressed(gdxKey));
+			return BooleanJassValue.of((gdxKey >= 0) && this.link.input().key(gdxKey));
 		});
 		add("BlzIsMetaKeyPressed", (arguments, globalScope, triggerScope) -> {
 			final int mask = integer(arguments, 0);
-			return BooleanJassValue.of((Gdx.input != null) && (mask != 0)
-					&& ((OsKeys.heldMetaKeys(Gdx.input) & mask) == mask));
+			return BooleanJassValue.of((mask != 0) && ((this.link.input().metaKeys() & mask) == mask));
 		});
 	}
 
 	private void registerMouse() {
 		add("BlzIsMouseButtonPressed", (arguments, globalScope, triggerScope) -> {
-			if (Gdx.input == null) {
-				return BooleanJassValue.FALSE;
-			}
 			// common.j numbers the buttons 1 left, 2 middle and 3 right.
 			switch (constant(arguments, 0)) {
 			case 1:
-				return BooleanJassValue.of(Gdx.input.isButtonPressed(Buttons.LEFT));
+				return BooleanJassValue.of(this.link.input().mouseButton(Buttons.LEFT));
 			case 2:
-				return BooleanJassValue.of(Gdx.input.isButtonPressed(Buttons.MIDDLE));
+				return BooleanJassValue.of(this.link.input().mouseButton(Buttons.MIDDLE));
 			case 3:
-				return BooleanJassValue.of(Gdx.input.isButtonPressed(Buttons.RIGHT));
+				return BooleanJassValue.of(this.link.input().mouseButton(Buttons.RIGHT));
 			default:
 				return BooleanJassValue.FALSE;
 			}
 		});
-		add("BlzGetMouseScreenPosX", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Gdx.input == null ? 0 : Gdx.input.getX()));
-		add("BlzGetMouseScreenPosY", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Gdx.input == null ? 0 : Gdx.input.getY()));
+		add("BlzGetMouseScreenPosX",
+				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(this.link.input().mouseX()));
+		add("BlzGetMouseScreenPosY",
+				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(this.link.input().mouseY()));
 		add("BlzSetMousePos", (arguments, globalScope, triggerScope) -> {
-			if (Gdx.input != null) {
-				Gdx.input.setCursorPosition(integer(arguments, 0), integer(arguments, 1));
-			}
+			final int x = integer(arguments, 0);
+			final int y = integer(arguments, 1);
+			this.commands.send(() -> {
+				if (Gdx.input != null) {
+					Gdx.input.setCursorPosition(x, y);
+				}
+			});
 			return null;
 		});
 		add("BlzGetMouseFocusUnit", (arguments, globalScope, triggerScope) -> {
-			final CUnit unit = this.ui == null ? null : this.ui.getMouseFocusUnit();
+			final CUnit unit;
+			if (this.commands.isQueued()) {
+				final int handle = this.link.input().hoveredUnitHandle();
+				unit = handle == 0 ? null : this.simulation.getUnit(handle);
+			}
+			else {
+				unit = this.ui == null ? null : this.ui.getMouseFocusUnit();
+			}
 			return new HandleJassValue(globalScope.getHandleType("unit"),
 					(unit == null) || unit.isRemovedFromGame() ? null : unit);
 		});
 		add("BlzEnableCursor", (arguments, globalScope, triggerScope) -> {
-			this.viewer.scriptUiState.setCursorEnabled(bool(arguments, 0));
+			final boolean enabled = bool(arguments, 0);
+			this.commands.send(() -> this.viewer.scriptUiState.setCursorEnabled(enabled));
 			return null;
 		});
 	}
 
 	private void registerClientAndInterface() {
-		add("BlzGetLocalClientWidth", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Gdx.graphics == null ? 0 : Gdx.graphics.getWidth()));
-		add("BlzGetLocalClientHeight", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Gdx.graphics == null ? 0 : Gdx.graphics.getHeight()));
+		add("BlzGetLocalClientWidth",
+				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(this.link.input().width()));
+		add("BlzGetLocalClientHeight",
+				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(this.link.input().height()));
 		// This machine's own focus, as the backend reports it: a script must keep it out of the game state.
 		add("BlzIsLocalClientActive", (arguments, globalScope, triggerScope) -> BooleanJassValue
 				.of(this.viewer.scriptUiState.isClientActive()));
 		add("BlzIsSelectionEnabled", (arguments, globalScope, triggerScope) -> BooleanJassValue
-				.of(this.viewer.scriptUiState.isSelectionEnabled()));
+				.of(this.selectionEnabled));
 		add("BlzEnableSelections", (arguments, globalScope, triggerScope) -> {
-			this.viewer.scriptUiState.setSelectionEnabled(bool(arguments, 0));
-			this.viewer.scriptUiState.setSelectionCircleEnabled(bool(arguments, 1));
+			final boolean enabled = bool(arguments, 0);
+			final boolean circle = bool(arguments, 1);
+			this.selectionEnabled = enabled;
+			this.selectionCircleEnabled = circle;
+			this.commands.send(() -> {
+				this.viewer.scriptUiState.setSelectionEnabled(enabled);
+				this.viewer.scriptUiState.setSelectionCircleEnabled(circle);
+			});
 			return null;
 		});
 		add("BlzIsSelectionCircleEnabled", (arguments, globalScope, triggerScope) -> BooleanJassValue
-				.of(this.viewer.scriptUiState.isSelectionCircleEnabled()));
+				.of(this.selectionCircleEnabled));
 		add("BlzEnableTargetIndicator", (arguments, globalScope, triggerScope) -> {
-			this.viewer.scriptUiState.setTargetIndicatorEnabled(bool(arguments, 0));
+			final boolean enabled = bool(arguments, 0);
+			this.targetIndicatorEnabled = enabled;
+			this.commands.send(() -> this.viewer.scriptUiState.setTargetIndicatorEnabled(enabled));
 			return null;
 		});
 		add("BlzIsTargetIndicatorEnabled", (arguments, globalScope, triggerScope) -> BooleanJassValue
-				.of(this.viewer.scriptUiState.isTargetIndicatorEnabled()));
+				.of(this.targetIndicatorEnabled));
 		// Shows a chat line of the player on this machine, as the chat command does for every machine.
 		add("BlzDisplayChatMessage", (arguments, globalScope, triggerScope) -> {
 			final CPlayer player = object(arguments, 0);

@@ -9,7 +9,6 @@ import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
-import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget.UnitAnimationListenerImpl;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CDestructableBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
@@ -26,8 +25,14 @@ public class CDestructable extends CWidget {
 	private final CDestructableType destType;
 	private final RemovablePathingMapInstance pathingInstance;
 	private final RemovablePathingMapInstance pathingInstanceDeath;
+	/** What the simulation tells about animations and wakes: the peer's own listener, or a stand-in that records them. */
 	@SavedTransient
-	private UnitAnimationListenerImpl unitAnimationListener;
+	private CUnitAnimationListener unitAnimationListener;
+	/** The listener the peer made; the render side's, never called by the simulation when a stand-in is set. */
+	@SavedTransient
+	private CUnitAnimationListener peerAnimationListener;
+	@SavedTransient
+	private boolean simulationListenerSet;
 	private boolean removedFromGame;
 	private boolean invulnerable;
 	private boolean blighted;
@@ -209,8 +214,27 @@ public class CDestructable extends CWidget {
 		return this.destType;
 	}
 
-	public void setUnitAnimationListener(final UnitAnimationListenerImpl unitAnimationListenerImpl) {
-		this.unitAnimationListener = unitAnimationListenerImpl;
+	/** The peer's listener. The simulation uses it unless {@link #setSimulationAnimationListener} gave it a stand-in. */
+	public void setUnitAnimationListener(final CUnitAnimationListener peerAnimationListener) {
+		this.peerAnimationListener = peerAnimationListener;
+		if (!this.simulationListenerSet) {
+			this.unitAnimationListener = peerAnimationListener;
+		}
+	}
+
+	/** With a simulation thread: the listener the simulation calls, made before the peer exists. */
+	public void setSimulationAnimationListener(final CUnitAnimationListener listener) {
+		this.unitAnimationListener = listener;
+		this.simulationListenerSet = true;
+	}
+
+	public boolean hasSimulationAnimationListener() {
+		return this.simulationListenerSet;
+	}
+
+	/** The listener the peer registered; render side only. */
+	public CUnitAnimationListener getPeerAnimationListener() {
+		return this.peerAnimationListener;
 	}
 
 	public CUnitAnimationListener getUnitAnimationListener() {

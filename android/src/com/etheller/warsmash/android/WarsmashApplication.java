@@ -26,7 +26,7 @@ public class WarsmashApplication extends Application {
 		ProfileStorageAndroid.init(this);
 		com.etheller.warsmash.lan.LanSessions.setNetwork(new AndroidLanNetwork(this));
 		com.etheller.warsmash.launcher.lan.LanText.use((name, arguments) -> {
-			final int id = getResources().getIdentifier(name, "string", getPackageName());
+			final int id = getResources().getIdentifier(name, "string", R.class.getPackage().getName());
 			if (id == 0) {
 				return name;
 			}

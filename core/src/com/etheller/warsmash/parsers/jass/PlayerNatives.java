@@ -20,6 +20,8 @@ import com.etheller.warsmash.parsers.jass.triggers.CForce;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedFormerly;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -640,7 +642,8 @@ final class PlayerNatives extends CommonNatives {
 		public void onFire(final CSimulation simulation) {
 			this.player.setPlayerState(simulation, CPlayerState.OBSERVER, 1);
 			if (this.player.getId() == this.war3MapViewer.getLocalPlayerIndex()) {
-				this.war3MapViewer.startObserverView();
+				final War3MapViewer viewer = this.war3MapViewer;
+				new RenderCommands(LocalUiLink.of(viewer, null)).send(viewer::startObserverView);
 			}
 		}
 	}

@@ -363,6 +363,12 @@ public class PathingGrid {
 		return (short) (this.pathingGrid[index] | this.dynamicPathingOverlay[index]);
 	}
 
+	/** getCellPathing for a cell the caller knows is inside the map. */
+	public short getCellPathingInside(final int cellX, final int cellY) {
+		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
+		return (short) (this.pathingGrid[index] | this.dynamicPathingOverlay[index]);
+	}
+
 	private short getCellPermanentPathing(final int cellX, final int cellY) {
 		if (!isCellInside(cellX, cellY)) {
 			return OUTSIDE_PATHING;

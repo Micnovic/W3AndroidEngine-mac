@@ -32,6 +32,18 @@ final class MapViewerVision {
 		return fogState;
 	}
 
+	/**
+	 * What each fog of war cell value is drawn as: its fog state and that state's shade, under the map's fog and mask
+	 * settings.
+	 */
+	static void fillFogTables(final War3MapViewer viewer, final CFogState[] stateByCell, final byte[] shadeByCell) {
+		for (int i = 0; i < 256; i++) {
+			final byte state = viewer.simulation.getFogStateFromSettings((byte) i);
+			stateByCell[i] = CFogState.getByMask(state);
+			shadeByCell[i] = getFogShade(viewer, state);
+		}
+	}
+
 	static boolean isMaskedAreasPartiallyVisible(final War3MapViewer viewer) {
 		return (viewer.lastLoadedMapInformation != null)
 				&& viewer.lastLoadedMapInformation.hasFlag(War3MapW3iFlags.MASKED_AREAS_ARE_PARTIALLY_VISIBLE);
@@ -44,6 +56,7 @@ final class MapViewerVision {
 	 */
 	static void setReplayVision(final War3MapViewer viewer, final int playerIndex, final boolean fogShown) {
 		viewer.replayVisionPlayer = playerIndex;
+		viewer.viewedReplayPlayer = playerIndex;
 		viewer.replayFogShown = fogShown;
 		if (viewer.replayFogOfWar == null) {
 			viewer.replayFogOfWar = new CPlayerFogOfWar(viewer.simulation.getPathingGrid());
@@ -77,13 +90,14 @@ final class MapViewerVision {
 	 * a replay the shown player's, or everyone's with All Players.
 	 */
 	static boolean isViewedPlayer(final War3MapViewer viewer, final int playerIndex) {
-		if (viewer.replayVisionPlayer == War3MapViewer.REPLAY_VISION_NONE) {
-			return playerIndex == viewer.localPlayerIndex;
+		final int vision = viewer.viewedReplayPlayer;
+		if (vision == War3MapViewer.REPLAY_VISION_NONE) {
+			return playerIndex == viewer.viewedLocalPlayer;
 		}
-		if (viewer.replayVisionPlayer == War3MapViewer.REPLAY_VISION_ALL_PLAYERS) {
+		if (vision == War3MapViewer.REPLAY_VISION_ALL_PLAYERS) {
 			return viewer.isReplayVisionPlayer(viewer.simulation.getPlayer(playerIndex));
 		}
-		return playerIndex == viewer.replayVisionPlayer;
+		return playerIndex == vision;
 	}
 
 	/** The player whose resources and sight the interface shows: a replay's Replay Vision, else the local player. */

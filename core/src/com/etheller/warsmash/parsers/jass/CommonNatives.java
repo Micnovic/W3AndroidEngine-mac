@@ -22,6 +22,7 @@ import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -54,6 +55,8 @@ abstract class CommonNatives {
 	final GameUI gameUI;
 	/** One rectangle reused by the natives that enumerate an area. */
 	final Rectangle tempRect;
+	/** How the natives that reach the local interface (camera, messages, music) do it; see {@link LocalUiLink}. */
+	final LocalUiLink link;
 
 	CommonNatives(final CommonEnvironment environment) {
 		this.environment = environment;
@@ -68,6 +71,17 @@ abstract class CommonNatives {
 		this.simulation = environment.simulation;
 		this.gameUI = environment.gameUI;
 		this.tempRect = environment.tempRect;
+		this.link = LocalUiLink.of(this.war3MapViewer, this.meleeUI);
+	}
+
+	/**
+	 * A native that touches objects only the render thread may use. With the simulation on its own thread the caller
+	 * waits while the render thread runs it; the simulation state it needs must be read before it is called.
+	 */
+	void createRenderNative(final String name, final com.etheller.interpreter.ast.function.JassFunction function) {
+		this.jassProgramVisitor.getJassNativeManager().createNative(name,
+				(arguments, globalScope, triggerScope) -> this.link.onRender(name,
+						() -> function.call(arguments, globalScope, triggerScope)));
 	}
 
 	abstract void register();

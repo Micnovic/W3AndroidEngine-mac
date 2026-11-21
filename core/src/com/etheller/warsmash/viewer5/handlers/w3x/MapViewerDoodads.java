@@ -27,6 +27,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.environment.BuildingShadow;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDoodad;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldPeerData;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDoodadTable;
 
@@ -211,10 +213,54 @@ final class MapViewerDoodads {
 	static RenderDestructable createNewDestructable(final War3MapViewer viewer, final War3ID doodadId, final GameObject row,
 			final int doodadVariation, final float[] location, final float requestedFacingRadians,
 			final short lifePercent, final float[] scale) {
+		final CDestructable simulationDestructable = spawnDestructable(viewer, row, location, requestedFacingRadians,
+				lifePercent);
+		return buildDestructablePeer(viewer, row, doodadVariation, location, requestedFacingRadians, lifePercent, scale,
+				simulationDestructable);
+	}
+
+	/**
+	 * The simulation's part of making a destructable: its pathing and the object. It reads the object data and
+	 * changes the simulation only, so the simulation thread can do it.
+	 */
+	static CDestructable spawnDestructable(final War3MapViewer viewer, final GameObject row, final float[] location,
+			final float requestedFacingRadians, final short lifePercent) {
 		final float facingRadians = getDestructableFacing(row, requestedFacingRadians);
-		BuildingShadow destructableShadow = null;
 		RemovablePathingMapInstance destructablePathing = null;
 		RemovablePathingMapInstance destructablePathingDeath = null;
+
+		final ArgbImage destructablePathingPixelMap = viewer.getDestructablePathingPixelMap(row);
+		if (destructablePathingPixelMap != null) {
+			destructablePathing = viewer.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
+					location[1], getPathingRotation(facingRadians), destructablePathingPixelMap);
+			if (lifePercent > 0) {
+				destructablePathing.add();
+			}
+		}
+		final ArgbImage destructablePathingDeathPixelMap = viewer.getDestructablePathingDeathPixelMap(row);
+		if (destructablePathingDeathPixelMap != null) {
+			destructablePathingDeath = viewer.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
+					location[1], getPathingRotation(facingRadians), destructablePathingDeathPixelMap);
+			if (lifePercent <= 0) {
+				destructablePathingDeath.add();
+			}
+		}
+		final float x = location[0];
+		final float y = location[1];
+		final CDestructable simulationDestructable = viewer.simulation.internalCreateDestructable(
+				War3ID.fromString(row.getId()), x, y, destructablePathing, destructablePathingDeath);
+		if (lifePercent != 100) {
+			simulationDestructable.setLife(viewer.simulation, simulationDestructable.getLife() * (lifePercent / 100f));
+		}
+		return simulationDestructable;
+	}
+
+	/** The render side of {@link #spawnDestructable}: model, shadow and the peer. */
+	static RenderDestructable buildDestructablePeer(final War3MapViewer viewer, final GameObject row,
+			final int doodadVariation, final float[] location, final float requestedFacingRadians,
+			final short lifePercent, final float[] scale, final CDestructable simulationDestructable) {
+		final float facingRadians = getDestructableFacing(row, requestedFacingRadians);
+		BuildingShadow destructableShadow = null;
 		// A walkable one (bridge, ramp, gate) is walked on by its model's bounds as soon as it stands, so its model is
 		// read at once; any other may be read in the background while the game goes on.
 		final boolean walkable = row.readSLKTagBoolean("walkable");
@@ -245,30 +291,11 @@ final class MapViewerDoodads {
 			}
 		}
 
-		final ArgbImage destructablePathingPixelMap = viewer.getDestructablePathingPixelMap(row);
-		if (destructablePathingPixelMap != null) {
-			destructablePathing = viewer.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
-					location[1], getPathingRotation(facingRadians), destructablePathingPixelMap);
-			if (lifePercent > 0) {
-				destructablePathing.add();
-			}
-		}
-		final ArgbImage destructablePathingDeathPixelMap = viewer.getDestructablePathingDeathPixelMap(row);
-		if (destructablePathingDeathPixelMap != null) {
-			destructablePathingDeath = viewer.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
-					location[1], getPathingRotation(facingRadians), destructablePathingDeathPixelMap);
-			if (lifePercent <= 0) {
-				destructablePathingDeath.add();
-			}
-		}
 		final float x = location[0];
 		final float y = location[1];
-		final CDestructable simulationDestructable = viewer.simulation.internalCreateDestructable(
-				War3ID.fromString(row.getId()), x, y, destructablePathing, destructablePathingDeath);
 		// Used to be this, but why: (float) Math.sqrt((scale[0]) * (scale[1]) *
 		// (scale[2]));
 		final float selectionScale = 1.0f;
-		simulationDestructable.setLife(viewer.simulation, simulationDestructable.getLife() * (lifePercent / 100f));
 		final RenderDestructable renderDestructable = new RenderDestructable(viewer, model, portraitModel, row, location,
 				scale, facingRadians, selectionScale, maxPitch, maxRoll, lifePercent, destructableShadow, lateShadow,
 				waitForModel, simulationDestructable, doodadVariation);
@@ -289,6 +316,42 @@ final class MapViewerDoodads {
 		return renderDestructable;
 	}
 
+	/**
+	 * The simulation's part of a destructable made while the game runs (a script, a saved game): the snapping, the
+	 * simulation object and what the peer is built from.
+	 *
+	 * @param z NaN to have the render side find the height
+	 */
+	static WorldPeerData.Destructable spawnRunTimeDestructable(final War3MapViewer viewer, final War3ID typeId,
+			final float requestedX, final float requestedY, final float z, final float facing, final float scale,
+			final int variation) {
+		final GameObject row = viewer.allObjectData.getDestructibles().get(typeId);
+		if (row == null) {
+			throw new NullPointerException("createDestructableZ called on: " + typeId + "," + requestedX + ","
+					+ requestedY + "," + z + "," + facing + "," + scale + "," + variation);
+		}
+		final float x = snapRunTimeDestructableX(viewer, row, requestedX, facing);
+		final float y = snapRunTimeDestructableY(viewer, row, requestedY, facing);
+		final CDestructable simulationDestructable = spawnDestructable(viewer, row, new float[] { x, y, z },
+				(float) Math.toRadians(facing), (short) 100);
+		return new WorldPeerData.Destructable(simulationDestructable, typeId, x, y, z, facing, scale, variation);
+	}
+
+	/** The render side of {@link #spawnRunTimeDestructable}. */
+	static RenderDestructable buildRunTimeDestructablePeer(final War3MapViewer viewer,
+			final WorldPeerData.Destructable data) {
+		final GameObject row = viewer.allObjectData.getDestructibles().get(data.typeId);
+		final float z = Float.isNaN(data.z)
+				? Math.max(viewer.getWalkableRenderHeight(data.x, data.y), viewer.terrain.getGroundHeight(data.x, data.y))
+				: data.z;
+		final RenderDestructable peer = buildDestructablePeer(viewer, row, data.variation,
+				new float[] { data.x, data.y, z }, (float) Math.toRadians(data.facingDegrees), (short) 100,
+				new float[] { data.scale, data.scale, data.scale }, data.destructable);
+		viewer.createdDestructables.add(new CreatedDestructable(data.destructable.getHandleId(),
+				data.typeId.getValue(), data.x, data.y, z, data.facingDegrees, data.scale, data.variation));
+		return peer;
+	}
+
 	static void createDestructableOrDoodad(final War3MapViewer viewer, final War3ID doodadId, final Warcraft3MapRuntimeObjectData modifications,
 			final int doodadVariation, final float[] location, final float facingRadians, final short lifePercent,
 			final float[] scale) {
@@ -296,7 +359,14 @@ final class MapViewerDoodads {
 		if (row == null) {
 			row = modifications.getDestructibles().get(doodadId);
 			if (row != null) {
-				createNewDestructable(viewer, doodadId, row, doodadVariation, location, facingRadians, lifePercent, scale);
+				// the map is loading: the render thread makes the simulation's objects
+				SimThreadGuard.renderOwnsSimulation(true);
+				try {
+					createNewDestructable(viewer, doodadId, row, doodadVariation, location, facingRadians, lifePercent, scale);
+				}
+				finally {
+					SimThreadGuard.renderOwnsSimulation(false);
+				}
 			}
 		} else {
 			createDoodad(viewer, row, doodadVariation, location, facingRadians, scale);
@@ -376,9 +446,16 @@ final class MapViewerDoodads {
 	}
 
 	static CDestructable createDestructableForSavedGame(final War3MapViewer viewer, final CreatedDestructable created) {
-		final CDestructable destructable = viewer.simulation.getSimulationRenderController().createDestructableZ(
-				new War3ID(created.typeId), created.x, created.y, created.z, created.facing, created.scale,
-				created.variation);
+		final CDestructable destructable;
+		SimThreadGuard.renderOwnsSimulation(true);
+		try {
+			destructable = viewer.simulation.getSimulationRenderController().createDestructableZ(
+					new War3ID(created.typeId), created.x, created.y, created.z, created.facing, created.scale,
+					created.variation);
+		}
+		finally {
+			SimThreadGuard.renderOwnsSimulation(false);
+		}
 		// The simulation's handle id comes back with the saved state; this list keeps the saved game's numbers.
 		viewer.createdDestructables.remove(viewer.createdDestructables.size() - 1);
 		viewer.createdDestructables.add(created);

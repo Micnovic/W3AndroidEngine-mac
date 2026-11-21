@@ -21,6 +21,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderItemType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderProjectile;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderSpellEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEventPlayer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldPeerData;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.SpellEffectModel;
@@ -53,7 +55,7 @@ import java.util.Map;
  * Draws and sounds what the simulation does on a map viewer. The simulation reads nothing back from it that
  * changes the game.
  */
-public class War3MapRenderController implements SimulationRenderController {
+public class War3MapRenderController implements SimulationRenderController, RenderEventPlayer.ValueTarget {
 	/** The game draws the text it makes for a unit this far below a script tag put at the same point. */
 	private static final float UNIT_TEXT_TAG_DROP = 19f;
 	private final War3MapViewer viewer;
@@ -69,17 +71,36 @@ public class War3MapRenderController implements SimulationRenderController {
 	@Override
 	public void spawnProjectileArt(final CProjectile projectile, final CUnit source,
 			final CUnitAttackSettings settings, final int bounceIndex) {
-		final float x = projectile.getX();
-		final float y = projectile.getY();
 		final float launchZ = settings.getZ() != null ? settings.getZ()
 				: source.getFlyHeight() + this.viewer.simulation.getUnitData().getProjectileLaunchZ(source.getTypeId());
+		launchProjectileArt(projectile, null, settings, bounceIndex, projectile.getX(), projectile.getY(), launchZ,
+				this.viewer.getMissileTeamColor(source));
+	}
+
+	@Override
+	public void spawnProjectileArt(final CUnit source, final CUnitAttackSettings settings, final int bounceIndex,
+			final WorldPeerData.ProjectileLaunch launch) {
+		final float launchZ = settings.getZ() != null ? settings.getZ() : launch.flyHeight + launch.typeLaunchZ;
+		launchProjectileArt(null, launch, settings, bounceIndex, launch.x, launch.y, launchZ,
+				missileTeamColor(source, launch));
+	}
+
+	private int missileTeamColor(final CUnit source, final WorldPeerData.ProjectileLaunch launch) {
+		final RenderUnit renderPeer = this.viewer.getRenderPeer(source);
+		// Missiles outlive their source: a bounce or a delayed launch can come after the unit was removed.
+		return renderPeer != null ? renderPeer.playerIndex : launch.playerColor;
+	}
+
+	/** @param launch what the missile was when launched, for a missile the simulation may be done with; else null */
+	private void launchProjectileArt(final CProjectile projectile, final WorldPeerData.ProjectileLaunch launch,
+			final CUnitAttackSettings settings, final int bounceIndex, final float x, final float y, final float launchZ, final int teamColor) {
 		final float height = this.viewer.terrain.getGroundHeight(x, y) + launchZ;
 		final MdxModel model = this.viewer.loadModelMdx(settings.getProjectileArt());
 		if (model == null) {
 			return;
 		}
 		final MdxComplexInstance modelInstance = (MdxComplexInstance) model.addInstance();
-		modelInstance.setTeamColor(this.viewer.getMissileTeamColor(source));
+		modelInstance.setTeamColor(teamColor);
 		modelInstance.setScene(this.viewer.worldScene);
 		if (bounceIndex == 0) {
 			SequenceUtils.randomBirthSequence(modelInstance);
@@ -88,8 +109,12 @@ public class War3MapRenderController implements SimulationRenderController {
 			SequenceUtils.randomStandSequence(modelInstance);
 		}
 		modelInstance.setLocation(x, y, height);
-		final RenderProjectile renderProjectile = new RenderProjectile(projectile, modelInstance, height,
-				settings.getProjectileArc(), this.viewer);
+		final RenderProjectile renderProjectile = launch != null
+				? new RenderProjectile(launch, modelInstance, height, settings.getProjectileArc(), this.viewer)
+				: new RenderProjectile(projectile, modelInstance, height, settings.getProjectileArc(), this.viewer);
+		if (launch == null) {
+			renderProjectile.setFrameId(this.viewer.projectileFrameId(projectile));
+		}
 		if (settings.getImpactZ() != null) {
 			renderProjectile.setImpactZ(this.viewer, settings.getImpactZ());
 		}
@@ -101,6 +126,20 @@ public class War3MapRenderController implements SimulationRenderController {
 
 	@Override
 	public void spawnProjectileArt(final CProjectile projectile, final CUnit source, final War3ID spellAlias) {
+		launchSpellProjectileArt(projectile, null, spellAlias, projectile.getX(), projectile.getY(), source.getFlyHeight(),
+				this.viewer.simulation.getUnitData().getProjectileLaunchZ(source.getTypeId()),
+				this.viewer.getMissileTeamColor(source));
+	}
+
+	@Override
+	public void spawnProjectileArt(final CUnit source, final War3ID spellAlias,
+			final WorldPeerData.ProjectileLaunch launch) {
+		launchSpellProjectileArt(null, launch, spellAlias, launch.x, launch.y, launch.flyHeight, launch.typeLaunchZ,
+				missileTeamColor(source, launch));
+	}
+
+	private void launchSpellProjectileArt(final CProjectile projectile, final WorldPeerData.ProjectileLaunch launch,
+			final War3ID spellAlias, final float x, final float y, final float flyHeight, final float typeLaunchZ, final int teamColor) {
 		final AbilityUI spellDataUI = this.viewer.abilityDataUI.getUI(spellAlias);
 		final EffectAttachmentUIMissile missileArt = spellDataUI == null ? null : spellDataUI.getMissileArt(0);
 		if (missileArt == null) {
@@ -110,17 +149,19 @@ public class War3MapRenderController implements SimulationRenderController {
 		if (model == null) {
 			return;
 		}
-		final float x = projectile.getX();
-		final float y = projectile.getY();
-		final float height = this.viewer.terrain.getGroundHeight(x, y) + source.getFlyHeight()
-				+ this.viewer.simulation.getUnitData().getProjectileLaunchZ(source.getTypeId());
+		final float height = this.viewer.terrain.getGroundHeight(x, y) + flyHeight + typeLaunchZ;
 		final MdxComplexInstance modelInstance = (MdxComplexInstance) model.addInstance();
-		modelInstance.setTeamColor(this.viewer.getMissileTeamColor(source));
+		modelInstance.setTeamColor(teamColor);
 		modelInstance.setScene(this.viewer.worldScene);
 		SequenceUtils.randomBirthSequence(modelInstance);
 		modelInstance.setLocation(x, y, height);
-		this.viewer.projectiles
-				.add(new RenderProjectile(projectile, modelInstance, height, missileArt.getArc(), this.viewer));
+		final RenderProjectile renderProjectile = launch != null
+				? new RenderProjectile(launch, modelInstance, height, missileArt.getArc(), this.viewer)
+				: new RenderProjectile(projectile, modelInstance, height, missileArt.getArc(), this.viewer);
+		if (launch == null) {
+			renderProjectile.setFrameId(this.viewer.projectileFrameId(projectile));
+		}
+		this.viewer.projectiles.add(renderProjectile);
 	}
 
 	@Override
@@ -128,7 +169,6 @@ public class War3MapRenderController implements SimulationRenderController {
 			final CUnitAttackInstant unitAttack, final CWidget target) {
 		final War3ID typeId = source.getTypeId();
 
-		final String missileArt = unitAttack.getProjectileArt();
 		final float projectileLaunchX = this.viewer.simulation.getUnitData()
 				.getProjectileLaunchX(typeId);
 		final float projectileLaunchY = this.viewer.simulation.getUnitData()
@@ -141,16 +181,28 @@ public class War3MapRenderController implements SimulationRenderController {
 		final float y = (source.getY() + (projectileLaunchY * sinFacing))
 				- (projectileLaunchX * cosFacing);
 
-		final float targetX = target.getX();
-		final float targetY = target.getY();
+		spawnInstantAttackEffect(unitAttack.getProjectileArt(), x, y, target.getX(), target.getY(),
+				target.getFlyHeight(), target.getImpactZ(), source.getPlayerIndex());
+	}
+
+	@Override
+	public void createInstantAttackEffect(final CUnit source, final WorldPeerData.InstantAttack attack,
+			final CWidget target) {
+		spawnInstantAttackEffect(attack.missileArt, attack.sourceX, attack.sourceY, attack.targetX, attack.targetY,
+				attack.targetFlyHeight, attack.targetImpactZ, attack.sourcePlayerIndex);
+	}
+
+	private void spawnInstantAttackEffect(final String missileArt, final float x, final float y, final float targetX,
+			final float targetY, final float targetFlyHeight, final float targetImpactZ,
+			final int sourcePlayerIndex) {
 		final float angleToTarget = (float) Math.atan2(targetY - y, targetX - x);
 
-		final float height = this.viewer.terrain.getGroundHeight(targetX, targetY)
-				+ target.getFlyHeight() + target.getImpactZ();
+		final float height = this.viewer.terrain.getGroundHeight(targetX, targetY) + targetFlyHeight
+				+ targetImpactZ;
 
 		final MdxModel model = this.viewer.loadWaitingModelMdx(missileArt);
 		final MdxComplexInstance modelInstance = (MdxComplexInstance) model.addWaitingInstance();
-		modelInstance.setTeamColor(source.getPlayerIndex());
+		modelInstance.setTeamColor(sourcePlayerIndex);
 		modelInstance.setLocation(targetX, targetY, height);
 		modelInstance.setScene(this.viewer.worldScene);
 		this.viewer.projectiles
@@ -235,8 +287,7 @@ public class War3MapRenderController implements SimulationRenderController {
 			final String armorType) {
 		final RenderWidget damagedWidget = this.viewer
 				.getRenderPeer(damagedDestructable);
-		if ((damagedWidget == null)
-				|| !this.viewer.isSoundHeardAt(damagedDestructable.getX(), damagedDestructable.getY())) {
+		if ((damagedWidget == null) || !this.viewer.isSoundHeardAt(damagedWidget.getX(), damagedWidget.getY())) {
 			return;
 		}
 		final String key = weaponSound + armorType;
@@ -246,8 +297,8 @@ public class War3MapRenderController implements SimulationRenderController {
 					this.viewer.unitCombatSoundsTable, weaponSound, armorType);
 			this.keyToCombatSound.put(key, combatSound);
 		}
-		combatSound.play(this.viewer.worldScene.audioContext, damagedDestructable.getX(),
-				damagedDestructable.getY(), damagedWidget.getZ());
+		combatSound.play(this.viewer.worldScene.audioContext, damagedWidget.getX(), damagedWidget.getY(),
+				damagedWidget.getZ());
 	}
 
 	@Override
@@ -387,15 +438,16 @@ public class War3MapRenderController implements SimulationRenderController {
 	@Override
 	public CUnit createUnit(final CSimulation simulation, final War3ID typeId,
 			final int playerIndex, final float x, final float y, final float facing) {
-		final CUnit unit = (CUnit) this.viewer.createNewUnit(this.viewer.allObjectData, typeId, x, y,
-				playerIndex, playerIndex, (float) Math.toRadians(facing));
-		// The minimap's creep camps start from the creeps the map placed in its first tick, also those that the melee
-		// setup then removes around the start locations.
-		if ((unit != null) && (simulation.getGameTurnTick() <= 1) && simulation.isNeutralAggressive(playerIndex)
-				&& !unit.isBuilding()) {
-			this.viewer.addInitialCreep(x, y, unit.getUnitType().getLevel());
+		final WorldPeerData.Unit data = (WorldPeerData.Unit) MapViewerUnits.spawn(this.viewer, this.viewer.allObjectData,
+				typeId, x, y, playerIndex, playerIndex, (float) Math.toRadians(facing), -1, -1, true);
+		if (data == null) {
+			return null;
 		}
-		return unit;
+		MapViewerUnits.buildUnitPeer(this.viewer, data);
+		if (data.creepLevel != WorldPeerData.NO_CREEP) {
+			this.viewer.addInitialCreep(data.requestedX, data.requestedY, data.creepLevel);
+		}
+		return data.unit;
 	}
 
 	@Override
@@ -413,21 +465,10 @@ public class War3MapRenderController implements SimulationRenderController {
 	@Override
 	public CDestructable createDestructableZ(final War3ID typeId, final float requestedX, final float requestedY,
 			final float z, final float facing, final float scale, final int variation) {
-		final GameObject row = this.viewer.allObjectData.getDestructibles().get(typeId);
-		if (row == null) {
-			throw new NullPointerException("createDestructableZ called on: " + typeId + "," + requestedX
-					+ "," + requestedY + "," + z + "," + facing + "," + scale + "," + variation);
-		}
-		final float x = this.viewer.snapRunTimeDestructableX(row, requestedX, facing);
-		final float y = this.viewer.snapRunTimeDestructableY(row, requestedY, facing);
-		final float[] location3d = { x, y, z };
-		final float[] scale3d = { scale, scale, scale };
-		final RenderDestructable newDestructable = this.viewer.createNewDestructable(typeId, row, variation,
-				location3d, (float) Math.toRadians(facing), (short) 100, scale3d);
-		this.viewer.createdDestructables
-				.add(new War3MapViewer.CreatedDestructable(newDestructable.getSimulationDestructable().getHandleId(),
-						typeId.getValue(), x, y, z, facing, scale, variation));
-		return newDestructable.getSimulationDestructable();
+		final WorldPeerData.Destructable data = MapViewerDoodads.spawnRunTimeDestructable(this.viewer, typeId,
+				requestedX, requestedY, z, facing, scale, variation);
+		MapViewerDoodads.buildRunTimeDestructablePeer(this.viewer, data);
+		return data.destructable;
 	}
 
 	@Override
@@ -649,16 +690,26 @@ public class War3MapRenderController implements SimulationRenderController {
 	@Override
 	public void unitUpdatedType(final CUnit simulationUnit, final War3ID typeId,
 			final boolean updatePortrait) {
+		updateUnitType(simulationUnit, typeId, updatePortrait,
+				this.viewer.simulation.getPlayer(simulationUnit.getPlayerIndex()).getColor(), simulationUnit.getX(),
+				simulationUnit.getY(), simulationUnit.getFlyHeight());
+	}
+
+	@Override
+	public void unitUpdatedType(final CUnit simulationUnit, final War3ID typeId, final boolean updatePortrait,
+			final WorldPeerData.TypeChange change) {
+		updateUnitType(simulationUnit, typeId, updatePortrait, change.playerColor, change.x, change.y,
+				change.flyHeight);
+	}
+
+	private void updateUnitType(final CUnit simulationUnit, final War3ID typeId, final boolean updatePortrait,
+			final int customTeamColor, final float unitX, final float unitY, final float flyHeight) {
 		final RenderUnit renderPeer = this.viewer.unitToRenderPeer.get(simulationUnit);
 
 		final RenderUnitType typeData = this.viewer.getUnitTypeData(typeId);
-		final int customTeamColor = this.viewer.simulation
-				.getPlayer(simulationUnit.getPlayerIndex()).getColor();
-		final float unitX = simulationUnit.getX();
-		final float unitY = simulationUnit.getY();
 		final float unitZ = Math.max(this.viewer.getWalkableRenderHeight(unitX, unitY),
 				this.viewer.terrain.getGroundHeight(unitX, unitY))
-				+ simulationUnit.getFlyHeight();
+				+ flyHeight;
 
 		BuildingShadow buildingShadowInstance = null;
 		final String buildingShadow = typeData.getBuildingShadow();
@@ -697,10 +748,14 @@ public class War3MapRenderController implements SimulationRenderController {
 
 	@Override
 	public void changeUnitColor(final CUnit unit, final int playerIndex) {
+		changeUnitColorTo(unit, this.viewer.simulation.getPlayer(playerIndex).getColor());
+	}
+
+	@Override
+	public void changeUnitColorTo(final CUnit unit, final int color) {
 		final RenderUnit renderPeer = this.viewer.unitToRenderPeer.get(unit);
 		if (renderPeer != null) {
-			renderPeer.setPlayerColor(
-					this.viewer.simulation.getPlayer(playerIndex).getColor());
+			renderPeer.setPlayerColor(color);
 		}
 	}
 
@@ -829,7 +884,7 @@ public class War3MapRenderController implements SimulationRenderController {
 		final AbilityUI abilityUi = this.viewer.abilityDataUI.getUI(alias);
 		if ((renderPeer == null) || (abilityUi == null)
 				|| (abilityUi.getEffectSound() == null) || (!isLoopingSound(abilityUi.getEffectSound())
-						&& !this.viewer.isSoundHeardAt(caster.getX(), caster.getY()))) {
+						&& !this.viewer.isSoundHeardAt(renderPeer.getX(), renderPeer.getY()))) {
 			return SimulationRenderComponent.DO_NOTHING;
 		}
 		final UnitSound effectSound = this.viewer.uiSounds.getSound(abilityUi.getEffectSound());
@@ -959,15 +1014,8 @@ public class War3MapRenderController implements SimulationRenderController {
 	}
 
 	@Override
-	public void setBlight(final float x, final float y, final float radius,
-			final boolean blighted) {
-		this.viewer.setBlight(x, y, radius, blighted);
-	}
-
-	@Override
-	public void setBlightSquare(final float x, final float y, final float halfSize,
-			final boolean blighted) {
-		this.viewer.setBlight(x, y, halfSize, true, blighted);
+	public void blightChanged(final float[] cornerPositions, final boolean blighted) {
+		this.viewer.blightChanged(cornerPositions, blighted);
 	}
 
 	@Override

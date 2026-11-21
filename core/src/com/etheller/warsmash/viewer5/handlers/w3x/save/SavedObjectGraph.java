@@ -1203,6 +1203,8 @@ public final class SavedObjectGraph {
 		private int[] classOfObject;
 		private final List<Runnable> deferred = new ArrayList<>();
 		private final List<Runnable> addedFieldHooks = new ArrayList<>();
+		/** Objects of retired classes: read to move past them, then left out of everything that held them. */
+		private final java.util.BitSet retiredObjects = new java.util.BitSet();
 
 		public Reader(final Rules rules, final byte[] tableBytes, final DataInputStream bodies) throws IOException {
 			this(rules, tableBytes, bodies, NEWEST_FORMAT);
@@ -1292,6 +1294,10 @@ public final class SavedObjectGraph {
 				case KIND_OBJECT: {
 					final int classId = in.readInt();
 					this.classOfObject[id] = classId;
+					if (this.classes[classId].isRetired()) {
+						this.retiredObjects.set(id);
+						return null;
+					}
 					return ObjectAllocator.allocate(this.classes[classId].type());
 				}
 				default:
@@ -1385,7 +1391,10 @@ public final class SavedObjectGraph {
 				final Collection list = (Collection) object;
 				final int size = this.bodies.readInt();
 				for (int i = 0; i < size; i++) {
-					list.add(this.objects[this.bodies.readInt()]);
+					final int element = this.bodies.readInt();
+					if (!this.retiredObjects.get(element)) {
+						list.add(this.objects[element]);
+					}
 				}
 				break;
 			}
@@ -1400,6 +1409,9 @@ public final class SavedObjectGraph {
 			case KIND_OBJECT: {
 				final ClassInfo info = this.classes[this.classOfObject[id]];
 				readFields(object, info);
+				if (info.isRetired()) {
+					break;
+				}
 				// Collections and maps were built by their constructor, so their own fields have its values already.
 				if (!(object instanceof Collection) && !(object instanceof Map)) {
 					info.applyAddedFieldDefaults(object);
@@ -1428,7 +1440,9 @@ public final class SavedObjectGraph {
 			}
 			this.deferred.add(() -> {
 				for (final int element : elements) {
-					collection.add(this.objects[element]);
+					if (!this.retiredObjects.get(element)) {
+						collection.add(this.objects[element]);
+					}
 				}
 			});
 		}
@@ -1440,7 +1454,9 @@ public final class SavedObjectGraph {
 			}
 			this.deferred.add(() -> {
 				for (int i = 0; i < entries.length; i += 2) {
-					map.put(this.objects[entries[i]], this.objects[entries[i + 1]]);
+					if (!this.retiredObjects.get(entries[i]) && !this.retiredObjects.get(entries[i + 1])) {
+						map.put(this.objects[entries[i]], this.objects[entries[i + 1]]);
+					}
 				}
 			});
 		}
@@ -1622,10 +1638,28 @@ public final class SavedObjectGraph {
 		private Field[] addedFields;
 		private Set<String> addedFieldNames;
 		private boolean addedFieldsReported;
+		private Boolean retired;
 
 		private ClassInfo(final String name, final String[] fieldKeys) {
 			this.name = name;
 			this.fieldKeys = fieldKeys;
+		}
+
+		/** A class this engine dropped on purpose: its saved objects are read and ignored instead of refusing the save. */
+		private boolean isRetired() {
+			if (this.retired == null) {
+				boolean gone = false;
+				if (RETIRED_CLASSES.contains(currentClassName(this.name))) {
+					try {
+						Class.forName(currentClassName(this.name), false, SavedObjectGraph.class.getClassLoader());
+					}
+					catch (final ClassNotFoundException exc) {
+						gone = true;
+					}
+				}
+				this.retired = gone;
+			}
+			return this.retired;
 		}
 
 		private Class<?> type() throws IOException {
@@ -1642,6 +1676,22 @@ public final class SavedObjectGraph {
 		 * class, whose name says nothing about which class it is.
 		 */
 		private Field[] fields() throws IOException {
+			if (this.fields == null && isRetired()) {
+				final Class<?>[] storedTypes = new Class<?>[this.fieldKeys.length];
+				for (int i = 0; i < storedTypes.length; i++) {
+					final String[] parts = this.fieldKeys[i].split("#", 3);
+					if (parts.length != 3) {
+						throw new IOException("Bad field key " + this.fieldKeys[i]);
+					}
+					final Class<?> primitive = PRIMITIVES.get(parts[2]);
+					storedTypes[i] = primitive != null ? primitive : Object.class;
+				}
+				this.storedTypes = storedTypes;
+				this.components = new Field[storedTypes.length];
+				this.addedFields = new Field[0];
+				this.addedFieldNames = new HashSet<>();
+				this.fields = new Field[storedTypes.length];
+			}
 			if (this.fields == null) {
 				final Class<?> type = type();
 				final Map<String, Field> current = new LinkedHashMap<>();
@@ -1786,6 +1836,12 @@ public final class SavedObjectGraph {
 				"com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.undead.dreadlord.CAbilityCarrionSwarmDummy");
 		FORMER_CLASS_NAMES.put("com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.test.CBehaviorCarrionSwarmDummy",
 				"com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.skills.undead.dreadlord.CBehaviorCarrionSwarmDummy");
+	}
+
+	/** Classes that no longer exist and whose saved objects (timers) carry nothing the game needs any more. */
+	private static final Set<String> RETIRED_CLASSES = new HashSet<>();
+	static {
+		RETIRED_CLASSES.add("com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer$FogGpuUpdateTimer");
 	}
 
 	/** For tables that carry no format, as the saves this engine writes. */

@@ -81,6 +81,15 @@ public interface WarsmashUI extends CommandErrorListener, WarsmashBaseUI {
 
 	void scriptSelectUnit(CUnit unit, boolean select);
 
+	/** Runs what the simulation asked of the interface while it ran its step on its own thread. */
+	default void runSimulationCalls() {
+	}
+
+	/** Whether calls the simulation thread made wait for {@link #runSimulationCalls}; any thread. */
+	default boolean hasSimulationCalls() {
+		return false;
+	}
+
 	void scriptClearSelection();
 
 	boolean isOverClickableUi(int screenX, int screenY);

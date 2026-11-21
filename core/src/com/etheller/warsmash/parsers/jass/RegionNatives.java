@@ -33,8 +33,11 @@ import java.util.List;
  * Rect, region and location natives, blight and terrain queries.
  */
 final class RegionNatives extends CommonNatives {
+	private final RenderSide render;
+
 	RegionNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.render = RenderSide.of(this.war3MapViewer);
 	}
 
 	@Override
@@ -392,7 +395,7 @@ final class RegionNatives extends CommonNatives {
 					}
 					final float whichLocationX = whichLocation.x;
 					final float whichLocationY = whichLocation.y;
-					war3MapViewer.setBlight(whichLocationX, whichLocationY, radius, addBlight);
+					this.simulation.setBlight(whichLocationX, whichLocationY, radius, addBlight);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetBlight",
@@ -401,7 +404,7 @@ final class RegionNatives extends CommonNatives {
 					final float y = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float radius = arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final boolean addBlight = arguments.get(4).visit(BooleanJassValueVisitor.getInstance());
-					war3MapViewer.setBlight(x, y, radius, addBlight);
+					this.simulation.setBlight(x, y, radius, addBlight);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetBlightPoint",
@@ -409,7 +412,7 @@ final class RegionNatives extends CommonNatives {
 					final float x = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final boolean addBlight = arguments.get(3).visit(BooleanJassValueVisitor.getInstance());
-					war3MapViewer.setBlight(x, y, 1, addBlight);
+					this.simulation.setBlight(x, y, 1, addBlight);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetBlightRect",
@@ -419,7 +422,7 @@ final class RegionNatives extends CommonNatives {
 					if (rect != null) {
 						for (float x = rect.x; x <= (rect.x + rect.width); x += 128f) {
 							for (float y = rect.y; y <= (rect.y + rect.height); y += 128f) {
-								war3MapViewer.setBlight(x, y, 1, addBlight);
+								this.simulation.setBlight(x, y, 1, addBlight);
 							}
 						}
 					}

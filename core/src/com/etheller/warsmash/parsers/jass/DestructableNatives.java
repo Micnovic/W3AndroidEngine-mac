@@ -25,8 +25,11 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColo
  * Destructable natives.
  */
 final class DestructableNatives extends CommonNatives {
+	private final RenderSide render;
+
 	DestructableNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.render = RenderSide.of(this.war3MapViewer);
 	}
 
 	@Override
@@ -217,10 +220,13 @@ final class DestructableNatives extends CommonNatives {
 							ObjectJassValueVisitor.getInstance()));
 					final String animation = this.gameUI
 							.getTrigStr(arguments.get(1).visit(StringJassValueVisitor.getInstance()));
-					final RenderDestructable renderPeer = whichDestructable == null ? null
-							: war3MapViewer.getRenderPeer(whichDestructable);
-					if (renderPeer != null) {
-						renderPeer.setAnimation(animation);
+					if (whichDestructable != null) {
+						render.post(RenderSide.WORLD, () -> {
+							final RenderDestructable renderPeer = war3MapViewer.getRenderPeer(whichDestructable);
+							if (renderPeer != null) {
+								renderPeer.setAnimation(animation);
+							}
+						});
 					}
 					return null;
 				});
@@ -242,19 +248,27 @@ final class DestructableNatives extends CommonNatives {
 					final float restoredLife = (life == 0) ? maxLife : Math.min(maxLife, Math.max(0.5f, life));
 					whichDestructable.setLife(this.simulation, restoredLife);
 					if (!birth) {
-						final RenderDestructable renderPeer = war3MapViewer.getRenderPeer(whichDestructable);
-						if (renderPeer != null) {
-							renderPeer.notifyLifeRestored();
-						}
+						render.post(RenderSide.WORLD, () -> {
+							final RenderDestructable renderPeer = war3MapViewer.getRenderPeer(whichDestructable);
+							if (renderPeer != null) {
+								renderPeer.notifyLifeRestored();
+							}
+						});
 					} // else birth plays automatically
 					return null;
 				});
 	}
 
 	private void applyColor(final CDestructable destructable, final Object color) {
-		final RenderDestructable renderPeer = (destructable == null) ? null : war3MapViewer.getRenderPeer(destructable);
-		if ((renderPeer != null) && (color instanceof CPlayerColor)) {
-			renderPeer.setPlayerColor(((CPlayerColor) color).ordinal());
+		if ((destructable == null) || !(color instanceof CPlayerColor)) {
+			return;
 		}
+		final int playerColor = ((CPlayerColor) color).ordinal();
+		render.post(RenderSide.WORLD, () -> {
+			final RenderDestructable renderPeer = war3MapViewer.getRenderPeer(destructable);
+			if (renderPeer != null) {
+				renderPeer.setPlayerColor(playerColor);
+			}
+		});
 	}
 }

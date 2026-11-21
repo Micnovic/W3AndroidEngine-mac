@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.etheller.warsmash.launcher.ButtonFlash;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayPlayback;
@@ -89,6 +90,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons.CommandButtonListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedInterfaceState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.OncePerStep;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEvent;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CPlayerStateListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -276,12 +281,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		@Override
 		public boolean call(final CUnit unit) {
 			final RenderUnit renderUnit = MeleeUI.this.war3MapViewer.getRenderPeer(unit);
-			if (!unit.isDead()
-					&& renderUnit.isSelectable(MeleeUI.this.war3MapViewer.simulation,
-							MeleeUI.this.war3MapViewer.getLocalPlayerIndex())
+			final UnitFrameView view = MeleeUI.this.unitView;
+			if (view.unit(renderUnit) && !view.isDead() && view.isSelectableByLocal()
 					&& MeleeUI.this.dragSelectPreviewUnitsUpcoming.add(renderUnit)) {
 				final SimpleStatusBarFrame simpleStatusBarFrame = MeleeUI.this.tooltips.getHpBar();
-				if (!unit.isInvulnerable()) {
+				if (!view.isInvulnerable()) {
 					MeleeUI.this.tooltips.positionHealthBar(simpleStatusBarFrame, renderUnit, 1.0f);
 				}
 				if (!MeleeUI.this.dragSelectPreviewUnits.contains(renderUnit) && isSelectionOn(DRAG_SELECT_UI_OFF)) {
@@ -461,6 +465,19 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	boolean chatOpenEntryAfterDialog;
 
+	final UnitFrameView unitView;
+	private final Thread renderThread = Thread.currentThread();
+	private final ConcurrentLinkedQueue<Runnable> simulationCalls = new ConcurrentLinkedQueue<>();
+	// Kinds of change of the selected unit, each sent at most once per step (see unitStateChanged).
+	static final int UNIT_LIFE = 0;
+	static final int UNIT_MANA = 1;
+	static final int UNIT_HIDDEN = 2;
+	static final int UNIT_ORDERS = 3;
+	static final int UNIT_PANEL = 4;
+	static final int UNIT_STATE_KINDS = 5;
+	/** Simulation thread: the changes of the selected unit sent to the interface. */
+	private final OncePerStep unitStateSent = new OncePerStep(UNIT_STATE_KINDS);
+
 	public MeleeUI(final DataSource dataSource, final ExtendViewport uiViewport, final Scene uiScene,
 			final Scene portraitScene, final CameraPreset[] cameraPresets, final CameraRates cameraRates,
 			final War3MapViewer war3MapViewer, final RootFrameListener rootFrameListener,
@@ -470,6 +487,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.uiScene = uiScene;
 		this.portraitScene = portraitScene;
 		this.war3MapViewer = war3MapViewer;
+		this.unitView = new UnitFrameView(war3MapViewer);
 		this.inventoryWidth = war3MapViewer.getGameData().isUseNineItemInventory() ? 3 : 2;
 		this.inventoryIcons = new CommandCardIcon[INVENTORY_HEIGHT][this.inventoryWidth];
 		this.rootFrameListener = rootFrameListener;
@@ -487,6 +505,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.cameraManager.target.y = startLocation[1];
 		this.cameraManager.setStepClock(this.war3MapViewer.simulation::getGameTurnTick,
 				(x, y) -> Math.max(smoothedGroundHeight(x, y), war3MapViewer.terrain.getWaterHeight(x, y)));
+		this.cameraManager.setPresentedClock(this.war3MapViewer::getPresentedTick);
 
 		this.widthRatioCorrection = this.uiViewport.getMinWorldWidth() / 1600f;
 		this.heightRatioCorrection = this.uiViewport.getMinWorldHeight() / 1200f;
@@ -737,6 +756,59 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		return this.simulationDrivenDepth > 0;
 	}
 
+	/**
+	 * What the simulation tells the interface (a unit removed, a script selecting) happens in the next frame when the
+	 * simulation runs on its own thread: that thread never touches what the interface draws from.
+	 */
+	private boolean isSimulationThreadCall() {
+		return this.unitView.isFrameMode() && (Thread.currentThread() != this.renderThread);
+	}
+
+	void afterSimulation(final Runnable action) {
+		if (isSimulationThreadCall()) {
+			this.simulationCalls.add(action);
+		}
+		else {
+			action.run();
+		}
+	}
+
+	/**
+	 * A change the simulation tells of a unit the interface shows. The panels show the frame being presented, and
+	 * laying out their text is the render thread's alone (libGDX shares the layout state of all text): with the
+	 * simulation on its own thread the change is done when the frame of its step is played, once per step and kind,
+	 * as it reads that frame; otherwise at once.
+	 *
+	 * @param sent the caller's own record of what it sent, of UNIT_STATE_KINDS kinds
+	 */
+	void unitStateChanged(final OncePerStep sent, final int kind, final Runnable action) {
+		if (!isSimulationThreadCall()) {
+			action.run();
+			return;
+		}
+		final LocalUiLink link = this.war3MapViewer.localUiLink();
+		if (link == null) {
+			afterSimulation(action);
+			return;
+		}
+		if (sent.first(kind, this.war3MapViewer.simulation.getGameTurnTick())) {
+			link.send(RenderEvent.FRAME_COMMAND, action);
+		}
+	}
+
+	@Override
+	public boolean hasSimulationCalls() {
+		return !this.simulationCalls.isEmpty();
+	}
+
+	@Override
+	public void runSimulationCalls() {
+		Runnable call;
+		while ((call = this.simulationCalls.poll()) != null) {
+			call.run();
+		}
+	}
+
 	public void setReservedLocalHeroButtons(final int reserved) {
 		this.groups.setReservedLocalHeroButtons(reserved);
 	}
@@ -766,6 +838,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void update(final float deltaTime) {
+		if (!this.war3MapViewer.isSimulationThreaded()) {
+			// with the thread on, a step may be under way: its calls run when it ends, as the step's own
+			runSimulationCalls();
+		}
+		this.menus.pollResourceBar();
 		this.input.flushScriptSelection();
 		this.war3MapViewer.scriptUiState.flushFrames();
 		this.originFrames.update();
@@ -826,12 +903,10 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 					&& this.input.isUnitSelectable(this.mouseOverUnit)) {
 				final SimpleStatusBarFrame simpleStatusBarFrame = this.tooltips.getHpBar();
 				this.tooltips.positionHealthBar(simpleStatusBarFrame, this.mouseOverUnit, 1.0f);
-				if (this.mouseOverUnit instanceof RenderUnit) {
-					final RenderUnit renderUnit = (RenderUnit) this.mouseOverUnit;
-					if (renderUnit.getSimulationUnit().getMaximumMana() > 0) {
-						final SimpleStatusBarFrame simpleStatusManaBarFrame = this.tooltips.getHpBar();
-						this.tooltips.positionManaBar(simpleStatusManaBarFrame, renderUnit, 1.0f);
-					}
+				if ((this.mouseOverUnit instanceof RenderUnit) && this.unitView.widget(this.mouseOverUnit)
+						&& this.unitView.hasMana()) {
+					final SimpleStatusBarFrame simpleStatusManaBarFrame = this.tooltips.getHpBar();
+					this.tooltips.positionManaBar(simpleStatusManaBarFrame, (RenderUnit) this.mouseOverUnit, 1.0f);
 				}
 				final String hoverTipTextValue = this.tooltips.getWorldFrameHoverTipText(this.war3MapViewer.simulation,
 						this.mouseOverUnit);
@@ -854,7 +929,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 					}
 					this.hovertipFrame.positionBounds(this.rootFrame, this.uiViewport);
 				}
-				if (this.mouseOverUnit.getSimulationWidget().isInvulnerable()
+				if ((this.unitView.widget(this.mouseOverUnit) && this.unitView.isInvulnerable())
 						|| (this.mouseOverUnit instanceof RenderItem)) {
 					// this is a bit silly, for now I'm using it to position the "Gold" text on gold
 					// mines even though they are invulnerable
@@ -964,14 +1039,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			}
 			else if (this.mouseOverUnit != null) {
 				if (this.mouseOverUnit instanceof RenderUnit) {
-					final RenderUnit mouseOverUnitUnit = (RenderUnit) this.mouseOverUnit;
-					final int playerIndex = mouseOverUnitUnit.getSimulationUnit().getFakePlayerIndex();
-					if (!this.localPlayer.hasAlliance(playerIndex, CAllianceType.PASSIVE)) {
+					final boolean inFrame = this.unitView.unit((RenderUnit) this.mouseOverUnit);
+					if (inFrame && !this.unitView.isTeamAllied()) {
 						this.commands.setCursorState(MenuCursorState.SELECT, Color.RED);
 					}
-					else if (this.localPlayer.hasAlliance(playerIndex, CAllianceType.SHARED_CONTROL)
-							|| this.localPlayer.hasAlliance(mouseOverUnitUnit.getSimulationUnit().getPlayerIndex(),
-									CAllianceType.SHARED_CONTROL)) {
+					else if (inFrame && this.unitView.isTeamControlShared()) {
 						this.commands.setCursorState(MenuCursorState.SELECT, Color.GREEN);
 					}
 					else {
@@ -1096,13 +1168,16 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 		this.meleeUIMinimap.render(this.war3MapViewer.simulation, batch, this.war3MapViewer.units,
 				this.war3MapViewer.getFogGhosts(),
-				this.war3MapViewer.simulation.getPathingGrid(), this.war3MapViewer.getFogOfWar(),
-				this.war3MapViewer.simulation.getPlayer(this.war3MapViewer.getLocalPlayerIndex()));
+				this.war3MapViewer.simulation.getPathingGrid(), this.war3MapViewer.getFogOfWar(), this.localPlayer);
 		if (fadingBatch != null) {
 			fadingBatch.setAlphaScale(1f);
 		}
-		this.timeIndicator.setSequence(this.war3MapViewer.simulation.isFalseTimeOfDay() ? 1 : 0);
-		this.timeIndicator.setFrameByRatio(this.war3MapViewer.simulation.getGameTimeOfDay()
+		final SimFrame presented = this.unitView.presentedFrame();
+		this.timeIndicator.setSequence(
+				(presented != null ? presented.falseTimeOfDay : this.war3MapViewer.simulation.isFalseTimeOfDay()) ? 1
+						: 0);
+		this.timeIndicator.setFrameByRatio((presented != null ? presented.timeOfDay
+				: this.war3MapViewer.simulation.getGameTimeOfDay())
 				/ this.war3MapViewer.simulation.getGameplayConstants().getGameDayHours());
 		for (final TextTag textTag : this.war3MapViewer.textTags) {
 			if (textTag.isVisible() && textTag.isShownTo(this.war3MapViewer.getLocalPlayerIndex())) {
@@ -1217,12 +1292,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void rallyPointChanged() {
-		this.commands.rallyPointChanged();
+		afterSimulation(this.commands::rallyPointChanged);
 	}
 
 	@Override
 	public void waypointsChanged() {
-		this.commands.waypointsChanged();
+		afterSimulation(this.commands::waypointsChanged);
 	}
 
 	@Override
@@ -1354,32 +1429,38 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void lifeChanged() {
-		this.infoPanel.lifeChanged();
+		unitStateChanged(this.unitStateSent, UNIT_LIFE, this.infoPanel::lifeChanged);
 	}
 
 	@Override
 	public void hideStateChanged() {
-		this.infoPanel.hideStateChanged();
+		unitStateChanged(this.unitStateSent, UNIT_HIDDEN, this.infoPanel::hideStateChanged);
 	}
 
 	@Override
 	public void manaChanged() {
-		this.infoPanel.manaChanged();
+		unitStateChanged(this.unitStateSent, UNIT_MANA, this.infoPanel::manaChanged);
 	}
 
 	@Override
 	public void goldChanged() {
-		this.menus.goldChanged();
+		if (!isSimulationThreadCall()) {
+			this.menus.goldChanged();
+		}
 	}
 
 	@Override
 	public void lumberChanged() {
-		this.menus.lumberChanged();
+		if (!isSimulationThreadCall()) {
+			this.menus.lumberChanged();
+		}
 	}
 
 	@Override
 	public void foodChanged() {
-		this.menus.foodChanged();
+		if (!isSimulationThreadCall()) {
+			this.menus.foodChanged();
+		}
 	}
 
 	/**
@@ -1399,16 +1480,20 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void upkeepChanged() {
-		this.menus.upkeepChanged();
+		if (!isSimulationThreadCall()) {
+			this.menus.upkeepChanged();
+		}
 	}
 
 	@Override
 	public void heroDeath() {
-		if (this.selectedUnit != null) {
-			if (this.selectedUnit.getSimulationUnit().getUnitType().isRevivesHeroes()) {
-				this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		afterSimulation(() -> {
+			if (this.selectedUnit != null) {
+				if (this.selectedUnit.getSimulationUnit().getUnitType().isRevivesHeroes()) {
+					this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+				}
 			}
-		}
+		});
 	}
 
 	@Override
@@ -1418,40 +1503,47 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void ordersChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
-		if (this.mouseOverUIFrame instanceof ClickableActionFrame) {
-			this.tooltips.loadTooltip((ClickableActionFrame) this.mouseOverUIFrame);
-		}
+		unitStateChanged(this.unitStateSent, UNIT_ORDERS, () -> {
+			this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+			if (this.mouseOverUIFrame instanceof ClickableActionFrame) {
+				this.tooltips.loadTooltip((ClickableActionFrame) this.mouseOverUIFrame);
+			}
+		});
+	}
+
+	private void reloadSelectedUnitPanel() {
+		unitStateChanged(this.unitStateSent, UNIT_PANEL,
+				() -> this.infoPanel.reloadSelectedUnitUI(this.selectedUnit));
 	}
 
 	@Override
 	public void heroStatsChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	@Override
 	public void attacksChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	@Override
 	public void abilitiesChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	@Override
 	public void upgradesChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	@Override
 	public void inventoryChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	@Override
 	public void queueChanged() {
-		this.infoPanel.reloadSelectedUnitUI(this.selectedUnit);
+		reloadSelectedUnitPanel();
 	}
 
 	public RenderUnit getSelectedUnit() {
@@ -1759,12 +1851,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void scriptSelectUnit(final CUnit unit, final boolean select) {
-		this.input.scriptSelectUnit(unit, select);
+		afterSimulation(() -> this.input.scriptSelectUnit(unit, select));
 	}
 
 	@Override
 	public void scriptClearSelection() {
-		this.input.scriptClearSelection();
+		afterSimulation(() -> this.input.scriptClearSelection());
 	}
 
 	@Override
@@ -2120,17 +2212,23 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void removedUnit(final CUnit whichUnit) {
-		runSimulationDriven(() -> deselectRemovedUnit(whichUnit));
+		final int handleId = whichUnit.getHandleId();
+		afterSimulation(() -> runSimulationDriven(() -> deselectRemovedUnit(handleId)));
 	}
 
-	private void deselectRemovedUnit(final CUnit whichUnit) {
-		final RenderUnit renderUnit = this.war3MapViewer.getRenderPeer(whichUnit);
-		if ((this.selectedUnits != null) && this.selectedUnits.contains(renderUnit)) {
-			final List<RenderUnit> newSelectedUnits = new ArrayList<>(this.selectedUnits);
-			newSelectedUnits.remove(renderUnit);
-			this.input.selectUnits(newSelectedUnits);
+	// By handle: when this runs a frame after the removal the unit's render peer may be gone already.
+	private void deselectRemovedUnit(final int handleId) {
+		if (this.selectedUnits != null) {
+			for (final RenderUnit selected : this.selectedUnits) {
+				if (selected.getSimulationUnit().getHandleId() == handleId) {
+					final List<RenderUnit> newSelectedUnits = new ArrayList<>(this.selectedUnits);
+					newSelectedUnits.remove(selected);
+					this.input.selectUnits(newSelectedUnits);
+					return;
+				}
+			}
 		}
-		else if (this.selectedUnit == renderUnit) {
+		if ((this.selectedUnit != null) && (this.selectedUnit.getSimulationUnit().getHandleId() == handleId)) {
 			this.input.selectUnit(null);
 		}
 	}

@@ -359,6 +359,24 @@ public class RenderDoodad {
 			final PathingGrid pathingGrid, final byte[] shadeByState) {
 		final CFogState newFogState = fogOfWar.getFogState(war3MapViewer.simulation,
 				pathingGrid.getFogOfWarIndexX(this.x), pathingGrid.getFogOfWarIndexY(this.y));
+		applyFogState(newFogState, shadeByState);
+	}
+
+	/**
+	 * The same from a copy of the fog of war cells, so that the render side never reads the game's fog.
+	 *
+	 * @param states the cells of the fog of war, rows of fogWidth
+	 * @param stateByCell the fog state each cell value stands for
+	 */
+	public void updateFog(final byte[] states, final int fogWidth, final PathingGrid pathingGrid,
+			final CFogState[] stateByCell, final byte[] shadeByState) {
+		final int index = (pathingGrid.getFogOfWarIndexY(this.y) * fogWidth) + pathingGrid.getFogOfWarIndexX(this.x);
+		final CFogState newFogState = ((index >= 0) && (index < states.length)) ? stateByCell[states[index] & 0xFF]
+				: CFogState.VISIBLE;
+		applyFogState(newFogState, shadeByState);
+	}
+
+	private void applyFogState(final CFogState newFogState, final byte[] shadeByState) {
 		this.fogState = newFogState;
 		applyFogAnimation();
 		final byte shade = shadeByState[newFogState.ordinal()];

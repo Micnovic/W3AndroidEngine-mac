@@ -98,6 +98,17 @@ public abstract class AbstractCSound extends AllocatedHandle implements CSound {
 		return Math.max(0, getDuration() - getElapsed(gameTurnTick));
 	}
 
+	/** The script state another sound of the same sequence of calls has reached. */
+	final void restoreScriptState(final AbstractCSound from) {
+		this.duration = from.duration;
+		this.fileDuration = from.fileDuration;
+		this.startTick = from.startTick;
+		this.playPosition = from.playPosition;
+		this.started = from.started;
+		this.stopped = from.stopped;
+		this.killWhenDone = from.killWhenDone;
+	}
+
 	@Override
 	public void killWhenDone() {
 		this.killWhenDone = true;

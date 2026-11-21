@@ -51,6 +51,8 @@ import com.etheller.warsmash.parsers.fdf.frames.TextureFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
 import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
@@ -97,10 +99,14 @@ final class FrameNatives implements FrameEventSink {
 	private final WarsmashUI ui;
 	private final CSimulation simulation;
 
+	private final RenderCommands commands;
+	private final LocalUiLink link;
+	// The numbers are given where the script makes a frame known and looked up where an event of the interface or a
+	// command reaches the simulation, so both threads use them.
 	private final List<UIFrame> frames = new ArrayList<>();
 	private final Map<UIFrame, Integer> frameIds = new IdentityHashMap<>();
-	private final Set<UIFrame> scriptFrames = new LinkedHashSet<>();
-	private final Map<Integer, List<Registration>> registrations = new java.util.HashMap<>();
+	private final Set<UIFrame> scriptFrames = java.util.Collections.synchronizedSet(new LinkedHashSet<>());
+	private final Map<Integer, List<Registration>> registrations = new java.util.concurrent.ConcurrentHashMap<>();
 	private final Map<UIFrame, UIFrame> tooltips = new IdentityHashMap<>();
 	private final Map<UIFrame, Integer> textSizeLimits = new IdentityHashMap<>();
 	/** Minimum, maximum and step a script gave a slider or a status bar; the frames count in whole steps. */
@@ -141,6 +147,8 @@ final class FrameNatives implements FrameEventSink {
 		this.uiViewport = uiViewport;
 		this.ui = ui;
 		this.simulation = viewer.simulation;
+		this.link = LocalUiLink.of(viewer, ui);
+		this.commands = new RenderCommands(this.link);
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer, final Viewport uiViewport,
@@ -161,6 +169,21 @@ final class FrameNatives implements FrameEventSink {
 
 	private void add(final String name, final JassFunction function) {
 		this.program.getJassNativeManager().createNative(name, function);
+	}
+
+	/** A native that changes a frame and returns nothing: it runs on the render side in the frame's order. */
+	private void addCommand(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> {
+			final List<JassValue> copy = new ArrayList<>(arguments);
+			this.commands.send(() -> function.call(copy, globalScope, triggerScope));
+			return null;
+		});
+	}
+
+	/** A native that makes or reads frames: the render thread runs it, after the commands sent before it. */
+	private void addCall(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> this.commands.call(name,
+				() -> function.call(arguments, globalScope, triggerScope)));
 	}
 
 	private GameUI gameUI() {
@@ -207,13 +230,21 @@ final class FrameNatives implements FrameEventSink {
 	}
 
 	private int idOf(final UIFrame frame) {
-		Integer id = this.frameIds.get(frame);
-		if (id == null) {
-			this.frames.add(frame);
-			id = this.frames.size();
-			this.frameIds.put(frame, id);
+		synchronized (this.frames) {
+			Integer id = this.frameIds.get(frame);
+			if (id == null) {
+				this.frames.add(frame);
+				id = this.frames.size();
+				this.frameIds.put(frame, id);
+			}
+			return id;
 		}
-		return id;
+	}
+
+	private Integer knownId(final UIFrame frame) {
+		synchronized (this.frames) {
+			return this.frameIds.get(frame);
+		}
 	}
 
 	private float frameX(final float x) {
@@ -271,7 +302,7 @@ final class FrameNatives implements FrameEventSink {
 	}
 
 	private void registerCreation() {
-		add("BlzLoadTOCFile", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzLoadTOCFile", (arguments, globalScope, triggerScope) -> {
 			try {
 				gameUI().loadTOCFile(string(arguments, 0));
 				return BooleanJassValue.TRUE;
@@ -280,31 +311,31 @@ final class FrameNatives implements FrameEventSink {
 				return BooleanJassValue.FALSE;
 			}
 		});
-		add("BlzCreateFrame", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzCreateFrame", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = gameUI().createFrame(string(arguments, 0), ownerOrRoot(arguments, 1),
 					integer(arguments, 2), integer(arguments, 3));
 			created(frame);
 			return handle(globalScope, frame);
 		});
-		add("BlzCreateSimpleFrame", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzCreateSimpleFrame", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = gameUI().createSimpleFrame(string(arguments, 0), ownerOrRoot(arguments, 1),
 					integer(arguments, 2));
 			created(frame);
 			return handle(globalScope, frame);
 		});
-		add("BlzCreateFrameByType", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzCreateFrameByType", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = gameUI().createFrameByType(string(arguments, 0), string(arguments, 1),
 					ownerOrRoot(arguments, 2), string(arguments, 3), integer(arguments, 4));
 			created(frame);
 			return handle(globalScope, frame);
 		});
-		add("BlzGetFrameByName", (arguments, globalScope, triggerScope) -> handle(globalScope,
+		addCall("BlzGetFrameByName", (arguments, globalScope, triggerScope) -> handle(globalScope,
 				gameUI().getFrameByName(string(arguments, 0), integer(arguments, 1))));
-		add("BlzFrameGetName", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetName", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return new StringJassValue(frame == null || frame.getName() == null ? "" : frame.getName());
 		});
-		add("BlzDestroyFrame", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzDestroyFrame", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if ((frame != null) && (frame != gameUI())) {
 				frame.setVisible(false);
@@ -316,14 +347,14 @@ final class FrameNatives implements FrameEventSink {
 					gameUI().remove(frame);
 				}
 				this.scriptFrames.remove(frame);
-				final Integer id = this.frameIds.get(frame);
+				final Integer id = knownId(frame);
 				if (id != null) {
 					this.registrations.remove(id);
 				}
 			}
 			return null;
 		});
-		add("BlzGetOriginFrame", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzGetOriginFrame", (arguments, globalScope, triggerScope) -> {
 			final int type = constant(arguments, 0);
 			if ((type == ORIGIN_GAME_UI) || (type == ORIGIN_SIMPLE_UI_PARENT)) {
 				return handle(globalScope, gameUI());
@@ -338,13 +369,13 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return handle(globalScope, this.ui == null ? null : this.ui.getOriginFrame(type, integer(arguments, 1)));
 		});
-		add("BlzEnableUIAutoPosition", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzEnableUIAutoPosition", (arguments, globalScope, triggerScope) -> {
 			this.viewer.scriptUiState.setUiAutoPosition(bool(arguments, 0));
 			gameUI().setAutoPosition(bool(arguments, 0));
 			return null;
 		});
 		// The interface of the game goes out of sight while the script's own frames stay; false brings it back.
-		add("BlzHideOriginFrames", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzHideOriginFrames", (arguments, globalScope, triggerScope) -> {
 			final boolean hide = bool(arguments, 0);
 			this.viewer.scriptUiState.setOriginFramesHidden(hide);
 			if (hide) {
@@ -373,7 +404,7 @@ final class FrameNatives implements FrameEventSink {
 	}
 
 	private void registerLayout() {
-		add("BlzFrameSetPoint", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetPoint", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final FramePoint point = framePoint(arguments, 1);
 			final UIFrame relative = ownerOrRoot(arguments, 2);
@@ -385,7 +416,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetAbsPoint", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetAbsPoint", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final FramePoint point = framePoint(arguments, 1);
 			if ((frame != null) && (point != null)) {
@@ -397,7 +428,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameClearAllPoints", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameClearAllPoints", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) {
 				((com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) frame)
@@ -406,7 +437,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetAllPoints", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetAllPoints", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final UIFrame relative = ownerOrRoot(arguments, 1);
 			if (frame != null) {
@@ -416,7 +447,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetSize", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetSize", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame != null) {
 				frame.setWidth(frameX(real(arguments, 1)));
@@ -425,7 +456,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetWidth", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetWidth", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame == null) {
 				return RealJassValue.ZERO;
@@ -433,7 +464,7 @@ final class FrameNatives implements FrameEventSink {
 			final float width = frame.getFramePointX(FramePoint.RIGHT) - frame.getFramePointX(FramePoint.LEFT);
 			return RealJassValue.of(GameUI.unconvertX(this.uiViewport, width != 0 ? width : frame.getAssignedWidth()));
 		});
-		add("BlzFrameGetHeight", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetHeight", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame == null) {
 				return RealJassValue.ZERO;
@@ -442,7 +473,7 @@ final class FrameNatives implements FrameEventSink {
 			return RealJassValue.of(
 					GameUI.unconvertY(this.uiViewport, height != 0 ? height : frame.getAssignedHeight()));
 		});
-		add("BlzFrameSetParent", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetParent", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final UIFrame parent = ownerOrRoot(arguments, 1);
 			if ((frame != null) && (frame != parent)) {
@@ -461,16 +492,16 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetParent", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetParent", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return handle(globalScope, frame == null ? null : frame.getParent());
 		});
-		add("BlzFrameGetChildrenCount", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetChildrenCount", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return IntegerJassValue
 					.of(frame instanceof AbstractUIFrame ? ((AbstractUIFrame) frame).getChildFrames().size() : 0);
 		});
-		add("BlzFrameGetChild", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetChild", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final int index = integer(arguments, 1);
 			if (frame instanceof AbstractUIFrame) {
@@ -482,7 +513,7 @@ final class FrameNatives implements FrameEventSink {
 			return handle(globalScope, null);
 		});
 		// Where a frame sits among the frames of its parent: later in the list is drawn above.
-		add("BlzFrameSetLevel", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetLevel", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final int level = integer(arguments, 1);
 			if ((frame != null) && (frame.getParent() instanceof AbstractUIFrame)) {
@@ -534,7 +565,7 @@ final class FrameNatives implements FrameEventSink {
 	}
 
 	private void registerContent() {
-		add("BlzFrameSetText", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetText", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final String text = gameUI().getTrigStr(string(arguments, 1));
 			if (frame instanceof EditBoxFrame) {
@@ -551,7 +582,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetText", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetText", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final String text;
 			if (frame instanceof EditBoxFrame) {
@@ -563,33 +594,33 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return new StringJassValue(text == null ? "" : text);
 		});
-		add("BlzFrameAddText", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameAddText", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof TextAreaFrame) {
 				((TextAreaFrame) frame).addItem(gameUI().getTrigStr(string(arguments, 1)), gameUI(), this.uiViewport);
 			}
 			return null;
 		});
-		add("BlzFrameSetTextSizeLimit", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetTextSizeLimit", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame != null) {
 				this.textSizeLimits.put(frame, Math.max(0, integer(arguments, 1)));
 			}
 			return null;
 		});
-		add("BlzFrameGetTextSizeLimit", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetTextSizeLimit", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final Integer limit = frame == null ? null : this.textSizeLimits.get(frame);
 			return IntegerJassValue.of(limit == null ? 0 : limit);
 		});
-		add("BlzFrameSetTextColor", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetTextColor", (arguments, globalScope, triggerScope) -> {
 			final StringFrame target = textFrame(object(arguments, 0));
 			if (target != null) {
 				target.setColor(argb(integer(arguments, 1)));
 			}
 			return null;
 		});
-		add("BlzFrameSetVertexColor", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetVertexColor", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final Color color = argb(integer(arguments, 1));
 			if (frame instanceof SpriteFrame) {
@@ -602,7 +633,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetTextAlignment", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetTextAlignment", (arguments, globalScope, triggerScope) -> {
 			final StringFrame target = textFrame(object(arguments, 0));
 			final int vertical = constant(arguments, 1);
 			final int horizontal = constant(arguments, 2);
@@ -616,7 +647,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetTexture", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetTexture", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final TextureFrame texture = textureOf(frame);
 			if (texture != null) {
@@ -627,14 +658,14 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetModel", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetModel", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof SpriteFrame) {
 				gameUI().setSpriteFrameModel((SpriteFrame) frame, string(arguments, 1));
 			}
 			return null;
 		});
-		add("BlzFrameSetSpriteAnimate", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetSpriteAnimate", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof SpriteFrame) {
 				((SpriteFrame) frame).setSequence(Math.max(0, integer(arguments, 1)));
@@ -644,7 +675,7 @@ final class FrameNatives implements FrameEventSink {
 	}
 
 	private void registerState() {
-		add("BlzFrameSetVisible", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetVisible", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame != null) {
 				// The game keeps showing and hiding its own frames; the script's hiding is a layer over that.
@@ -657,11 +688,11 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameIsVisible", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameIsVisible", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return BooleanJassValue.of((frame != null) && frame.isVisible());
 		});
-		add("BlzFrameSetEnable", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetEnable", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final boolean enabled = bool(arguments, 1);
 			if (frame instanceof GlueButtonFrame) {
@@ -675,14 +706,14 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetEnable", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetEnable", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof GlueButtonFrame) {
 				return BooleanJassValue.of(((GlueButtonFrame) frame).isEnabled());
 			}
 			return BooleanJassValue.of(frame != null);
 		});
-		add("BlzFrameSetAlpha", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetAlpha", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) {
 				((com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) frame)
@@ -690,14 +721,14 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetAlpha", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetAlpha", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return IntegerJassValue.of(frame instanceof com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame
 					? Math.round(((com.etheller.warsmash.parsers.fdf.frames.AbstractRenderableFrame) frame)
 							.getRenderAlpha() * 255f)
 					: 255);
 		});
-		add("BlzFrameSetValue", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetValue", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float value = real(arguments, 1);
 			final float[] range = this.ranges.get(frame);
@@ -711,11 +742,11 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameGetValue", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzFrameGetValue", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			return RealJassValue.of(valueOf(frame));
 		});
-		add("BlzFrameClick", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameClick", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			if (frame instanceof ClickableFrame) {
 				((ClickableFrame) frame).onClick(1);
@@ -726,7 +757,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetTooltip", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetTooltip", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final UIFrame tooltip = object(arguments, 1);
 			if (frame != null) {
@@ -795,8 +826,9 @@ final class FrameNatives implements FrameEventSink {
 			}
 			final int frameId = idOf(frame);
 			final Registration registration = new Registration(globalScope, trigger, frameId, eventType);
-			this.registrations.computeIfAbsent(frameId, key -> new ArrayList<>()).add(registration);
-			hook(frame, frameId);
+			this.registrations.computeIfAbsent(frameId, key -> new java.util.concurrent.CopyOnWriteArrayList<>())
+					.add(registration);
+			this.commands.send(() -> hook(frame, frameId));
 			return new HandleJassValue(eventHandleType, registration);
 		});
 		add("BlzGetTriggerFrame", (arguments, globalScope, triggerScope) -> {
@@ -829,7 +861,7 @@ final class FrameNatives implements FrameEventSink {
 		// The frame keeps what the script gave it, so it reads back.
 		// The frame and what it holds are drawn larger or smaller about the frame's center, text and textures
 		// alike, and the pointer finds them where they are drawn; models of the interface scene keep their size.
-		add("BlzFrameSetScale", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetScale", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float scale = real(arguments, 1);
 			if ((frame instanceof AbstractRenderableFrame) && (scale > 0)) {
@@ -838,7 +870,7 @@ final class FrameNatives implements FrameEventSink {
 			return null;
 		});
 		// The font file of the data at the height of the script (in the 0.6 high screen), for the frame's text.
-		add("BlzFrameSetFont", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetFont", (arguments, globalScope, triggerScope) -> {
 			final StringFrame target = textFrame(object(arguments, 0));
 			if ((target != null) && (real(arguments, 2) > 0)) {
 				target.setFrameFont(gameUI().generateFont(string(arguments, 1), real(arguments, 2)));
@@ -846,7 +878,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetMinMaxValue", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetMinMaxValue", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float min = real(arguments, 1);
 			final float max = real(arguments, 2);
@@ -856,7 +888,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 			return null;
 		});
-		add("BlzFrameSetStepSize", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzFrameSetStepSize", (arguments, globalScope, triggerScope) -> {
 			final UIFrame frame = object(arguments, 0);
 			final float step = real(arguments, 1);
 			if ((frame instanceof ScrollBarFrame) || (frame instanceof SimpleStatusBarFrame)) {
@@ -939,7 +971,7 @@ final class FrameNatives implements FrameEventSink {
 
 	/** The frame's events go out only when a trigger listens for the frame, as the registration made it known. */
 	private void deliver(final UIFrame frame, final int eventType, final float value) {
-		final Integer frameId = this.frameIds.get(frame);
+		final Integer frameId = knownId(frame);
 		if ((frameId != null) && this.registrations.containsKey(frameId)) {
 			send(frameId, eventType, value, "");
 		}
@@ -1001,10 +1033,13 @@ final class FrameNatives implements FrameEventSink {
 	private void onFrameEvent(final CPlayer player, final int frameId, final int eventType, final float value,
 			final String text) {
 		final List<Registration> list = this.registrations.get(frameId);
-		if ((list == null) || (frameId < 1) || (frameId > this.frames.size())) {
-			return;
+		final UIFrame frame;
+		synchronized (this.frames) {
+			if ((list == null) || (frameId < 1) || (frameId > this.frames.size())) {
+				return;
+			}
+			frame = this.frames.get(frameId - 1);
 		}
-		final UIFrame frame = this.frames.get(frameId - 1);
 		for (final Registration registration : new ArrayList<>(list)) {
 			if (registration.eventType == eventType) {
 				final CommonTriggerExecutionScope scope = CommonTriggerExecutionScope.frameScope(registration.trigger,
@@ -1017,12 +1052,12 @@ final class FrameNatives implements FrameEventSink {
 	private void registerCoordinates() {
 		// A pixel of this client's window to the 0.8 by 0.6 space of the frames, and back; the pixel row 0 is the top.
 		add("BlzPixelToFrameX", (arguments, globalScope, triggerScope) -> RealJassValue
-				.of((integer(arguments, 0) / (float) Math.max(1, Gdx.graphics.getWidth())) * 0.8f));
+				.of((integer(arguments, 0) / (float) Math.max(1, this.link.input().width())) * 0.8f));
 		add("BlzPixelToFrameY", (arguments, globalScope, triggerScope) -> RealJassValue
-				.of((1f - (integer(arguments, 0) / (float) Math.max(1, Gdx.graphics.getHeight()))) * 0.6f));
+				.of((1f - (integer(arguments, 0) / (float) Math.max(1, this.link.input().height()))) * 0.6f));
 		add("BlzFrameToPixelX", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Math.round((real(arguments, 0) / 0.8f) * Gdx.graphics.getWidth())));
+				.of(Math.round((real(arguments, 0) / 0.8f) * this.link.input().width())));
 		add("BlzFrameToPixelY", (arguments, globalScope, triggerScope) -> IntegerJassValue
-				.of(Math.round((1f - (real(arguments, 0) / 0.6f)) * Gdx.graphics.getHeight())));
+				.of(Math.round((1f - (real(arguments, 0) / 0.6f)) * this.link.input().height())));
 	}
 }

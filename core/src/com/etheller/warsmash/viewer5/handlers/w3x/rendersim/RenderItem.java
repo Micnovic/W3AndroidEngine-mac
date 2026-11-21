@@ -9,6 +9,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.SplatModel.SplatMover;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.Extrapolator;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldObjectFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
@@ -27,11 +30,15 @@ public class RenderItem implements RenderWidget {
 	private boolean hidden;
 	private boolean dead;
 	private int shownScriptColor = -1;
+	// With a presentation clock the state is read from the frames of the game, by the handle.
+	private final int handleId;
+	private final Extrapolator.ObjectPose pose = new Extrapolator.ObjectPose();
 
 	public RenderItem(final War3MapViewer map, RenderItemType itemType, final float x, final float y, final float z,
 			final float angle, final CItem simulationItem) {
 		this.portraitModel = itemType.getPortraitModel();
 		this.simulationItem = simulationItem;
+		this.handleId = simulationItem.getHandleId();
 		final MdxComplexInstance instance = (MdxComplexInstance) itemType.getModel().addWaitingInstance();
 
 		this.angle = angle;
@@ -88,14 +95,41 @@ public class RenderItem implements RenderWidget {
 
 	@Override
 	public void updateAnimations(final War3MapViewer map) {
-		final CPlayerFogOfWar fogOfWar = map.getFogOfWar();
-		final PathingGrid pathingGrid = map.simulation.getPathingGrid();
-		final int fogOfWarIndexX = pathingGrid.getFogOfWarIndexX(this.location[0]);
-		final int fogOfWarIndexY = pathingGrid.getFogOfWarIndexY(this.location[1]);
-		final boolean fogHidden = !fogOfWar.isVisible(map.simulation, fogOfWarIndexX, fogOfWarIndexY);
-		final boolean hidden = this.simulationItem.isHidden();
-		if ((hidden || fogHidden) != this.hidden) {
-			this.hidden = hidden || fogHidden;
+		final boolean hide;
+		final int scriptColor;
+		final boolean dead;
+		final float simulationX;
+		final float simulationY;
+		final float flyHeight;
+		final PresentationClock clock = map.getPresentation();
+		if (clock != null) {
+			if (!Extrapolator.sampleObject(clock, Extrapolator.ITEMS, this.handleId, this.pose)) {
+				return;
+			}
+			final WorldObjectFrameState state = this.pose.state;
+			final int flags = state.flags[this.pose.row];
+			hide = (flags & WorldObjectFrameState.VISIBLE) == 0;
+			scriptColor = state.target[this.pose.row];
+			dead = (flags & WorldObjectFrameState.DEAD) != 0;
+			simulationX = this.pose.x;
+			simulationY = this.pose.y;
+			flyHeight = this.pose.z;
+		}
+		else {
+			final CPlayerFogOfWar fogOfWar = map.getFogOfWar();
+			final PathingGrid pathingGrid = map.simulation.getPathingGrid();
+			final int fogOfWarIndexX = pathingGrid.getFogOfWarIndexX(this.location[0]);
+			final int fogOfWarIndexY = pathingGrid.getFogOfWarIndexY(this.location[1]);
+			final boolean fogHidden = !fogOfWar.isVisible(map.simulation, fogOfWarIndexX, fogOfWarIndexY);
+			hide = this.simulationItem.isHidden() || fogHidden;
+			scriptColor = this.simulationItem.getScriptColor();
+			dead = this.simulationItem.isDead();
+			simulationX = this.simulationItem.getX();
+			simulationY = this.simulationItem.getY();
+			flyHeight = this.simulationItem.getFlyHeight();
+		}
+		if (hide != this.hidden) {
+			this.hidden = hide;
 			if (this.hidden) {
 				this.instance.hide();
 				if (this.shadow != null) {
@@ -109,14 +143,12 @@ public class RenderItem implements RenderWidget {
 				}
 			}
 		}
-		final int scriptColor = this.simulationItem.getScriptColor();
 		if (scriptColor != this.shownScriptColor) {
 			this.shownScriptColor = scriptColor;
 			if (scriptColor >= 0) {
 				this.instance.setTeamColor(scriptColor);
 			}
 		}
-		final boolean dead = this.simulationItem.isDead();
 		final MdxComplexInstance mdxComplexInstance = this.instance;
 		if (mdxComplexInstance.isWaiting()) {
 			// no sequences to choose from yet, and a death is shown when the model is built
@@ -133,8 +165,6 @@ public class RenderItem implements RenderWidget {
 
 		final float prevX = this.location[0];
 		final float prevY = this.location[1];
-		final float simulationX = this.simulationItem.getX();
-		final float simulationY = this.simulationItem.getY();
 		final float dx = simulationX - prevX;
 		final float dy = simulationY - prevY;
 		this.location[0] = simulationX;
@@ -156,7 +186,7 @@ public class RenderItem implements RenderWidget {
 			groundHeight = groundHeightTerrainAndWater;
 			currentWalkableUnder = null;
 		}
-		this.location[2] = this.simulationItem.getFlyHeight() + groundHeight;
+		this.location[2] = flyHeight + groundHeight;
 
 		this.instance.moveTo(this.location);
 		if (this.shadow != null) {

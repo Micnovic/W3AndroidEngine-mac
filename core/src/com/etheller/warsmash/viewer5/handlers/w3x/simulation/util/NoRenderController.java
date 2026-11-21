@@ -348,13 +348,8 @@ public class NoRenderController implements SimulationRenderController {
 	}
 
 	@Override
-	public void setBlight(final float x, final float y, final float radius, final boolean blighted) {
-		this.world.setBlight(x, y, radius, blighted);
-	}
-
-	@Override
-	public void setBlightSquare(final float x, final float y, final float halfSize, final boolean blighted) {
-		this.world.setBlightSquare(x, y, halfSize, blighted);
+	public void blightChanged(final float[] cornerPositions, final boolean blighted) {
+		this.world.blightChanged(cornerPositions, blighted);
 	}
 
 	@Override

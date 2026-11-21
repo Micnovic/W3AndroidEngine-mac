@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.utils.Align;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 
 /**
  * Text drawn straight with a font, outside of a frame, with its color codes: "|cAARRGGBB" starts a color, "|r" goes
@@ -29,6 +30,7 @@ public final class ColorCodedText {
 	 */
 	public void set(final String text, final BitmapFont font, final GlyphLayout glyphLayout, final float lineHeight,
 			final float wrapWidth) {
+		SimThreadGuard.assertGl();
 		if ((font == this.font) && text.equals(this.text) && (lineHeight == this.lineHeight)
 				&& (wrapWidth == this.wrapWidth)) {
 			return;

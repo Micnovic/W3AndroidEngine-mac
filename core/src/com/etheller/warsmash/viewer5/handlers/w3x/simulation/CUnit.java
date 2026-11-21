@@ -19,6 +19,7 @@ import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 import com.etheller.warsmash.parsers.jass.triggers.UnitGroup;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.creeps.CCreepCastAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.blademaster.CBuffWhirlWindCaster;
@@ -672,6 +673,7 @@ public class CUnit extends CWidget {
 	}
 
 	public War3ID getTypeId() {
+		SimThreadGuard.assertSim();
 		return this.typeId;
 	}
 
@@ -679,6 +681,7 @@ public class CUnit extends CWidget {
 	 * @return facing in DEGREES
 	 */
 	public float getFacing() {
+		SimThreadGuard.assertSim();
 		return this.facing;
 	}
 
@@ -696,14 +699,17 @@ public class CUnit extends CWidget {
 	}
 
 	public float getMana() {
+		SimThreadGuard.assertSim();
 		return this.stats.mana;
 	}
 
 	public int getMaximumMana() {
+		SimThreadGuard.assertSim();
 		return this.stats.maximumMana;
 	}
 
 	public int getMaximumLife() {
+		SimThreadGuard.assertSim();
 		return this.stats.maximumLife;
 	}
 
@@ -935,6 +941,7 @@ public class CUnit extends CWidget {
 
 	@Override
 	public float getFlyHeight() {
+		SimThreadGuard.assertSim();
 		return this.placement.flyHeight;
 	}
 
@@ -980,6 +987,7 @@ public class CUnit extends CWidget {
 	}
 
 	public int getPlayerIndex() {
+		SimThreadGuard.assertSim();
 		return this.playerIndex;
 	}
 
@@ -1041,6 +1049,7 @@ public class CUnit extends CWidget {
 	}
 
 	public CUnitType getUnitType() {
+		SimThreadGuard.assertSim();
 		return this.unitType;
 	}
 
@@ -1685,6 +1694,34 @@ public class CUnit extends CWidget {
 		return getCurrentBehavior() instanceof CBehaviorMove;
 	}
 
+	/** Id of the order started last, 0 when there is none. Only reads. */
+	public int getCurrentOrderId() {
+		SimThreadGuard.assertSim();
+		final COrder order = this.orders.lastStartedOrder;
+		return order == null ? 0 : order.getOrderId();
+	}
+
+	/** Rawcode of the first item of the build or train queue, 0 when the queue is empty. Only reads. */
+	public int getQueueFirstTypeId() {
+		SimThreadGuard.assertSim();
+		if (this.production.buildQueueTypes[0] == null) {
+			return 0;
+		}
+		final War3ID first = this.production.buildQueue[0];
+		return first == null ? 0 : first.getValue();
+	}
+
+	/**
+	 * Copies the next points of the way the unit is walking, nearest first, as x/y pairs into out starting at offset;
+	 * returns how many were copied, 0 when it is not walking. Only reads.
+	 */
+	public int copyPathPoints(final float[] out, final int offset, final int maxPoints) {
+		SimThreadGuard.assertSim();
+		final CBehavior current = this.orders.currentBehavior;
+		return (current instanceof CBehaviorMove) ? ((CBehaviorMove) current).copyPathPoints(out, offset, maxPoints)
+				: 0;
+	}
+
 	public void setConstructing(final boolean constructing) {
 		this.production.constructing = constructing;
 		if (constructing) {
@@ -1789,6 +1826,7 @@ public class CUnit extends CWidget {
 	}
 
 	public boolean isPaused() {
+		SimThreadGuard.assertSim();
 		return this.paused;
 	}
 
@@ -1797,6 +1835,7 @@ public class CUnit extends CWidget {
 	}
 
 	public boolean isHidden() {
+		SimThreadGuard.assertSim();
 		return this.hidden;
 	}
 
@@ -2253,6 +2292,7 @@ public class CUnit extends CWidget {
 	}
 
 	public boolean isBuilding() {
+		SimThreadGuard.assertSim();
 		return this.structure;
 	}
 

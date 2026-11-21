@@ -61,7 +61,7 @@ public final class RenderUbersplat implements SimulationRenderComponentUbersplat
 	}
 
 	private float gameTime() {
-		return this.viewer.simulation.getGameTurnTick() * WarsmashConstants.SIMULATION_STEP_TIME;
+		return this.viewer.getPresentedTick() * WarsmashConstants.SIMULATION_STEP_TIME;
 	}
 
 	/** Brings the drawn colour to the splat's age; false once it is gone. */

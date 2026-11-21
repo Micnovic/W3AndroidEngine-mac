@@ -32,6 +32,32 @@ final class CSoundParameters {
 	String dialogueSpeakerNameKey = "";
 	String dialogueTextKey = "";
 
+	/** The values a script set; the unit a sound is attached to is the render side's to find. */
+	void copyFrom(final CSoundParameters other) {
+		this.volume = other.volume;
+		this.pitch = other.pitch;
+		this.pitchVariance = other.pitchVariance;
+		this.channel = other.channel;
+		this.positioned = other.positioned;
+		this.x = other.x;
+		this.y = other.y;
+		this.z = other.z;
+		this.minDistance = other.minDistance;
+		this.maxDistance = other.maxDistance;
+		this.distanceCutoff = other.distanceCutoff;
+		this.coneInside = other.coneInside;
+		this.coneOutside = other.coneOutside;
+		this.coneOutsideVolume = other.coneOutsideVolume;
+		this.coneX = other.coneX;
+		this.coneY = other.coneY;
+		this.coneZ = other.coneZ;
+		this.velocityX = other.velocityX;
+		this.velocityY = other.velocityY;
+		this.velocityZ = other.velocityZ;
+		this.dialogueSpeakerNameKey = other.dialogueSpeakerNameKey;
+		this.dialogueTextKey = other.dialogueTextKey;
+	}
+
 	void updatePositionFromUnit() {
 		if (this.attachedLocation != null) {
 			this.positioned = true;

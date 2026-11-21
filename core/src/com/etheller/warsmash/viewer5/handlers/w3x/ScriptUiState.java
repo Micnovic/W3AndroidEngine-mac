@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,6 +28,7 @@ public final class ScriptUiState {
 
 	/** Called by the interface every frame, for the Frame API to lay out the frames a script changed. */
 	public void setFrameFlush(final Runnable frameFlush) {
+		SimThreadGuard.assertGl();
 		this.frameFlush = frameFlush;
 	}
 
@@ -41,6 +43,7 @@ public final class ScriptUiState {
 	}
 
 	public void setCursorEnabled(final boolean cursorEnabled) {
+		SimThreadGuard.assertGl();
 		this.cursorEnabled = cursorEnabled;
 	}
 
@@ -49,6 +52,7 @@ public final class ScriptUiState {
 	}
 
 	public void setSelectionEnabled(final boolean selectionEnabled) {
+		SimThreadGuard.assertGl();
 		this.selectionEnabled = selectionEnabled;
 	}
 
@@ -57,6 +61,7 @@ public final class ScriptUiState {
 	}
 
 	public void setSelectionCircleEnabled(final boolean selectionCircleEnabled) {
+		SimThreadGuard.assertGl();
 		this.selectionCircleEnabled = selectionCircleEnabled;
 	}
 
@@ -65,6 +70,7 @@ public final class ScriptUiState {
 	}
 
 	public void setTargetIndicatorEnabled(final boolean targetIndicatorEnabled) {
+		SimThreadGuard.assertGl();
 		this.targetIndicatorEnabled = targetIndicatorEnabled;
 	}
 
@@ -73,6 +79,7 @@ public final class ScriptUiState {
 	}
 
 	public void setOriginFramesHidden(final boolean originFramesHidden) {
+		SimThreadGuard.assertGl();
 		this.originFramesHidden = originFramesHidden;
 	}
 
@@ -81,6 +88,7 @@ public final class ScriptUiState {
 	}
 
 	public void setUiAutoPosition(final boolean uiAutoPosition) {
+		SimThreadGuard.assertGl();
 		this.uiAutoPosition = uiAutoPosition;
 	}
 
@@ -89,6 +97,7 @@ public final class ScriptUiState {
 	}
 
 	public void setTerrainShown(final boolean terrainShown) {
+		SimThreadGuard.assertGl();
 		this.terrainShown = terrainShown;
 	}
 
@@ -97,6 +106,7 @@ public final class ScriptUiState {
 	}
 
 	public void setSkyBoxShown(final boolean skyBoxShown) {
+		SimThreadGuard.assertGl();
 		this.skyBoxShown = skyBoxShown;
 	}
 
@@ -106,6 +116,7 @@ public final class ScriptUiState {
 	}
 
 	public void setClientActive(final boolean clientActive) {
+		SimThreadGuard.assertGl();
 		this.clientActive = clientActive;
 	}
 
@@ -114,6 +125,7 @@ public final class ScriptUiState {
 	}
 
 	public void setPauseThematicMusicOnFocusLost(final boolean pause) {
+		SimThreadGuard.assertGl();
 		this.pauseThematicMusicOnFocusLost = pause;
 	}
 
@@ -128,6 +140,7 @@ public final class ScriptUiState {
 	}
 
 	public void setMinimapTerrainTexture(final String minimapTerrainTexture) {
+		SimThreadGuard.assertGl();
 		this.minimapTerrainTexture = minimapTerrainTexture;
 	}
 

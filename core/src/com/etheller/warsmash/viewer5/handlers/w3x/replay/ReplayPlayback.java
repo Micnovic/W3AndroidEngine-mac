@@ -156,8 +156,8 @@ public final class ReplayPlayback implements GameTurnManager, ReplaySession {
 		}
 		if (!this.viewer.isGameEnded()) {
 			// The recorded game ended outside its script (its player left from the menu) or was cut off: the
-			// viewer is shown how it stands, on the score screen.
-			this.viewer.showGameEnd();
+			// viewer is shown how it stands, on the score screen; the step waits, so that no further one is made.
+			this.viewer.onRenderThread(this.viewer::showGameEnd);
 		}
 		GameReplays.report(this.player.report());
 	}

@@ -23,6 +23,8 @@ public final class RenderFogGhost {
 	private final int colorIndex;
 	private final boolean minimapIconHidden;
 	private final boolean usesAltMinimapIcon;
+	private final boolean frameMode;
+	private final int teamRelation;
 	private final int minimapLandmarkKind;
 	private final MdxComplexInstance instance;
 	private final float[] baseColor = new float[4];
@@ -41,11 +43,16 @@ public final class RenderFogGhost {
 		this.renderUnit = source;
 		this.x = source.location[0];
 		this.y = source.location[1];
-		this.fakePlayerIndex = this.unit.getFakePlayerIndex();
+		// with a presentation clock what the unit was when last seen comes from the frames, through its peer
+		this.frameMode = map.getPresentation() != null;
+		this.fakePlayerIndex = this.frameMode ? source.getFrameTeamPlayer() : this.unit.getFakePlayerIndex();
+		this.teamRelation = this.frameMode ? source.getFrameTeamRelation() : 0;
 		this.colorIndex = source.playerIndex;
-		this.minimapIconHidden = this.unit.isHideMinimapIcon();
-		this.usesAltMinimapIcon = this.unit.isUsesAltMinimapIcon();
-		this.minimapLandmarkKind = RenderUnit.minimapLandmarkKindOf(this.unit);
+		this.minimapIconHidden = this.frameMode ? source.isFrameMinimapIconHidden() : this.unit.isHideMinimapIcon();
+		this.usesAltMinimapIcon = this.frameMode ? source.isFrameUsesAltMinimapIcon()
+				: this.unit.isUsesAltMinimapIcon();
+		this.minimapLandmarkKind = this.frameMode ? source.getMinimapLandmarkKind()
+				: RenderUnit.minimapLandmarkKindOf(this.unit);
 		this.buildingShadowFile = source.getTypeData().getBuildingShadow();
 		final MdxComplexInstance seen = source.instance;
 		this.instance = (MdxComplexInstance) ((MdxModel) seen.model).addInstance();
@@ -142,8 +149,10 @@ public final class RenderFogGhost {
 	}
 
 	private void updateColors(final War3MapViewer map) {
-		final int teamColor = map.getAllyColorFilter().worldColor(map.simulation, map.getLocalPlayerIndex(),
-				this.fakePlayerIndex, this.colorIndex);
+		final int teamColor = this.frameMode
+				? map.getAllyColorFilter().worldColorOfRelation(this.teamRelation, this.colorIndex)
+				: map.getAllyColorFilter().worldColor(map.simulation, map.getLocalPlayerIndex(),
+						this.fakePlayerIndex, this.colorIndex);
 		if (teamColor != this.shownTeamColor) {
 			this.shownTeamColor = teamColor;
 			this.instance.setTeamColor(teamColor);

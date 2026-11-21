@@ -15,6 +15,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.SplatModel.SplatMover;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.BuildingShadow;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.Extrapolator;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldObjectFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
@@ -40,6 +43,13 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 	private String replaceableTextureFile;
 	private final War3MapViewer map;
 	private boolean active;
+	// With a presentation clock the state is read from the frames of the game, by the handle.
+	private final int handleId;
+	private final float maxLife;
+	private final Extrapolator.ObjectPose pose = new Extrapolator.ObjectPose();
+	private boolean frameDead;
+	private boolean frameBlighted;
+	private float frameLife;
 	/** The shadow image to lay once the model says whether it casts a shadow of its own, see {@link #modelBuilt}. */
 	private final String shadowFile;
 	/** What a script asked of the animation while the model was not built, replayed when it is. */
@@ -70,6 +80,8 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		this.shadowFile = shadowFile;
 		this.portraitModel = portraitModel;
 		this.life = simulationDestructable.getLife();
+		this.handleId = simulationDestructable.getHandleId();
+		this.maxLife = simulationDestructable.getMaxLife();
 		this.destructableShadow = destructableShadow;
 		this.simulationDestructable = simulationDestructable;
 		this.replaceableTextureFile = row.getFieldAsString(TEX_FILE, 0);
@@ -91,6 +103,7 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		this.selectionScale *= row.getFieldAsFloat(SEL_CIRCLE_SIZE, 0);
 		this.unitAnimationListenerImpl = new UnitAnimationListenerImpl((MdxComplexInstance) this.instance, 0, 0);
 		simulationDestructable.setUnitAnimationListener(this.unitAnimationListenerImpl);
+		map.destructablePeerCreated(simulationDestructable);
 		this.unitAnimationListenerImpl.playAnimation(true, getAnimation(), SequenceUtils.EMPTY, 1.0f, true);
 		this.selectable = row.readSLKTagBoolean("selectable");
 		this.unitAnimationListenerImpl.setActivityObserver(this::wake);
@@ -123,8 +136,11 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 				this.instance.setReplaceableTextureHD(this.replaceableTextureId, this.replaceableTextureFile);
 			}
 		}
-		if ((this.shadowFile != null) && !mdxInstance.sceneryShadow && !this.dead
-				&& !this.simulationDestructable.isDead()
+		final PresentationClock clock = this.map.getPresentation();
+		// with frames, a destructable no frame lists yet is as the game made it: dead when it had no life then
+		final boolean gameDead = clock == null ? this.simulationDestructable.isDead()
+				: (readFrame(clock) ? this.frameDead : this.life <= 0);
+		if ((this.shadowFile != null) && !mdxInstance.sceneryShadow && !this.dead && !gameDead
 				&& (!late || (this.map.getRenderPeer(this.simulationDestructable) == this))) {
 			this.destructableShadow = this.map.terrain.addShadow(this.shadowFile, this.x, this.y, true);
 		}
@@ -167,9 +183,30 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 
 	/** Whether the game changed this destructable in a way {@link #updateAnimations} reacts to. */
 	public boolean hasPendingChange() {
+		final PresentationClock clock = this.map.getPresentation();
+		if (clock != null) {
+			if (!readFrame(clock)) {
+				return false;
+			}
+			return (this.frameDead != this.dead) || (this.frameBlighted && !this.blighted)
+					|| (!this.frameDead && (Math.abs(this.life - this.frameLife) > 0.003f));
+		}
 		final boolean dead = this.simulationDestructable.isDead();
 		return (dead != this.dead) || (this.simulationDestructable.isBlighted() && !this.blighted)
 				|| (!dead && (Math.abs(this.life - this.simulationDestructable.getLife()) > 0.003f));
+	}
+
+	/** Takes the state the frames give at the presentation time; false when no frame has this destructable. */
+	private boolean readFrame(final PresentationClock clock) {
+		if (!Extrapolator.sampleObject(clock, Extrapolator.TREES, this.handleId, this.pose)) {
+			return false;
+		}
+		final WorldObjectFrameState state = this.pose.state;
+		final int flags = state.flags[this.pose.row];
+		this.frameDead = (flags & WorldObjectFrameState.DEAD) != 0;
+		this.frameBlighted = (flags & WorldObjectFrameState.BLIGHTED) != 0;
+		this.frameLife = state.life[this.pose.row] * this.maxLife;
+		return true;
 	}
 
 	// Only trees have blight art (AshenTreeBlight); other replaceable textures such as Cliff\Cliff0 keep their own.
@@ -212,10 +249,26 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 			// what changed is dealt with once the model is built
 			return;
 		}
-		final boolean dead = this.simulationDestructable.isDead();
-		final boolean blighted = this.simulationDestructable.isBlighted();
+		final PresentationClock clock = war3MapViewer.getPresentation();
+		final boolean dead;
+		final boolean blighted;
+		final float simulationLife;
+		if (clock != null) {
+			if (!readFrame(clock)) {
+				this.unitAnimationListenerImpl.update();
+				return;
+			}
+			dead = this.frameDead;
+			blighted = this.frameBlighted;
+			simulationLife = this.frameLife;
+		}
+		else {
+			dead = this.simulationDestructable.isDead();
+			blighted = this.simulationDestructable.isBlighted();
+			simulationLife = this.simulationDestructable.getLife();
+		}
 		final boolean changed = (dead != this.dead) || (blighted && !this.blighted)
-				|| (!dead && (Math.abs(this.life - this.simulationDestructable.getLife()) > 0.003f));
+				|| (!dead && (Math.abs(this.life - simulationLife) > 0.003f));
 		if (changed && !war3MapViewer.isPointShownToViewer(this.x, this.y)) {
 			// Measured on 1.29: the fog keeps a tree as it was last seen; one cut or grown back out of sight
 			// shows its new state, without the fall or the growth, once the place is seen again.
@@ -254,17 +307,17 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 							true);
 					this.unitAnimationListenerImpl.queueAnimation(PrimaryTag.STAND, SequenceUtils.EMPTY, true);
 				}
-				this.life = this.simulationDestructable.getLife();
+				this.life = simulationLife;
 				// TODO add back shadow here
 
 			}
 			else {
-				if (Math.abs(this.life - this.simulationDestructable.getLife()) > 0.003f) {
-					if (!changedOutOfSight && (this.life > this.simulationDestructable.getLife())) {
+				if (Math.abs(this.life - simulationLife) > 0.003f) {
+					if (!changedOutOfSight && (this.life > simulationLife)) {
 						this.unitAnimationListenerImpl.playAnimation(true, PrimaryTag.STAND, SequenceUtils.HIT, 1.0f,
 								true);
 					}
-					this.life = this.simulationDestructable.getLife();
+					this.life = simulationLife;
 				}
 			}
 		}

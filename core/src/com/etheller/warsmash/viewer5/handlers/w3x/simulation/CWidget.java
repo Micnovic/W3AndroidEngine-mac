@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Set;
@@ -122,15 +123,18 @@ public abstract class CWidget extends CExtensibleHandleAbstract implements Abili
 
 	@Override
 	public float getX() {
+		SimThreadGuard.assertSim();
 		return this.x;
 	}
 
 	@Override
 	public float getY() {
+		SimThreadGuard.assertSim();
 		return this.y;
 	}
 
 	public float getLife() {
+		SimThreadGuard.assertSim();
 		return this.life;
 	}
 
@@ -163,6 +167,7 @@ public abstract class CWidget extends CExtensibleHandleAbstract implements Abili
 	public abstract <T> T visit(CWidgetVisitor<T> visitor);
 
 	public boolean isDead() {
+		SimThreadGuard.assertSim();
 		return this.life <= 0;
 	}
 

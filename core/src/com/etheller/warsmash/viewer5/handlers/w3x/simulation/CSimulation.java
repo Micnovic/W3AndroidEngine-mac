@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -96,6 +97,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColo
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerState;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrameWriter;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CFrameEventHandler;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandHost;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandLog;
@@ -160,6 +162,8 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	private final HandleIdAllocator handleIdAllocator;
 	@SavedTransient
 	private transient final SimulationRenderController simulationRenderController;
+	@SavedTransient
+	private transient StepEndListener stepEndListener;
 	private int gameTurnTick = 0;
 	private boolean scriptStartPending = false;
 	private final PathingGrid pathingGrid;
@@ -418,6 +422,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		fogUpdateTimer.setRepeats(true);
 		fogUpdateTimer.setTimeoutTime(CFogModifier.FOG_UPDATE_TIME);
 		fogUpdateTimer.start(this);
+		this.stepEndListener = SimFrameWriter.installFromProperties(this);
 	}
 	
 	public char getTileset() {
@@ -458,7 +463,13 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public List<CUnit> getUnits() {
+		SimThreadGuard.assertSim();
 		return this.units;
+	}
+
+	/** Units made since the unit list was last joined by the new ones (during the step, after the unit update). */
+	public List<CUnit> getPendingNewUnits() {
+		return this.newUnits;
 	}
 
 	public SimulationRenderController getSimulationRenderController() {
@@ -466,10 +477,12 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public List<CItem> getItems() {
+		SimThreadGuard.assertSim();
 		return this.items;
 	}
 
 	public CDestructable getDestructable(final int handleId) {
+		SimThreadGuard.assertSim();
 		return this.handleIdToDestructable.get(handleId);
 	}
 
@@ -907,6 +920,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public CUnit getUnit(final int handleId) {
+		SimThreadGuard.assertSim();
 		return this.handleIdToUnit.get(handleId);
 	}
 
@@ -1415,6 +1429,10 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		expireScriptTextTags();
 		this.handleIdAllocator.endStep();
 		SimulationChecksum.afterStep(this);
+		final StepEndListener stepEnd = this.stepEndListener;
+		if (stepEnd != null) {
+			stepEnd.onStepEnd(this);
+		}
 		PerfStats.stepEnd(PerfStats.Step.TAIL);
 	}
 
@@ -1526,6 +1544,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public float getGameTimeOfDay() {
+		SimThreadGuard.assertSim();
 		if ((this.falseTimeOfDay != null) && this.falseTimeOfDay.isInitialized()) {
 			return this.falseTimeOfDay.getTimeOfDay();
 		}
@@ -1607,6 +1626,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public int getGameTurnTick() {
+		SimThreadGuard.assertSim();
 		return this.gameTurnTick;
 	}
 
@@ -1777,6 +1797,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 
 	@Override
 	public CPlayer getPlayer(final int index) {
+		SimThreadGuard.assertSim();
 		return this.players.get(index);
 	}
 
@@ -1848,6 +1869,27 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 
 	public List<CEffect> getProjectiles() {
 		return this.projectiles;
+	}
+
+	/** Missiles launched since the last move, which join the projectile list at the next step. */
+	public List<CEffect> getPendingProjectiles() {
+		return this.newProjectiles;
+	}
+
+	/**
+	 * Called at the very end of every step, on the thread that runs steps, after the checksum. It may only read the
+	 * simulation.
+	 */
+	public interface StepEndListener {
+		void onStepEnd(CSimulation simulation);
+	}
+
+	public void setStepEndListener(final StepEndListener listener) {
+		this.stepEndListener = listener;
+	}
+
+	public StepEndListener getStepEndListener() {
+		return this.stepEndListener;
 	}
 
 	public List<CTimer> getActiveTimers() {
@@ -2025,6 +2067,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public CWidget getWidget(final int handleId) {
+		SimThreadGuard.assertSim();
 		final CUnit unit = this.handleIdToUnit.get(handleId);
 		if (unit != null) {
 			return unit;
@@ -2575,11 +2618,11 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public void setBlight(final float x, final float y, final float radius, final boolean blighted) {
-		this.simulationRenderController.setBlight(x, y, radius, blighted);
+		CBlight.set(this, x, y, radius, false, blighted);
 	}
 
 	public void setBlightSquare(final float x, final float y, final float halfSize, final boolean blighted) {
-		this.simulationRenderController.setBlightSquare(x, y, halfSize, blighted);
+		CBlight.set(this, x, y, halfSize, true, blighted);
 	}
 
 	public void unitUpdatedType(final CUnit unit, final War3ID typeId, final boolean updatePortrait) {

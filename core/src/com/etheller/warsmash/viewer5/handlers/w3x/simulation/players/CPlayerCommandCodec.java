@@ -316,7 +316,13 @@ public final class CPlayerCommandCodec {
 	 * @throws IllegalArgumentException when the bytes are not whole commands; nothing after the bad one is applied
 	 */
 	public static void decode(final byte[] bytes, final CPlayerUnitOrderListener listener) {
-		final ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN);
+		decode(bytes, 0, bytes.length, listener);
+	}
+
+	/** The same for the commands in {@code length} bytes of a longer array, so a pooled buffer need not be copied. */
+	public static void decode(final byte[] bytes, final int offset, final int length,
+			final CPlayerUnitOrderListener listener) {
+		final ByteBuffer buffer = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.BIG_ENDIAN);
 		try {
 			while (buffer.hasRemaining()) {
 				decodeOne(buffer, listener);

@@ -72,49 +72,50 @@ public class BatchGroup extends GenericGroup {
 		}
 
 		webGL.useShaderProgram(shader);
+		final MdxLocations locations = MdxLocations.of(shader);
 
-		shader.setUniformMatrix(hd ? "u_VP" : "u_mvp", mvp);
+		shader.setUniformMatrix(hd ? locations.vp : locations.mvp, mvp);
 
 		final DataTexture unitLightsTexture = lightManager.getUnitLightsTexture();
 
 		unitLightsTexture.bind(14);
-		shader.setUniformi("u_lightTexture", 14);
-		shader.setUniformf("u_lightCount", lightManager.getUnitLightCount());
-		shader.setUniformf("u_lightTextureHeight", unitLightsTexture.getHeight());
+		shader.setUniformi(locations.lightTexture, 14);
+		shader.setUniformf(locations.lightCount, lightManager.getUnitLightCount());
+		shader.setUniformf(locations.lightTextureHeight, unitLightsTexture.getHeight());
 
 		// Instances of models with no bones don't have a bone texture.
-		if (instance.bindBones(shader)) {
-			shader.setUniformf("u_hasBones", 1);
+		if (instance.bindBones(shader, locations)) {
+			shader.setUniformf(locations.hasBones, 1);
 		}
 		else {
-			shader.setUniformf("u_hasBones", 0);
+			shader.setUniformf(locations.hasBones, 0);
 		}
 
 		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, model.arrayBuffer);
 		gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, model.elementBuffer);
 
 		if (hd) {
-			shader.setUniformi("u_diffuseMap", 0);
-			shader.setUniformi("u_normalsMap", 1);
-			shader.setUniformi("u_ormMap", 2);
-			shader.setUniformi("u_emissiveMap", 3);
-			shader.setUniformi("u_teamColorMap", 4);
-			shader.setUniformi("u_environmentMap", 5);
-			scene.fogSettings.uploadUniforms(shader);
-			shader.setUniformf("u_iblParams", HD_IBL_STRENGTH * lightManager.getHdIblScale(), HD_NIGHT_AMBIENT,
+			shader.setUniformi(locations.diffuseMap, 0);
+			shader.setUniformi(locations.normalsMap, 1);
+			shader.setUniformi(locations.ormMap, 2);
+			shader.setUniformi(locations.emissiveMap, 3);
+			shader.setUniformi(locations.teamColorMap, 4);
+			shader.setUniformi(locations.environmentMap, 5);
+			scene.fogSettings.uploadUniforms(shader, locations.fogColor, locations.fogParams, locations.fogHeight);
+			shader.setUniformf(locations.iblParams, HD_IBL_STRENGTH * lightManager.getHdIblScale(), HD_NIGHT_AMBIENT,
 					lightManager.getHdSpecularScale());
-			shader.setUniform4fv("u_vertexColor", instance.vertexColor, 0, instance.vertexColor.length);
+			shader.setUniform4fv(locations.vertexColor, instance.vertexColor, 0, instance.vertexColor.length);
 
 			gl.glEnable(GL20.GL_BLEND);
 			gl.glEnable(GL20.GL_DEPTH_TEST);
 			gl.glDepthMask(true);
 
-			shader.setUniformMatrix("u_MV", camera.viewMatrix);
+			shader.setUniformMatrix(locations.mv, camera.viewMatrix);
 
 			tempFloat3Array[0] = camera.location.x;
 			tempFloat3Array[1] = camera.location.y;
 			tempFloat3Array[2] = camera.location.z;
-			shader.setUniform3fv("u_eyePos", tempFloat3Array, 0, 3);
+			shader.setUniform3fv(locations.eyePos, tempFloat3Array, 0, 3);
 
 			for (final int index : getObjectArray()) {
 				final Batch batch = batches.get(index);
@@ -130,8 +131,8 @@ public class BatchGroup extends GenericGroup {
 				final float layerAlpha = instance.layerAlphas[diffuseLayer.index];
 
 				if ((geosetColor[3] > 0.01) && (layerAlpha > 0)) {
-					shader.setUniformf("u_layerAlpha", layerAlpha * geosetColor[3]);
-					shader.setUniformf("u_filterMode", diffuseLayer.filterMode);
+					shader.setUniformf(locations.layerAlpha, layerAlpha * geosetColor[3]);
+					shader.setUniformf(locations.filterMode, diffuseLayer.filterMode);
 
 					final int diffuseId = Math.max(0, instance.layerTextures[diffuseLayer.index]);
 					final int normalsId = Math.max(0, instance.layerTextures[normalsLayer.index]);
@@ -203,21 +204,21 @@ public class BatchGroup extends GenericGroup {
 					webGL.bindTexture(environmentMapTexture, 5);
 
 					if (instance.vertexColor[3] < 1.0f) {
-						diffuseLayer.bindBlended(shader);
+						diffuseLayer.bindBlended(shader, locations.filterMode);
 					}
 					else {
-						diffuseLayer.bind(shader);
+						diffuseLayer.bind(shader, locations.filterMode);
 					}
 
-					geoset.bindHd(shader, batch.skinningType, diffuseLayer.coordId);
+					geoset.bindHd(shader, locations, batch.skinningType, diffuseLayer.coordId);
 					geoset.render();
 				}
 			}
 		}
 		else {
-			shader.setUniformi("u_texture", 0);
+			shader.setUniformi(locations.texture, 0);
 
-			shader.setUniform4fv("u_vertexColor", instance.vertexColor, 0, instance.vertexColor.length);
+			shader.setUniform4fv(locations.vertexColor, instance.vertexColor, 0, instance.vertexColor.length);
 
 			for (final int index : getObjectArray()) {
 				final Batch batch = batches.get(index);
@@ -238,26 +239,26 @@ public class BatchGroup extends GenericGroup {
 					final int layerTexture = Math.max(0, instance.layerTextures[layerIndex]);
 					final float[] uvAnim = instance.uvAnims[layerIndex];
 
-					shader.setUniform4fv("u_geosetColor", geosetColor, 0, geosetColor.length);
+					shader.setUniform4fv(locations.geosetColor, geosetColor, 0, geosetColor.length);
 
-					shader.setUniformf("u_layerAlpha", layerAlpha);
-					shader.setUniformi("u_unshaded", layer.unshaded != 0 ? 1 : 0);
-					shader.setUniformi("u_unfogged", layer.unfogged != 0 ? 1 : 0);
-					scene.fogSettings.uploadUniforms(shader);
+					shader.setUniformf(locations.layerAlpha, layerAlpha);
+					shader.setUniformi(locations.unshaded, layer.unshaded != 0 ? 1 : 0);
+					shader.setUniformi(locations.unfogged, layer.unfogged != 0 ? 1 : 0);
+					scene.fogSettings.uploadUniforms(shader, locations.fogColor, locations.fogParams, locations.fogHeight);
 
-					shader.setUniform2fv("u_uvTrans", uvAnim, 0, 2);
-					shader.setUniform2fv("u_uvRot", uvAnim, 2, 2);
-					shader.setUniform1fv("u_uvScale", uvAnim, 4, 1);
+					shader.setUniform2fv(locations.uvTrans, uvAnim, 0, 2);
+					shader.setUniform2fv(locations.uvRot, uvAnim, 2, 2);
+					shader.setUniform1fv(locations.uvScale, uvAnim, 4, 1);
 
 					if (instance.additiveOverrideMeshMode) {
-						layer.bindBlended(shader);
+						layer.bindBlended(shader, locations.filterMode);
 						gl.glBlendFunc(FilterMode.ADDITIVE_ALPHA[0], FilterMode.ADDITIVE_ALPHA[1]);
 					}
 					else if (instance.vertexColor[3] < 1.0f) {
-						layer.bindBlended(shader);
+						layer.bindBlended(shader, locations.filterMode);
 					}
 					else {
-						layer.bind(shader);
+						layer.bind(shader, locations.filterMode);
 					}
 
 					final Integer replaceable = replaceables.get(layerTexture); // TODO is this OK?
@@ -283,10 +284,10 @@ public class BatchGroup extends GenericGroup {
 					viewer.webGL.bindTexture(texture, 0);
 
 					if (skinningType == SkinningType.ExtendedVertexGroups) {
-						geoset.bindExtended(shader, layer.coordId);
+						geoset.bindExtended(shader, locations, layer.coordId);
 					}
 					else {
-						geoset.bind(shader, layer.coordId);
+						geoset.bind(shader, locations, layer.coordId);
 					}
 
 					geoset.render();

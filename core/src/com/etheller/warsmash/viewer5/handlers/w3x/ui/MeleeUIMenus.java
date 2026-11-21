@@ -10,6 +10,8 @@ import com.badlogic.gdx.graphics.Color;
 import com.etheller.warsmash.input.touch.TouchInputRouter;
 import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.parsers.fdf.GameUI;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.PlayerPanelState;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.frames.EditBoxFrame;
@@ -47,6 +49,10 @@ final class MeleeUIMenus {
 	private Runnable escMenuBackAction;
 
 	final MeleeUI ui;
+	private int shownGold = Integer.MIN_VALUE;
+	private int shownLumber = Integer.MIN_VALUE;
+	private int shownFoodUsed = Integer.MIN_VALUE;
+	private int shownFoodCap = Integer.MIN_VALUE;
 
 	MeleeUIMenus(final MeleeUI ui) {
 		this.ui = ui;
@@ -458,25 +464,72 @@ final class MeleeUIMenus {
 	}
 
 	public void goldChanged() {
-		this.ui.rootFrame.setText(this.ui.resourceBarGoldText, Integer.toString(resourceBarPlayer().getGold()));
+		final PlayerPanelState panel = panel();
+		this.ui.rootFrame.setText(this.ui.resourceBarGoldText,
+				Integer.toString(panel != null ? panel.gold : resourceBarPlayer().getGold()));
 	}
 
 	public void lumberChanged() {
-		this.ui.rootFrame.setText(this.ui.resourceBarLumberText, Integer.toString(resourceBarPlayer().getLumber()));
+		final PlayerPanelState panel = panel();
+		this.ui.rootFrame.setText(this.ui.resourceBarLumberText,
+				Integer.toString(panel != null ? panel.lumber : resourceBarPlayer().getLumber()));
 	}
 
 	public void foodChanged() {
-		final CPlayer player = resourceBarPlayer();
-		final int foodCap = player.getFoodCap();
+		final PlayerPanelState panel = panel();
+		final CPlayer player = panel != null ? null : resourceBarPlayer();
+		final int foodUsed = panel != null ? panel.foodUsed : player.getFoodUsed();
+		final int foodCap = panel != null ? panel.foodCap : player.getFoodCap();
 		if (foodCap == 0) {
-			this.ui.rootFrame.setText(this.ui.resourceBarSupplyText, Integer.toString(player.getFoodUsed()));
+			this.ui.rootFrame.setText(this.ui.resourceBarSupplyText, Integer.toString(foodUsed));
 			this.ui.resourceBarSupplyText.setColor(Color.WHITE);
 		}
 		else {
-			this.ui.rootFrame.setText(this.ui.resourceBarSupplyText, player.getFoodUsed() + "/" + foodCap);
-			this.ui.resourceBarSupplyText.setColor(player.getFoodUsed() > foodCap ? Color.RED : Color.WHITE);
+			this.ui.rootFrame.setText(this.ui.resourceBarSupplyText, foodUsed + "/" + foodCap);
+			this.ui.resourceBarSupplyText.setColor(foodUsed > foodCap ? Color.RED : Color.WHITE);
 		}
 		upkeepChanged();
+	}
+
+	/**
+	 * The player panel of the frame being presented, when it is the player the bar shows; null without a frame (the
+	 * bar then asks the player). Zero in everything is a panel never written.
+	 */
+	private PlayerPanelState panel() {
+		final SimFrame frame = this.ui.unitView.presentedFrame();
+		if (frame == null) {
+			return null;
+		}
+		final PlayerPanelState panel = frame.ui.panel;
+		if ((panel.playerIndex != this.ui.war3MapViewer.getViewingPlayerIndex())
+				|| ((panel.gold == 0) && (panel.lumber == 0) && (panel.foodCap == 0) && (panel.foodUsed == 0))) {
+			return null;
+		}
+		return panel;
+	}
+
+	/**
+	 * With the simulation on its own thread its resource events do not reach the bar; it follows the panel of the
+	 * frame being presented instead, as the world does.
+	 */
+	void pollResourceBar() {
+		final PlayerPanelState panel = panel();
+		if (panel == null) {
+			return;
+		}
+		if (panel.gold != this.shownGold) {
+			this.shownGold = panel.gold;
+			goldChanged();
+		}
+		if (panel.lumber != this.shownLumber) {
+			this.shownLumber = panel.lumber;
+			lumberChanged();
+		}
+		if ((panel.foodUsed != this.shownFoodUsed) || (panel.foodCap != this.shownFoodCap)) {
+			this.shownFoodUsed = panel.foodUsed;
+			this.shownFoodCap = panel.foodCap;
+			foodChanged();
+		}
 	}
 
 	/** The local player, or in a replay the player Replay Vision shows (measured). */
@@ -494,8 +547,10 @@ final class MeleeUIMenus {
 		if (this.ui.resourceBarUpkeepText == null) {
 			return;
 		}
-		final int level = this.ui.war3MapViewer.simulation.getGameplayConstants()
-				.getUpkeepLevel(resourceBarPlayer().getFoodUsed());
+		final PlayerPanelState panel = panel();
+		final int level = panel != null ? panel.upkeepLevel
+				: this.ui.war3MapViewer.simulation.getGameplayConstants()
+						.getUpkeepLevel(resourceBarPlayer().getFoodUsed());
 		this.ui.resourceBarUpkeepText.setColor(Color.WHITE);
 		this.ui.rootFrame.setDecoratedText(this.ui.resourceBarUpkeepText,
 				level == 0 ? "UPKEEP_NONE" : (level == 1 ? "UPKEEP_LOW" : "UPKEEP_HIGH"));

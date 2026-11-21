@@ -22,6 +22,20 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWorldCollision;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorMove;
 
 public class CPathfindingProcessor {
+	/** The flags of a cell any movement type reads. */
+	private static final int PATHING_FLAGS_MASK = PathingGrid.PathingFlags.UNWALKABLE
+			| PathingGrid.PathingFlags.UNFLYABLE | PathingGrid.PathingFlags.UNSWIMABLE;
+	/** For each movement type whether a cell is pathable for it, by the flags of the cell it reads. */
+	private static final boolean[][] MOVEMENT_PATHABLE = new boolean[MovementType.values().length][];
+	static {
+		for (final MovementType movementType : MovementType.values()) {
+			final boolean[] pathable = new boolean[PATHING_FLAGS_MASK + 1];
+			for (int flags = 0; flags <= PATHING_FLAGS_MASK; flags++) {
+				pathable[flags] = movementType.isPathable((short) flags);
+			}
+			MOVEMENT_PATHABLE[movementType.ordinal()] = pathable;
+		}
+	}
 	private final Rectangle tempRect = new Rectangle();
 	private final Rectangle segmentRect = new Rectangle();
 	private int footprintCells = 1;
@@ -113,6 +127,17 @@ public class CPathfindingProcessor {
 	/** Ticks a computer player's search may keep waiting for the shared graph while human orders go before it. */
 	private static final int HUMAN_PRIORITY_MAX_WAIT = 200;
 	private static final double DETOUR_MIN_DISTANCE = 1024;
+	@SavedTransient
+	private int[] nodeMemo;
+	/** What the terrain test of the job being worked on reads: set by prepareTerrain. */
+	@SavedTransient
+	private int[] terrainColumns;
+	@SavedTransient
+	private int[] terrainRows;
+	@SavedTransient
+	private boolean[] terrainPathable;
+	@SavedTransient
+	private FootprintUnits footprintUnits;
 	private int totalIterations = 0;
 	private long jobNanos;
 	private final int pathingGridCellCount;
@@ -188,6 +213,22 @@ public class CPathfindingProcessor {
 		public boolean canReach(final PathingGrid pathingGrid, final MovementType movementType,
 				final float collisionSize, final float fromX, final float fromY, final float toX, final float toY,
 				final float reach) {
+			if (!PathingProfile.ENABLED) {
+				return canReachBetween(pathingGrid, movementType, collisionSize, fromX, fromY, toX, toY, reach);
+			}
+			PathingProfile.enterExternal(PathingProfile.Part.CAN_REACH);
+			PathingProfile.count(PathingProfile.Count.CAN_REACH_CALLS);
+			try {
+				return canReachBetween(pathingGrid, movementType, collisionSize, fromX, fromY, toX, toY, reach);
+			}
+			finally {
+				PathingProfile.exitExternal();
+			}
+		}
+
+		private boolean canReachBetween(final PathingGrid pathingGrid, final MovementType movementType,
+				final float collisionSize, final float fromX, final float fromY, final float toX, final float toY,
+				final float reach) {
 			final Reachability parts = reachability(pathingGrid, movementType, collisionSize, false);
 			final int startX = pathingGrid.getCellX(fromX);
 			final int startY = pathingGrid.getCellY(fromY);
@@ -254,14 +295,27 @@ public class CPathfindingProcessor {
 				if ((entry.movementType == ground) && (entry.collisionSize == collisionSize)
 						&& (entry.corners == corners)) {
 					entry.lastUse = this.lastJobId;
+					if (PathingProfile.ENABLED) {
+						PathingProfile.enter(PathingProfile.Part.GRAPH_UPDATE);
+					}
 					entry.validate(this, pathingGrid);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.exit();
+					}
 					return entry;
 				}
 				if (entry.lastUse < this.reachability[slot].lastUse) {
 					slot = i;
 				}
 			}
+			if (PathingProfile.ENABLED) {
+				PathingProfile.enter(PathingProfile.Part.GRAPH_UPDATE);
+				PathingProfile.count(PathingProfile.Count.GRAPH_BUILDS);
+			}
 			final Reachability entry = new Reachability(pathingGrid, ground, collisionSize, corners);
+			if (PathingProfile.ENABLED) {
+				PathingProfile.exit();
+			}
 			entry.lastUse = this.lastJobId;
 			this.reachability[slot] = entry;
 			return entry;
@@ -348,9 +402,10 @@ public class CPathfindingProcessor {
 					|| ((firstY + cells) > grid.getHeight())) {
 				return false;
 			}
+			final boolean[] pathableFlags = MOVEMENT_PATHABLE[this.movementType.ordinal()];
 			for (int cellY = firstY; cellY < (firstY + cells); cellY++) {
 				for (int cellX = firstX; cellX < (firstX + cells); cellX++) {
-					if (!this.movementType.isPathable(grid.getCellPathing(cellX, cellY))) {
+					if (!pathableFlags[grid.getCellPathing(cellX, cellY) & PATHING_FLAGS_MASK]) {
 						return false;
 					}
 				}
@@ -366,9 +421,15 @@ public class CPathfindingProcessor {
 			final int count = grid.collectOverlayChanges(this.version, this.changes);
 			this.version = current;
 			if ((count < 0) || !repair(graph, grid, count)) {
+				if (PathingProfile.ENABLED) {
+					PathingProfile.count(PathingProfile.Count.GRAPH_FULL);
+				}
 				Arrays.fill(this.pathable, UNKNOWN);
 				Arrays.fill(this.part, 0);
 				this.parts = 0;
+			}
+			else if (PathingProfile.ENABLED) {
+				PathingProfile.count(PathingProfile.Count.GRAPH_REPAIRS);
 			}
 		}
 
@@ -699,6 +760,16 @@ public class CPathfindingProcessor {
 			return value == OPEN;
 		}
 
+		/** open for a grid point inside the arrays, at its index. */
+		private boolean openAt(final PathingGrid grid, final int x, final int y, final int index) {
+			byte value = this.pathable[index];
+			if (value == UNKNOWN) {
+				value = samplesPathable(grid, x, y) ? OPEN : BLOCKED;
+				this.pathable[index] = value;
+			}
+			return value == OPEN;
+		}
+
 		/** The part already found for a grid point (every point of a part is found at once), else 0. */
 		int label(final int x, final int y) {
 			if ((x < 0) || (y < 0) || (x >= this.width) || (y >= this.height)) {
@@ -716,6 +787,10 @@ public class CPathfindingProcessor {
 			if (this.part[start] != 0) {
 				return this.part[start];
 			}
+			if (PathingProfile.ENABLED) {
+				PathingProfile.enter(PathingProfile.Part.REACH_FILL);
+				PathingProfile.count(PathingProfile.Count.FILLS);
+			}
 			final int id = ++this.parts;
 			if ((graph.fillQueue == null) || (graph.fillQueue.length < this.part.length)) {
 				graph.fillQueue = new int[this.part.length];
@@ -725,50 +800,28 @@ public class CPathfindingProcessor {
 			int tail = 0;
 			this.part[start] = id;
 			queue[tail++] = start;
-			final int[] part = this.part;
 			final int width = this.width;
+			final int[] part = this.part;
 			while (head < tail) {
 				final int index = queue[head++];
-				final int cx = index % width;
 				final int cy = index / width;
+				final int cx = index - (cy * width);
 				if ((cx > 0) && (cy > 0) && (cx < (width - 1)) && (cy < (this.height - 1))) {
-					// the eight points around it are tested once each; a step needs the point it goes to and
-					// the two it passes between
-					final boolean north = open(grid, cx, cy + 1);
-					final boolean south = open(grid, cx, cy - 1);
-					final boolean east = open(grid, cx + 1, cy);
-					final boolean west = open(grid, cx - 1, cy);
-					if (north && (part[index + width] == 0)) {
-						part[index + width] = id;
-						queue[tail++] = index + width;
-					}
-					if (south && (part[index - width] == 0)) {
-						part[index - width] = id;
-						queue[tail++] = index - width;
-					}
-					if (east && (part[index + 1] == 0)) {
-						part[index + 1] = id;
-						queue[tail++] = index + 1;
-					}
-					if (west && (part[index - 1] == 0)) {
-						part[index - 1] = id;
-						queue[tail++] = index - 1;
-					}
-					if (north && east && (part[index + width + 1] == 0) && open(grid, cx + 1, cy + 1)) {
-						part[index + width + 1] = id;
-						queue[tail++] = index + width + 1;
-					}
-					if (north && west && (part[index + width - 1] == 0) && open(grid, cx - 1, cy + 1)) {
-						part[index + width - 1] = id;
-						queue[tail++] = index + width - 1;
-					}
-					if (south && east && (part[index - width + 1] == 0) && open(grid, cx + 1, cy - 1)) {
-						part[index - width + 1] = id;
-						queue[tail++] = index - width + 1;
-					}
-					if (south && west && (part[index - width - 1] == 0) && open(grid, cx - 1, cy - 1)) {
-						part[index - width - 1] = id;
-						queue[tail++] = index - width - 1;
+					// a point with a part is open and tested already; the ones a diagonal step also reads are next to
+					// the point, so they are tested here or by their own step, whichever comes first
+					for (int d = 0; d < 8; d++) {
+						final int stepX = STEP_X[d];
+						final int stepY = STEP_Y[d];
+						final int next = index + stepX + (stepY * width);
+						if ((part[next] != 0) || !openAt(grid, cx + stepX, cy + stepY, next)) {
+							continue;
+						}
+						if (((d & 1) == 0) && (!openAt(grid, cx, cy + stepY, index + (stepY * width))
+								|| !openAt(grid, cx + stepX, cy, index + stepX))) {
+							continue;
+						}
+						part[next] = id;
+						queue[tail++] = next;
 					}
 					continue;
 				}
@@ -785,6 +838,10 @@ public class CPathfindingProcessor {
 					part[next] = id;
 					queue[tail++] = next;
 				}
+			}
+			if (PathingProfile.ENABLED) {
+				PathingProfile.count(PathingProfile.Count.FILL_POINTS, tail);
+				PathingProfile.exit();
 			}
 			return id;
 		}
@@ -816,6 +873,21 @@ public class CPathfindingProcessor {
 	}
 
 	private void finishJob() {
+		if (PathingProfile.ENABLED) {
+			final PathfindingJob job = this.moveQueue.peek();
+			if ((job != null) && (job.profile != null)) {
+				PathingProfile.jobDone(job.profile, this.gameTurnTick, this.totalIterations,
+						(float) StrictMath.hypot(job.goal.x - job.startX, job.goal.y - job.startY),
+						job.movementType.name(), job.collisionSize,
+						(job.shortSearch ? PathingProfile.F_SHORT : 0) | (job.humanOrder ? PathingProfile.F_HUMAN : 0)
+								| ((job.gridMapping == GridMapping.CORNERS) ? PathingProfile.F_CORNERS : 0)
+								| (job.goalMoved ? PathingProfile.F_MOVED : 0)
+								| ((job.enclosedGoalRadius > 0) ? PathingProfile.F_ENCLOSED : 0)
+								| (job.limitExtended ? PathingProfile.F_DETOUR : 0)
+								| (job.metScriptedTerrain ? PathingProfile.F_SCRIPTED : 0)
+								| (job.goalNodesBlocked ? PathingProfile.F_BLOCKED : 0));
+			}
+		}
 		this.moveQueue.poll();
 		if (this.graph.owner == this) {
 			this.graph.owner = null;
@@ -859,6 +931,9 @@ public class CPathfindingProcessor {
 				queueItem);
 		job.humanOrder = humanOrder;
 		job.queuedTick = this.gameTurnTick;
+		if (PathingProfile.ENABLED) {
+			job.profile = PathingProfile.newJob(this.gameTurnTick);
+		}
 		final int[] withdrawn = this.withdrawnTurns.remove(queueItem);
 		if (withdrawn == null) {
 			job.turn = this.nextTurn++;
@@ -930,6 +1005,23 @@ public class CPathfindingProcessor {
 				ignoreIntersectionsWithThisUnit, ignoreIntersectionsWithThisSecondUnit, movementType, this.gameTurnTick);
 	}
 
+	/**
+	 * isPathableDynamically for a point of the search at the given epoch, for a ground unit from the units gathered for
+	 * that search and tick.
+	 */
+	private boolean isPathableDynamically(final PathfindingJob job, final int epoch, final float x, final float y) {
+		if (usesFootprint(job.movementType)) {
+			if (this.footprintUnits == null) {
+				this.footprintUnits = new FootprintUnits();
+			}
+			this.footprintUnits.prepare(this.pathingGrid, this.worldCollision, epoch, this.gameTurnTick,
+					this.footprintCells, job.movementType);
+			return !this.footprintUnits.intersects(x, y, job.ignoreIntersectionsWithThisUnit, secondUnitAt(job, x, y));
+		}
+		return isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit, secondUnitAt(job, x, y),
+				job.movementType);
+	}
+
 	/** Ground units are compared by the pathing cells they stand on, as their movement does. */
 	private static boolean usesFootprint(final PathingGrid.MovementType movementType) {
 		return (movementType == PathingGrid.MovementType.FOOT) || (movementType == PathingGrid.MovementType.HORSE)
@@ -939,6 +1031,193 @@ public class CPathfindingProcessor {
 
 	public static boolean isCollisionSizeBetterSuitedForCorners(final float collisionSize) {
 		return (((2 * (int) collisionSize) / 32) % 2) == 1;
+	}
+
+	/**
+	 * Gives the points next to a point their scores through it, and opens the ones that got nearer. A step is free when
+	 * the three points it reads (the one it goes to and the two beside it, as the unit would pass them) are; those are
+	 * among the nine points round the point being expanded, so each is looked up once for its eight steps.
+	 */
+	private void relaxNeighbors(final PathfindingJob job, final SearchGrid grid, final int epoch, final int current,
+			final int gridX, final int gridY, final double currentG) {
+		if (this.nodeMemo == null) {
+			this.nodeMemo = new int[9];
+		}
+		final int[] memo = this.nodeMemo;
+		memo[0] = -1;
+		memo[1] = -1;
+		memo[2] = -1;
+		memo[3] = -1;
+		memo[4] = -1;
+		memo[5] = -1;
+		memo[6] = -1;
+		memo[7] = -1;
+		memo[8] = -1;
+		final int currentDirection = grid.direction(current);
+		final boolean[] insideX = grid.insideX;
+		final boolean[] insideY = grid.insideY;
+		for (int d = 0; d < 8; d++) {
+			final int stepX = STEP_X[d];
+			final int stepY = STEP_Y[d];
+			final int neighborX = gridX + stepX;
+			final int neighborY = gridY + stepY;
+			if (!insideX[neighborX + 1] || !insideY[neighborY + 1]) {
+				continue;
+			}
+			double tentativeScore = currentG
+					+ (((currentDirection != 0) && ((d + 1) != currentDirection)) ? STEP_COST_TURN[d] : STEP_COST[d]);
+			final int neighbor = (neighborY * grid.width) + neighborX;
+			if (!pathableAround(job, grid, epoch, gridX, gridY, stepX, stepY)
+					|| !pathableAround(job, grid, epoch, gridX, gridY, 0, stepY)
+					|| !pathableAround(job, grid, epoch, gridX, gridY, stepX, 0)) {
+				tentativeScore += STEP_LENGTH[d] * job.weightForHittingWalls;
+				if (!job.metScriptedTerrain && this.pathingGrid.isTerrainScripted(grid.xs[neighborX],
+						grid.ys[neighborY], SCRIPTED_TERRAIN_CELLS)) {
+					job.metScriptedTerrain = true;
+				}
+			}
+			grid.touch(neighbor, this.pathfindJobId);
+			if (tentativeScore < grid.g(neighbor)) {
+				grid.setCameFrom(neighbor, current, d + 1);
+				grid.setScores(neighbor, tentativeScore, tentativeScore + h(grid.xs[neighborX], grid.ys[neighborY]));
+				if (!grid.isOpen(neighbor)) {
+					openAdd(grid, neighbor);
+				}
+			}
+		}
+	}
+
+	/** Whether the point at an offset from a grid point is free; the answer is kept for the other steps of the point. */
+	private boolean pathableAround(final PathfindingJob job, final SearchGrid grid, final int epoch, final int gridX,
+			final int gridY, final int offsetX, final int offsetY) {
+		final int slot = ((offsetY + 1) * 3) + offsetX + 1;
+		int answer = this.nodeMemo[slot];
+		if (answer < 0) {
+			final int x = gridX + offsetX;
+			final int y = gridY + offsetY;
+			answer = nodePathableAt(job, grid, epoch, x, y) ? 1 : 0;
+			this.nodeMemo[slot] = answer;
+		}
+		return answer != 0;
+	}
+
+	/** relaxNeighbors for search arrays whose points do not lie exactly one step apart. */
+	private void relaxNeighborsAnywhere(final PathfindingJob job, final SearchGrid grid, final int epoch,
+			final int current, final float currentX, final float currentY, final double currentG) {
+		final int currentDirection = grid.direction(current);
+		final int currentMappedX = job.gridMapping.getX(this.pathingGrid, currentX);
+		final int currentMappedY = job.gridMapping.getY(this.pathingGrid, currentY);
+		for (final Direction direction : Direction.VALUES) {
+			final float x = currentX + (direction.xOffset * 32);
+			final float y = currentY + (direction.yOffset * 32);
+			if (this.pathingGrid.contains(x, y)) {
+				double turnCost;
+				if ((currentDirection != 0) && ((direction.ordinal() + 1) != currentDirection)) {
+					turnCost = 0.25;
+				}
+				else {
+					turnCost = 0;
+				}
+				double tentativeScore = currentG + ((direction.length + turnCost) * 32);
+				final int neighborX = job.gridMapping.getX(this.pathingGrid, x);
+				final int neighborY = job.gridMapping.getY(this.pathingGrid, y);
+				final int neighbor = (neighborY * grid.width) + neighborX;
+				if (!nodePathable(job, grid, epoch, neighbor, x, y)
+						|| !nodePathable(job, grid, epoch, (neighborY * grid.width) + currentMappedX, currentX,
+								y)
+						|| !nodePathable(job, grid, epoch, (currentMappedY * grid.width) + neighborX, x,
+								currentY)) {
+					tentativeScore += (direction.length) * job.weightForHittingWalls;
+					if (!job.metScriptedTerrain
+							&& this.pathingGrid.isTerrainScripted(x, y, SCRIPTED_TERRAIN_CELLS)) {
+						job.metScriptedTerrain = true;
+					}
+				}
+				grid.touch(neighbor, this.pathfindJobId);
+				if (tentativeScore < grid.g(neighbor)) {
+					grid.setCameFrom(neighbor, current, direction.ordinal() + 1);
+					grid.setScores(neighbor, tentativeScore,
+							tentativeScore + h(grid.xs[neighborX], grid.ys[neighborY]));
+					if (!grid.isOpen(neighbor)) {
+						openAdd(grid, neighbor);
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * The tables the terrain test of a job on a search grid reads (the footprint cells under each column and row), none
+	 * for a unit too big for them, which PathingGrid.isPathable tests itself.
+	 */
+	private void prepareTerrain(final PathfindingJob job, final SearchGrid grid) {
+		if (grid.regular && (this.footprintCells <= SearchGrid.MAX_FOOTPRINT_CELLS)) {
+			this.terrainColumns = grid.footprintColumns(this.pathingGrid, this.footprintCells);
+			this.terrainRows = grid.footprintRows(this.pathingGrid, this.footprintCells);
+			this.terrainPathable = MOVEMENT_PATHABLE[job.movementType.ordinal()];
+		}
+		else {
+			this.terrainColumns = null;
+		}
+	}
+
+	/** PathingGrid.isPathable at a grid point of the job's search grid, from the cells under it. */
+	private boolean terrainPathable(final PathfindingJob job, final SearchGrid grid, final int column, final int row) {
+		if (this.terrainColumns == null) {
+			return this.pathingGrid.isPathable(grid.xs[column], grid.ys[row], job.movementType, job.collisionSize);
+		}
+		final int cells = this.footprintCells;
+		final int firstX = this.terrainColumns[column];
+		final int firstY = this.terrainRows[row];
+		if ((firstX < 0) || (firstY < 0) || ((firstX + cells) > this.pathingGrid.getWidth())
+				|| ((firstY + cells) > this.pathingGrid.getHeight())) {
+			return false;
+		}
+		final boolean[] pathable = this.terrainPathable;
+		final PathingGrid pathingGrid = this.pathingGrid;
+		for (int cellY = firstY; cellY < (firstY + cells); cellY++) {
+			for (int cellX = firstX; cellX < (firstX + cells); cellX++) {
+				if (!pathable[pathingGrid.getCellPathingInside(cellX, cellY) & PATHING_FLAGS_MASK]) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/** nodePathable for a point of a regular search grid, given by its column and row. */
+	private boolean nodePathableAt(final PathfindingJob job, final SearchGrid grid, final int epoch, final int column,
+			final int row) {
+		final int index = (row * grid.width) + column;
+		final int cached = grid.pathable(index);
+		if (PathingProfile.ENABLED) {
+			PathingProfile.count(PathingProfile.Count.NODE_TESTS);
+		}
+		if ((cached & ~1) != epoch) {
+			final float x = grid.xs[column];
+			final float y = grid.ys[row];
+			final boolean pathable;
+			if (PathingProfile.ENABLED) {
+				PathingProfile.count(PathingProfile.Count.NODE_MISSES);
+			}
+			if (PathingProfile.FINE) {
+				PathingProfile.enter(PathingProfile.Part.TERRAIN_TEST);
+				boolean free = terrainPathable(job, grid, column, row);
+				PathingProfile.exit();
+				if (free) {
+					PathingProfile.enter(PathingProfile.Part.UNIT_TEST);
+					free = isPathableDynamically(job, epoch, x, y);
+					PathingProfile.exit();
+				}
+				pathable = free;
+			}
+			else {
+				pathable = terrainPathable(job, grid, column, row) && isPathableDynamically(job, epoch, x, y);
+			}
+			grid.setPathable(index, epoch | (pathable ? 1 : 0));
+			return pathable;
+		}
+		return (cached & 1) != 0;
 	}
 
 	/**
@@ -952,14 +1231,32 @@ public class CPathfindingProcessor {
 			// A point just below the map truncates to the first row or column: it shares that node with the point
 			// inside, which would let the answer depend on which of the two a tick happened to test first.
 			return this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
-					&& isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit, secondUnitAt(job, x, y),
-							job.movementType);
+					&& isPathableDynamically(job, epoch, x, y);
 		}
 		final int cached = grid.pathable(index);
+		if (PathingProfile.ENABLED) {
+			PathingProfile.count(PathingProfile.Count.NODE_TESTS);
+		}
 		if ((cached & ~1) != epoch) {
-			final boolean pathable = this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
-					&& isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit, secondUnitAt(job, x, y),
-							job.movementType);
+			final boolean pathable;
+			if (PathingProfile.ENABLED) {
+				PathingProfile.count(PathingProfile.Count.NODE_MISSES);
+			}
+			if (PathingProfile.FINE) {
+				PathingProfile.enter(PathingProfile.Part.TERRAIN_TEST);
+				boolean free = this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize);
+				PathingProfile.exit();
+				if (free) {
+					PathingProfile.enter(PathingProfile.Part.UNIT_TEST);
+					free = isPathableDynamically(job, epoch, x, y);
+					PathingProfile.exit();
+				}
+				pathable = free;
+			}
+			else {
+				pathable = this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
+						&& isPathableDynamically(job, epoch, x, y);
+			}
 			grid.setPathable(index, epoch | (pathable ? 1 : 0));
 			return pathable;
 		}
@@ -967,6 +1264,9 @@ public class CPathfindingProcessor {
 	}
 
 	private static void openAdd(final SearchGrid grid, final int index) {
+		if (PathingProfile.ENABLED) {
+			PathingProfile.count(PathingProfile.Count.OPEN_ADDS);
+		}
 		grid.setOpen(index, true);
 		grid.add(index);
 	}
@@ -1007,6 +1307,7 @@ public class CPathfindingProcessor {
 	 * search's are from an earlier search and are reset when the search first touches them.
 	 */
 	static final class SearchGrid {
+		private static final int MAX_FOOTPRINT_CELLS = 32;
 		private static final int DIRECTION_MASK = 15;
 		private static final int OPEN_FLAG = 16;
 		private final int width;
@@ -1026,6 +1327,48 @@ public class CPathfindingProcessor {
 		private final int[] state;
 		private int[] heap = new int[64];
 		private int heapSize;
+		/**
+		 * Whether every point's eight neighbours are the points beside it in the arrays, at exactly the positions the
+		 * steps of the search work out, and whether a point is inside the map is told by its column and row alone: then
+		 * the search reads them off the arrays instead of working positions and cells out again for each step.
+		 */
+		@SavedTransient
+		private final boolean regular;
+		/** Whether the column or row (one more than its index, so that the step off the arrays has a place) is in the map. */
+		@SavedTransient
+		private final boolean[] insideX;
+		@SavedTransient
+		private final boolean[] insideY;
+
+		/** The first footprint column and row (PathingGrid.getFootprintCellX) of each column and row, by footprint cells. */
+		@SavedTransient
+		private final int[][] footprintColumns = new int[MAX_FOOTPRINT_CELLS + 1][];
+		@SavedTransient
+		private final int[][] footprintRows = new int[MAX_FOOTPRINT_CELLS + 1][];
+
+		private int[] footprintColumns(final PathingGrid pathingGrid, final int cells) {
+			int[] columns = this.footprintColumns[cells];
+			if (columns == null) {
+				columns = new int[this.width];
+				for (int x = 0; x < this.width; x++) {
+					columns[x] = pathingGrid.getFootprintCellX(this.xs[x], cells);
+				}
+				this.footprintColumns[cells] = columns;
+			}
+			return columns;
+		}
+
+		private int[] footprintRows(final PathingGrid pathingGrid, final int cells) {
+			int[] rows = this.footprintRows[cells];
+			if (rows == null) {
+				rows = new int[this.height];
+				for (int y = 0; y < this.height; y++) {
+					rows[y] = pathingGrid.getFootprintCellY(this.ys[y], cells);
+				}
+				this.footprintRows[cells] = rows;
+			}
+			return rows;
+		}
 
 		private SearchGrid(final PathingGrid pathingGrid, final boolean corner) {
 			this.width = pathingGrid.getWidth() + (corner ? 1 : 0);
@@ -1041,6 +1384,25 @@ public class CPathfindingProcessor {
 			final int count = this.width * this.height;
 			this.scores = new double[count * 2];
 			this.state = new int[count * 4];
+			final GridMapping mapping = corner ? GridMapping.CORNERS : GridMapping.CELLS;
+			boolean regular = true;
+			this.insideX = new boolean[this.width + 2];
+			this.insideY = new boolean[this.height + 2];
+			for (int x = 0; x < this.width; x++) {
+				regular &= mapping.getX(pathingGrid, this.xs[x]) == x;
+				regular &= (x == 0) || (((this.xs[x - 1] + 32f) == this.xs[x]) && ((this.xs[x] + -32f) == this.xs[x - 1]));
+				final int cell = pathingGrid.getCellX(this.xs[x]);
+				this.insideX[x + 1] = (cell >= 0) && (cell < pathingGrid.getWidth());
+			}
+			for (int y = 0; y < this.height; y++) {
+				regular &= mapping.getY(pathingGrid, this.ys[y]) == y;
+				regular &= (y == 0) || (((this.ys[y - 1] + 32f) == this.ys[y]) && ((this.ys[y] + -32f) == this.ys[y - 1]));
+				final int cell = pathingGrid.getCellY(this.ys[y]);
+				this.insideY[y + 1] = (cell >= 0) && (cell < pathingGrid.getHeight());
+			}
+			regular &= !pathingGrid.contains(this.xs[0] + -32f, this.ys[0]) && !pathingGrid.contains(this.xs[this.width - 1] + 32f, this.ys[0])
+					&& !pathingGrid.contains(this.xs[0], this.ys[0] + -32f) && !pathingGrid.contains(this.xs[0], this.ys[this.height - 1] + 32f);
+			this.regular = regular;
 		}
 
 		private double g(final int index) {
@@ -1114,7 +1476,7 @@ public class CPathfindingProcessor {
 			while (k > 0) {
 				final int parent = (k - 1) >>> 1;
 				final int e = this.heap[parent];
-				if (Double.compare(value, f(e)) >= 0) {
+				if (!(value < f(e))) {
 					break;
 				}
 				this.heap[k] = e;
@@ -1136,10 +1498,10 @@ public class CPathfindingProcessor {
 					int child = (k << 1) + 1;
 					int c = heap[child];
 					final int right = child + 1;
-					if ((right < n) && (Double.compare(f(c), f(heap[right])) > 0)) {
+					if ((right < n) && (f(c) > f(heap[right]))) {
 						c = heap[child = right];
 					}
-					if (Double.compare(xf, f(c)) <= 0) {
+					if (xf <= f(c)) {
 						break;
 					}
 					heap[k] = c;
@@ -1157,6 +1519,23 @@ public class CPathfindingProcessor {
 
 	/** See Node. */
 	static final class OpenSet {
+	}
+
+	/** The steps of Direction.VALUES: the offsets, the length of the step and its score with and without a turn. */
+	private static final int[] STEP_X = new int[8];
+	private static final int[] STEP_Y = new int[8];
+	private static final double[] STEP_LENGTH = new double[8];
+	private static final double[] STEP_COST = new double[8];
+	private static final double[] STEP_COST_TURN = new double[8];
+	static {
+		for (final Direction direction : Direction.VALUES) {
+			final int d = direction.ordinal();
+			STEP_X[d] = direction.xOffset;
+			STEP_Y[d] = direction.yOffset;
+			STEP_LENGTH[d] = direction.length;
+			STEP_COST[d] = (direction.length + 0.0) * 32;
+			STEP_COST_TURN[d] = (direction.length + 0.25) * 32;
+		}
 	}
 
 	private static enum Direction {
@@ -1221,16 +1600,30 @@ public class CPathfindingProcessor {
 	}
 
 	public void update(final CSimulation simulation) {
+		if (PathingProfile.ENABLED) {
+			PathingProfile.beginUpdate(simulation.getGameTurnTick());
+			try {
+				timedUpdate(simulation);
+			}
+			finally {
+				PathingProfile.endUpdate();
+			}
+			return;
+		}
+		timedUpdate(simulation);
+	}
+
+	private void timedUpdate(final CSimulation simulation) {
 		if (!PerfStats.ENABLED) {
-			updateJobs(simulation);
+			update0(simulation);
 			return;
 		}
 		final long start = System.nanoTime();
-		updateJobs(simulation);
+		update0(simulation);
 		this.jobNanos += System.nanoTime() - start;
 	}
 
-	private void updateJobs(final CSimulation simulation) {
+	private void update0(final CSimulation simulation) {
 		this.gameTurnTick = simulation.getGameTurnTick();
 		if (!this.withdrawnTurns.isEmpty()) {
 			final Iterator<int[]> withdrawn = this.withdrawnTurns.values().iterator();
@@ -1262,6 +1655,11 @@ public class CPathfindingProcessor {
 				final PathfindingJob ownerHead = graph.owner.moveQueue.peek();
 				if ((ownerHead != null) && ownerHead.jobStarted && !ownerHead.humanOrder && !ownerHead.preempted) {
 					ownerHead.preempted = true;
+					PathingProfile.count(PathingProfile.Count.PREEMPTIONS);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.count(PathingProfile.Count.PREEMPT_WASTED_ITERATIONS,
+								graph.owner.totalIterations);
+					}
 					if (PerfStats.ENABLED) {
 						PerfStats.pathDiscarded(graph.owner.totalIterations, graph.owner.jobNanos);
 					}
@@ -1273,6 +1671,9 @@ public class CPathfindingProcessor {
 			}
 		}
 		if ((graph.owner != null) && (graph.owner != this)) {
+			if (PathingProfile.ENABLED && !this.moveQueue.isEmpty()) {
+				PathingProfile.count(PathingProfile.Count.WAIT_OWNER);
+			}
 			if (!this.moveQueue.isEmpty() && (graph.reservedFor == null)) {
 				graph.reservedFor = this;
 			}
@@ -1281,6 +1682,14 @@ public class CPathfindingProcessor {
 		int workIterations = 0;
 		JobsLoop: while (!this.moveQueue.isEmpty()) {
 			final PathfindingJob job = this.moveQueue.peek();
+			if (PathingProfile.ENABLED) {
+				if (job.profile == null) {
+					job.profile = PathingProfile.newJob(job.queuedTick);
+				}
+				PathingProfile.mark(PathingProfile.Part.BOOKKEEPING);
+				PathingProfile.setJob(job.profile);
+				PathingProfile.jobWorked(job.profile);
+			}
 			final int tickBudget = !job.jobStarted ? TICK_ITERATIONS
 					: (this.moveQueue.size() > 1) ? TICK_ITERATIONS_MAX
 							: Math.min(TICK_ITERATIONS_MAX, Math.max(TICK_ITERATIONS, this.totalIterations));
@@ -1292,6 +1701,7 @@ public class CPathfindingProcessor {
 			this.footprintCells = PathingGrid.getFootprintCells(job.collisionSize);
 			if (!job.jobStarted) {
 				if ((graph.reservedFor != null) && (graph.reservedFor != this)) {
+					PathingProfile.count(PathingProfile.Count.WAIT_RESERVED);
 					break JobsLoop;
 				}
 				graph.owner = this;
@@ -1301,6 +1711,9 @@ public class CPathfindingProcessor {
 				this.jobNanos = 0;
 				job.jobStarted = true;
 				PerfStats.pathJob();
+				if (PathingProfile.ENABLED) {
+					PathingProfile.jobStarted(job.profile);
+				}
 				workIterations += 5; // setup of job predicted cost
 				job.goalX = job.goal.x;
 				job.goalY = job.goal.y;
@@ -1320,15 +1733,27 @@ public class CPathfindingProcessor {
 				job.shortSearch = searchesShort(simulation, job.ignoreIntersectionsWithThisUnit);
 				if (!job.shortSearch) {
 					if (!this.pathingGrid.isPathable(job.goalX, job.goalY, job.movementType, job.collisionSize)) {
+						if (PathingProfile.ENABLED) {
+							PathingProfile.enter(PathingProfile.Part.GOAL_NEAREST);
+						}
 						if (!moveGoalToNearest(job, true)) {
 							moveGoalToNearest(job, false);
+						}
+						if (PathingProfile.ENABLED) {
+							PathingProfile.exit();
 						}
 						job.goalOnBlockedGround = job.goalMoved;
 					}
 					else if (!isPathableDynamically(job.goalX, job.goalY, job.ignoreIntersectionsWithThisUnit,
 							job.ignoreIntersectionsWithThisSecondUnit, job.movementType)) {
+						if (PathingProfile.ENABLED) {
+							PathingProfile.enter(PathingProfile.Part.GOAL_BESIDE);
+						}
 						if (!moveGoalBesideStandingUnit(job)) {
 							moveGoalToNearest(job, true);
+						}
+						if (PathingProfile.ENABLED) {
+							PathingProfile.exit();
 						}
 					}
 				}
@@ -1339,18 +1764,39 @@ public class CPathfindingProcessor {
 					job.weightForHittingWalls = 5E2f;
 				}
 				if ((job.startX == job.goalX) && (job.startY == job.goalY)) {
+					if (PathingProfile.ENABLED) {
+						PathingProfile.outcome(job.profile, PathingProfile.Outcome.SAME_POINT);
+						PathingProfile.enter(PathingProfile.Part.CALLBACK);
+					}
 					finishJob();
 					job.queueItem.pathFound(job.goal, new LinkedList<>(), !job.goalMoved || job.goalBesideUnit,
 							simulation);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.exit();
+					}
 					continue JobsLoop;
 				}
 				if (!job.shortSearch && (job.queueItem != null) && !job.goalMoved) {
+					if (PathingProfile.ENABLED) {
+						PathingProfile.enter(PathingProfile.Part.APPROACH);
+					}
 					final CPathPoint cell = job.queueItem.approachCell(simulation, job.startX, job.startY);
-					if ((cell != null) && this.pathingGrid.isPathable(cell.x, cell.y, job.movementType,
-							job.collisionSize)
-							&& segmentClear(job, job.startX, job.startY, cell.x, cell.y)) {
+					final boolean approach = (cell != null) && this.pathingGrid.isPathable(cell.x, cell.y,
+							job.movementType, job.collisionSize)
+							&& segmentClear(job, job.startX, job.startY, cell.x, cell.y);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.exit();
+					}
+					if (approach) {
+						if (PathingProfile.ENABLED) {
+							PathingProfile.outcome(job.profile, PathingProfile.Outcome.APPROACH_CELL);
+							PathingProfile.enter(PathingProfile.Part.CALLBACK);
+						}
 						finishJob();
 						job.queueItem.pathFoundToApproachCell(job.goal, cell, simulation);
+						if (PathingProfile.ENABLED) {
+							PathingProfile.exit();
+						}
 						continue JobsLoop;
 					}
 				}
@@ -1365,13 +1811,21 @@ public class CPathfindingProcessor {
 					job.gridMapping = GridMapping.CELLS;
 				}
 				if ((job.weightForHittingWalls >= 1E9f) && !job.shortSearch
-						&& !this.pathingGrid.isTerrainScripted(job.goalX, job.goalY, SCRIPTED_GOAL_CELLS) && !aimAtReachablePart(job)) {
+						&& !this.pathingGrid.isTerrainScripted(job.goalX, job.goalY, SCRIPTED_GOAL_CELLS)
+						&& !aimAtReachablePartProfiled(job)) {
 					// Measured: the original walks to the reachable point nearest the target and stops there; with no
 					// such point nearer than where it stands, it stays.
 					final LinkedList<CPathPoint> stay = new LinkedList<>();
 					stay.add(new CPathPoint(job.startX, job.startY));
+					if (PathingProfile.ENABLED) {
+						PathingProfile.outcome(job.profile, PathingProfile.Outcome.AIM_STAY);
+						PathingProfile.enter(PathingProfile.Part.CALLBACK);
+					}
 					finishJob();
 					job.queueItem.pathFound(job.goal, stay, false, simulation);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.exit();
+					}
 					continue JobsLoop;
 				}
 				final double straightCells = StrictMath.hypot(job.goalX - job.startX, job.goalY - job.startY) / 32;
@@ -1427,9 +1881,16 @@ public class CPathfindingProcessor {
 						grid.width - 1);
 				job.enclosedGoalRadius = 0;
 				if ((job.weightForHittingWalls >= 1E9f) && !job.goalNodesBlocked && !job.shortSearch) {
+					if (PathingProfile.ENABLED) {
+						PathingProfile.enter(PathingProfile.Part.ENCLOSED_FILL);
+						PathingProfile.count(PathingProfile.Count.ENCLOSED_CALLS);
+					}
 					job.enclosedGoalRadius = enclosedGoalRadius(job, grid,
 							graph.pathableEpoch(this.pathfindJobId, simulation.getGameTurnTick()),
 							(startGridY * grid.width) + startGridX);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.exit();
+					}
 				}
 				grid.clearOpen();
 
@@ -1495,28 +1956,48 @@ public class CPathfindingProcessor {
 
 			final SearchGrid grid = job.searchGrid;
 			final int epoch = graph.pathableEpoch(this.pathfindJobId, simulation.getGameTurnTick());
+			prepareTerrain(job, grid);
+			if (PathingProfile.ENABLED) {
+				PathingProfile.mark(PathingProfile.Part.SEARCH);
+			}
 			while (!grid.isEmpty()) {
 				final int current = grid.poll();
 				grid.touch(current, this.pathfindJobId);
 				grid.setOpen(current, false);
 				if (isGoal(current)) {
-					if (crossesBlockedGround(job, current)) {
+					if (crossesBlockedGroundProfiled(job, current)) {
 						// Measured on 1.29: a target walled off by destructables (a ship before gates across its
 						// river) cannot be reached; the unit goes to the reachable point nearest to it, not to the wall.
 						break;
 					}
+					if (PathingProfile.ENABLED) {
+						PathingProfile.mark(PathingProfile.Part.BUILD_PATH);
+					}
 					final LinkedList<CPathPoint> totalPath = buildPath(job, current, true);
+					if (PathingProfile.ENABLED) {
+						PathingProfile.outcome(job.profile, PathingProfile.Outcome.GOAL);
+						PathingProfile.mark(PathingProfile.Part.CALLBACK);
+					}
 					finishJob();
 					job.queueItem.pathFound(job.goal, totalPath, (!job.goalMoved || job.goalBesideUnit) && !job.goalOutOfReach,
 							simulation);
 					continue JobsLoop;
 				}
-				final float currentX = grid.xs[current % grid.width];
-				final float currentY = grid.ys[current / grid.width];
+				final int currentGridY = current / grid.width;
+				final int currentGridX = current - (currentGridY * grid.width);
+				final float currentX = grid.xs[currentGridX];
+				final float currentY = grid.ys[currentGridY];
 				final double currentG = grid.g(current);
 				if (currentG < job.bestGLimit) {
 					if (job.shortSearch) {
+						if (PathingProfile.ENABLED) {
+							PathingProfile.enter(PathingProfile.Part.SLIDE);
+							PathingProfile.count(PathingProfile.Count.SLIDES);
+						}
 						slideTowardGoal(job, currentX, currentY, null);
+						if (PathingProfile.ENABLED) {
+							PathingProfile.exit();
+						}
 						final float distanceToGoal = (float) StrictMath.hypot(job.goalX - this.slideX,
 								job.goalY - this.slideY);
 						if (distanceToGoal < (job.bestDistance - 1)) {
@@ -1542,49 +2023,18 @@ public class CPathfindingProcessor {
 					}
 				}
 
-				final int currentDirection = grid.direction(current);
-				final int currentMappedX = job.gridMapping.getX(this.pathingGrid, currentX);
-				final int currentMappedY = job.gridMapping.getY(this.pathingGrid, currentY);
-				for (final Direction direction : Direction.VALUES) {
-					final float x = currentX + (direction.xOffset * 32);
-					final float y = currentY + (direction.yOffset * 32);
-					if (this.pathingGrid.contains(x, y)) {
-						double turnCost;
-						if ((currentDirection != 0) && ((direction.ordinal() + 1) != currentDirection)) {
-							turnCost = 0.25;
-						}
-						else {
-							turnCost = 0;
-						}
-						double tentativeScore = currentG + ((direction.length + turnCost) * 32);
-						final int neighborX = job.gridMapping.getX(this.pathingGrid, x);
-						final int neighborY = job.gridMapping.getY(this.pathingGrid, y);
-						final int neighbor = (neighborY * grid.width) + neighborX;
-						if (!nodePathable(job, grid, epoch, neighbor, x, y)
-								|| !nodePathable(job, grid, epoch, (neighborY * grid.width) + currentMappedX, currentX,
-										y)
-								|| !nodePathable(job, grid, epoch, (currentMappedY * grid.width) + neighborX, x,
-										currentY)) {
-							tentativeScore += (direction.length) * job.weightForHittingWalls;
-							if (!job.metScriptedTerrain
-									&& this.pathingGrid.isTerrainScripted(x, y, SCRIPTED_TERRAIN_CELLS)) {
-								job.metScriptedTerrain = true;
-							}
-						}
-						grid.touch(neighbor, this.pathfindJobId);
-						if (tentativeScore < grid.g(neighbor)) {
-							grid.setCameFrom(neighbor, current, direction.ordinal() + 1);
-							grid.setScores(neighbor, tentativeScore,
-									tentativeScore + h(grid.xs[neighborX], grid.ys[neighborY]));
-							if (!grid.isOpen(neighbor)) {
-								openAdd(grid, neighbor);
-							}
-						}
-					}
+				if (grid.regular) {
+					relaxNeighbors(job, grid, epoch, current, currentGridX, currentGridY, currentG);
+				}
+				else {
+					relaxNeighborsAnywhere(job, grid, epoch, current, currentX, currentY, currentG);
 				}
 				workIterations++;
 				this.totalIterations++;
 				PerfStats.pathIteration();
+				if (PathingProfile.ENABLED) {
+					PathingProfile.count(PathingProfile.Count.ITERATIONS);
+				}
 				if (!job.nearSideDecided
 						&& (this.totalIterations >= Math.max(NEAR_SIDE_ITERATIONS, job.iterationLimit / 8))
 						&& staysOnNearSide(job)) {
@@ -1622,8 +2072,14 @@ public class CPathfindingProcessor {
 				}
 				if (workIterations >= tickBudget) {
 					// breaking jobs loop will implicitly exit without calling pathFound() below
+					if (PathingProfile.ENABLED) {
+						PathingProfile.count(PathingProfile.Count.BUDGET_PAUSES);
+					}
 					break JobsLoop;
 				}
+			}
+			if (PathingProfile.ENABLED) {
+				PathingProfile.mark(PathingProfile.Part.PARTIAL_PATH);
 			}
 			// Measured: the original walks to the reachable point nearest the target and stops there.
 			final LinkedList<CPathPoint> partialPath;
@@ -1669,6 +2125,11 @@ public class CPathfindingProcessor {
 			else {
 				partialPath = new LinkedList<>();
 				partialPath.add(new CPathPoint(job.startX, job.startY));
+			}
+			if (PathingProfile.ENABLED) {
+				PathingProfile.outcome(job.profile, nearerThanStart(job) ? PathingProfile.Outcome.PARTIAL
+						: PathingProfile.Outcome.STAY);
+				PathingProfile.mark(PathingProfile.Part.CALLBACK);
 			}
 			finishJob();
 			job.queueItem.pathFound(job.goal, partialPath, false, simulation);
@@ -1717,7 +2178,17 @@ public class CPathfindingProcessor {
 		if (goalCell < 0) {
 			return 0;
 		}
-		if (openAround(job, grid, goalCell)) {
+		if (PathingProfile.ENABLED) {
+			PathingProfile.enter(PathingProfile.Part.OPEN_AROUND);
+		}
+		final boolean open = openAround(job, grid, goalCell);
+		if (PathingProfile.ENABLED) {
+			PathingProfile.exit();
+			if (open) {
+				PathingProfile.count(PathingProfile.Count.ENCLOSED_OPEN_SKIPS);
+			}
+		}
+		if (open) {
 			return 0;
 		}
 		final int seenSize = ENCLOSED_POCKET_CELLS * 4;
@@ -1781,6 +2252,9 @@ public class CPathfindingProcessor {
 				queue[tail++] = next;
 			}
 		}
+		if (PathingProfile.ENABLED) {
+			PathingProfile.count(PathingProfile.Count.ENCLOSED_FILL_CELLS, tail);
+		}
 		// A pocket that terrain alone closes off is left to the full search, as before.
 		return unitsInRing ? radius : 0;
 	}
@@ -1816,6 +2290,32 @@ public class CPathfindingProcessor {
 	 * When no grid point next to the job's goal can be reached from its start (ignoring units), moves the goal to the
 	 * reachable point nearest to it. Returns false when that point is no nearer to the goal than the start.
 	 */
+	private boolean aimAtReachablePartProfiled(final PathfindingJob job) {
+		if (!PathingProfile.ENABLED) {
+			return aimAtReachablePart(job);
+		}
+		PathingProfile.enter(PathingProfile.Part.REACH_AIM);
+		try {
+			return aimAtReachablePart(job);
+		}
+		finally {
+			PathingProfile.exit();
+		}
+	}
+
+	private boolean crossesBlockedGroundProfiled(final PathfindingJob job, final int end) {
+		if (!PathingProfile.ENABLED) {
+			return crossesBlockedGround(job, end);
+		}
+		PathingProfile.enter(PathingProfile.Part.CROSSES);
+		try {
+			return crossesBlockedGround(job, end);
+		}
+		finally {
+			PathingProfile.exit();
+		}
+	}
+
 	private boolean aimAtReachablePart(final PathfindingJob job) {
 		final Reachability reach = this.graph.reachability(this.pathingGrid, job.movementType, job.collisionSize,
 				job.searchGrid == this.graph.corners);
@@ -2184,20 +2684,32 @@ public class CPathfindingProcessor {
 					final double distanceY = this.pathingGrid.getFootprintCenterY(y, job.collisionSize) - job.goalY;
 					// toward a building every spot of its first free ring is as near, a corner of it too: the one
 					// nearest the start is chosen, so a unit coming diagonally stops at the corner
+					// hypot is exact to within an ulp, so a square clearly above the best cannot be nearer
+					if (!toBuilding && (((distanceX * distanceX) + (distanceY * distanceY)) > (bestDistance
+							* bestDistance * 1.0000001))) {
+						continue;
+					}
 					final double distance = toBuilding ? Math.max(Math.abs(distanceX), Math.abs(distanceY))
 							: StrictMath.hypot(distanceX, distanceY);
 					if (distance > bestDistance) {
 						continue;
 					}
-					final double startDistance = StrictMath.hypot(x - job.startX, y - job.startY);
-					if ((distance == bestDistance) && (startDistance >= bestStartDistance)) {
-						continue;
+					final boolean tie = distance == bestDistance;
+					double startDistance = 0;
+					if (tie) {
+						startDistance = StrictMath.hypot(x - job.startX, y - job.startY);
+						if (startDistance >= bestStartDistance) {
+							continue;
+						}
 					}
 					if (this.pathingGrid.contains(x, y)
 							&& this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
 							&& (!freeOfUnits || !this.worldCollision.intersectsStandingUnitOtherThan(
 									this.tempRect.setCenter(x, y), job.ignoreIntersectionsWithThisUnit,
 									job.ignoreIntersectionsWithThisSecondUnit, job.movementType, this.gameTurnTick))) {
+						if (!tie) {
+							startDistance = StrictMath.hypot(x - job.startX, y - job.startY);
+						}
 						bestDistance = distance;
 						bestStartDistance = startDistance;
 						bestX = x;
@@ -2395,6 +2907,7 @@ public class CPathfindingProcessor {
 		private boolean jobStarted;
 		private boolean humanOrder;
 		private boolean preempted;
+		PathingProfile.Job profile;
 		float enclosedGoalRadius;
 		private int queuedTick;
 		private int turn;

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Warsmash</string>
+    <string name="app_name">Warsmash Reforged multithread</string>
     <string name="lan_channel_name">LAN game</string>
     <string name="lan_notification_title">LAN game in progress</string>
     <string name="lan_notification_text">Tap to return</string>

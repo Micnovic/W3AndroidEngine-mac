@@ -593,6 +593,10 @@ public class Jass2 {
 					gamespeedType, gamedifficultyType, mapdensityType, locationType, playerType, playercolorType,
 					mapcontrolType, playerslotstateType, this.simulation, this.simulation.getHandleIdAllocator(),
 					war3MapViewer.getGameUI());
+			// With the simulation on its own thread the natives that touch the interface or the render side run on the render
+			// thread, which waits for the step; null otherwise.
+			final java.util.function.BiFunction<String, com.etheller.interpreter.ast.function.JassFunction, com.etheller.interpreter.ast.function.JassFunction> onRenderThread = war3MapViewer
+					.renderThreadNativeWrapper();
 			new ScriptNatives(this).register();
 			new TimerNatives(this).register();
 			new GroupNatives(this).register();
@@ -600,8 +604,11 @@ public class Jass2 {
 			new PlayerNatives(this).register();
 			new RegionNatives(this).register();
 			new TriggerNatives(this).register();
+			// Quest, interface, camera, sound and campaign natives choose per native what runs on the render thread.
 			new QuestNatives(this).register();
 			new InterfaceNatives(this).register();
+			jassProgramVisitor.getJassNativeManager().setNativeWrapper(null);
+			// these pick what they hand to the render thread themselves (RenderSide)
 			new DestructableNatives(this).register();
 			new ItemNatives(this).register();
 			new WorldNatives(this).register();

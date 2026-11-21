@@ -1,5 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEvent;
 import com.badlogic.gdx.Gdx;
 import com.etheller.interpreter.ast.function.JassFunction;
 import com.etheller.interpreter.ast.scope.GlobalScope;
@@ -108,12 +109,12 @@ final class InterfaceNatives extends CommonNatives {
 						// whichUnit model, but according to their notes that value changes from
 						// bloodlust but not SetUnitScale, some crazy bugs, we are not reproducing those
 						// at the moment
-						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-						final Bounds bounds = renderPeer == null ? null : renderPeer.instance.getBounds();
-						float estimatedBoundsMaxZ = 0;
-						if (bounds != null) {
-							estimatedBoundsMaxZ = bounds.getEstimatedMaxZ();
-						}
+						// the model's bounds belong to the render peer
+						final float estimatedBoundsMaxZ = this.link.onRender("SetTextTagPosUnit", () -> {
+							final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+							final Bounds bounds = renderPeer == null ? null : renderPeer.instance.getBounds();
+							return bounds == null ? 0f : bounds.getEstimatedMaxZ();
+						});
 						textTag.setPosition(x, y, war3MapViewer.terrain.getGroundHeight(x, y) + flyHeight
 								+ estimatedBoundsMaxZ + heightOffset);
 					}
@@ -260,7 +261,7 @@ final class InterfaceNatives extends CommonNatives {
 							? filename.substring(0, PRELOAD_LINE_LIMIT) : filename);
 				}
 				if (filename != null) {
-					ScriptPreload.load(war3MapViewer, filename);
+					InterfaceNatives.this.link.send(RenderEvent.FRAME_COMMAND, () -> ScriptPreload.load(war3MapViewer, filename));
 				}
 				return null;
 			}
@@ -293,12 +294,12 @@ final class InterfaceNatives extends CommonNatives {
 					this.preloadGenLines = null;
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("EndGame",
+		createRenderNative("EndGame",
 				(arguments, globalScope, triggerScope) -> {
 					meleeUI.endGame(arguments.get(0).visit(BooleanJassValueVisitor.getInstance()));
 					return null;
 				});
-		jassProgramVisitor.getJassNativeManager().createNative("RestartGame",
+		createRenderNative("RestartGame",
 				(arguments, globalScope, triggerScope) -> {
 					final boolean showScoreScreen = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
 					war3MapViewer.runAfterPendingSave(() -> {
@@ -315,7 +316,7 @@ final class InterfaceNatives extends CommonNatives {
 				return null;
 			}
 		});
-		jassProgramVisitor.getJassNativeManager().createNative("Preloader",
+		createRenderNative("Preloader",
 				(arguments, globalScope, triggerScope) -> {
 					final String filename = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					// Campaign maps name .pld files the game data does not ship (NightElfX05); a preload list
@@ -331,7 +332,8 @@ final class InterfaceNatives extends CommonNatives {
 	private void registerMessagesAndInterface() {
 		jassProgramVisitor.getJassNativeManager().createNative("EnableUserUI",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.enableUserUI(arguments.get(0).visit(BooleanJassValueVisitor.getInstance()));
+					final boolean enable = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.enableUserUI(enable));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DisplayTimedTextToPlayer",
@@ -343,8 +345,14 @@ final class InterfaceNatives extends CommonNatives {
 					final String message = this.gameUI
 							.getTrigStr(arguments.get(4).visit(StringJassValueVisitor.getInstance()));
 					Log.warn("DisplayTimedTextToPlayer: " + message.replace("\\n", "\n"));
-					if ((whichPlayer != null) && war3MapViewer.isViewedPlayer(whichPlayer.getId())) {
-						meleeUI.displayTimedText(x, y, duration, message);
+					if (whichPlayer != null) {
+						final int playerIndex = whichPlayer.getId();
+						// who is viewed is the interface's to say
+						this.link.send(RenderEvent.DISPLAY_TEXT, () -> {
+							if (war3MapViewer.isViewedPlayer(playerIndex)) {
+								meleeUI.displayTimedText(x, y, duration, message);
+							}
+						});
 					}
 					return null;
 				});
@@ -359,7 +367,7 @@ final class InterfaceNatives extends CommonNatives {
 					final String message = format.replace("%s",
 							fromPlayer == null ? "" : fromPlayer.getName());
 					Log.warn("DisplayTimedTextFromPlayer: " + message.replace("\\n", "\n"));
-					meleeUI.displayTimedText(x, y, duration, message);
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.displayTimedText(x, y, duration, message));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DisplayTextToPlayer",
@@ -372,13 +380,14 @@ final class InterfaceNatives extends CommonNatives {
 					if (whichPlayer == this.simulation
 							.getPlayer(war3MapViewer.getLocalPlayerIndex())) {
 						// Measured on 1.29: longer texts stay longer, up to about 10.7 s.
-						meleeUI.displayTimedText(x, y, Math.min(2.8f + (0.1f * message.length()), 10.7f), message);
+						final float duration = Math.min(2.8f + (0.1f * message.length()), 10.7f);
+						this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.displayTimedText(x, y, duration, message));
 					}
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ClearTextMessages",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.clearTextMessages();
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.clearTextMessages());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ShowInterface",
@@ -386,13 +395,13 @@ final class InterfaceNatives extends CommonNatives {
 					final boolean show = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
 					final float fadeDuration = arguments.get(1).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
-					meleeUI.showInterface(show, fadeDuration);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.showInterface(show, fadeDuration));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("EnableUserControl",
 				(arguments, globalScope, triggerScope) -> {
 					final boolean value = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
-					meleeUI.enableUserControl(value);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> meleeUI.enableUserControl(value));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCinematicScene",
@@ -413,31 +422,36 @@ final class InterfaceNatives extends CommonNatives {
 						text = DIALOGUE_ANIMATION_TAG.matcher(text).replaceAll("").trim();
 					}
 
-					meleeUI.setCinematicScene(portraitUnitId, color, speakerTitle, text, sceneDuration,
-							voiceoverDuration);
+					final String title = speakerTitle;
+					final String sceneText = text;
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.setCinematicScene(portraitUnitId, color, title,
+							sceneText, sceneDuration, voiceoverDuration));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("EndCinematicScene",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.endCinematicScene();
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.endCinematicScene());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ForceCinematicSubtitles",
 				(arguments, globalScope, triggerScope) -> {
 					final boolean value = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
-					meleeUI.forceCinematicSubtitles(value);
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.forceCinematicSubtitles(value));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("BlzHideCinematicPanels",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.hideCinematicPanels(arguments.get(0).visit(BooleanJassValueVisitor.getInstance()));
+					final boolean hide = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
+					this.link.send(RenderEvent.DISPLAY_TEXT, () -> meleeUI.hideCinematicPanels(hide));
 					return null;
 				});
 		// Measured: it acts as an Escape press, so it also fires EVENT_PLAYER_END_CINEMATIC (skips a cinematic).
 		jassProgramVisitor.getJassNativeManager().createNative("ForceUICancel",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.keyDown(com.badlogic.gdx.Input.Keys.ESCAPE);
-					meleeUI.keyUp(com.badlogic.gdx.Input.Keys.ESCAPE);
+					this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+						meleeUI.keyDown(com.badlogic.gdx.Input.Keys.ESCAPE);
+						meleeUI.keyUp(com.badlogic.gdx.Input.Keys.ESCAPE);
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ShowInterfaceError",

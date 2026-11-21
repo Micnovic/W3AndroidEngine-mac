@@ -32,6 +32,11 @@ import com.etheller.warsmash.viewer5.handlers.tga.TgaFile;
 import com.etheller.warsmash.viewer5.handlers.w3x.UnitSound;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UiFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UnitFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameSource;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.data.CUnitData;
@@ -61,6 +66,8 @@ final class MeleeUIMinimapPanel {
 	private final List<float[]> knownCreepCamps = new ArrayList<>();
 	/** Creeps that existed at the start or were already grouped; only units made later can start a new camp. */
 	private final Set<CUnit> accountedCreeps = new HashSet<>();
+	// as accountedCreeps, by handle, where the game is shown from frames
+	private final Set<Integer> accountedCreepHandles = new HashSet<>();
 	private boolean creepCampsStarted;
 	private long creepCampsRefreshMillis;
 
@@ -129,6 +136,7 @@ final class MeleeUIMinimapPanel {
 		final MeleeUIMinimap minimap = new MeleeUIMinimap(minimapDisplayArea, playableMapArea, minimapTexture, teamColors,
 				specialIcons);
 		minimap.setMaskedAreasPartiallyVisible(war3MapViewer.isMaskedAreasPartiallyVisible());
+		minimap.setFrameSource(war3MapViewer::getPresentation, war3MapViewer::uiFrameSource);
 		return minimap;
 	}
 
@@ -189,11 +197,30 @@ final class MeleeUIMinimapPanel {
 	}
 
 	void showMinimapSignal(final int playerIndex, final float x, final float y) {
-		final int rgba = MeleeChat.playerTextColorRgba(
-				this.ui.war3MapViewer.simulation.getPlayer(playerIndex).getColor());
+		final UiFrameState players = presentedPlayers();
+		final int rgba = MeleeChat.playerTextColorRgba((players != null) && (playerIndex >= 0)
+				&& (playerIndex < UiFrameState.PLAYER_SLOTS) && (players.playerColor[playerIndex] >= 0)
+				? players.playerColor[playerIndex]
+				: this.ui.war3MapViewer.simulation.getPlayer(playerIndex).getColor());
 		pingMinimap(x, y, MINIMAP_SIGNAL_SECONDS, (rgba >>> 24) & 0xFF, (rgba >>> 16) & 0xFF, (rgba >>> 8) & 0xFF,
 				MINIMAP_ALLY_PING_BIRTH, MINIMAP_ALLY_PING_STAND, MINIMAP_ALLY_PING_DEATH);
 		this.ui.war3MapViewer.getUiSounds().getSound("MapPing").play(this.ui.uiScene.audioContext, 0, 0, 0);
+	}
+
+	/**
+	 * The players' relations and colours of the frame on screen, null where the game is not shown from frames (the
+	 * live simulation is read then) or before one has arrived.
+	 */
+	private UiFrameState presentedPlayers() {
+		if (this.ui.war3MapViewer.getPresentation() == null) {
+			return null;
+		}
+		final UiFrameSource source = this.ui.war3MapViewer.uiFrameSource();
+		if ((source == null) || !source.isPresented()) {
+			return null;
+		}
+		final UiFrameState state = source.current();
+		return state.playersWritten ? state : null;
 	}
 
 	void setMinimapTerrain(final boolean shown) {
@@ -282,8 +309,19 @@ final class MeleeUIMinimapPanel {
 			}
 			return;
 		}
+		if (this.ui.meleeUIMinimap.getFogOfWar() == null) {
+			// The fog comes from what the minimap was last drawn with, which is the viewer's, read once a frame by the
+			// interface; the first frame has none yet.
+			return;
+		}
 		final CSimulation simulation = this.ui.war3MapViewer.simulation;
-		if (!this.creepCampsStarted && (simulation.getGameTurnTick() == 0)) {
+		// Where the game is shown from frames the creeps are those of the frame on screen.
+		final PresentationClock clock = this.ui.war3MapViewer.getPresentation();
+		final SimFrame simFrame = clock == null ? null : clock.frameBefore();
+		if ((clock != null) && (simFrame == null)) {
+			return;
+		}
+		if (!this.creepCampsStarted && ((simFrame != null ? simFrame.tick : simulation.getGameTurnTick()) == 0)) {
 			// The map's script has not placed its creeps yet.
 			return;
 		}
@@ -294,16 +332,31 @@ final class MeleeUIMinimapPanel {
 				? misc.getFieldFloatValue("CreepCampPathingCellDistance") * 32
 				: 26 * 32;
 		final float linkDistanceSq = linkDistance * linkDistance;
-		final int localPlayer = this.ui.war3MapViewer.getLocalPlayerIndex();
 		final boolean observer = this.ui.war3MapViewer.isObserverView();
 		final List<CUnit> creeps = new ArrayList<>();
+		final List<Integer> creepHandles = new ArrayList<>();
 		final List<float[]> creepPoints = new ArrayList<>();
-		for (final CUnit unit : simulation.getUnits()) {
-			if (!unit.isDead() && !unit.isHidden() && !unit.isBuilding()
-					&& simulation.isNeutralAggressive(unit.getPlayerIndex())) {
-				creeps.add(unit);
-				creepPoints.add(new float[] { unit.getX(), unit.getY(), unit.getUnitType().getLevel(),
-						(observer || unit.isVisible(simulation, localPlayer)) ? 1 : 0 });
+		if (simFrame != null) {
+			final UnitFrameState units = simFrame.units;
+			for (int row = 0; row < units.count; row++) {
+				final int flags = units.flags[row];
+				if (((flags & (UnitFrameState.DEAD | UnitFrameState.HIDDEN | UnitFrameState.BUILDING)) == 0)
+						&& ((flags & UnitFrameState.CREEP) != 0)) {
+					creepHandles.add(units.handle[row]);
+					creepPoints.add(new float[] { units.x[row], units.y[row], units.level[row],
+							(observer || ((flags & UnitFrameState.VISIBLE_TO_LOCAL) != 0)) ? 1 : 0 });
+				}
+			}
+		}
+		else {
+			final int localPlayer = this.ui.war3MapViewer.getLocalPlayerIndex();
+			for (final CUnit unit : simulation.getUnits()) {
+				if (!unit.isDead() && !unit.isHidden() && !unit.isBuilding()
+						&& simulation.isNeutralAggressive(unit.getPlayerIndex())) {
+					creeps.add(unit);
+					creepPoints.add(new float[] { unit.getX(), unit.getY(), unit.getUnitType().getLevel(),
+							(observer || unit.isVisible(simulation, localPlayer)) ? 1 : 0 });
+				}
 			}
 		}
 		final float middleThreshold = minimapField(minimap, "MinimapMiddleCampThreshold", 10);
@@ -331,19 +384,28 @@ final class MeleeUIMinimapPanel {
 		// Creeps that chase or wander away from their camp must not show as a new camp: the player would see
 		// movement in the fog.
 		final List<float[]> newCreepPoints = new ArrayList<>();
-		for (int i = 0; i < creeps.size(); i++) {
-			if (this.accountedCreeps.add(creeps.get(i))) {
+		for (int i = 0; i < creepPoints.size(); i++) {
+			if (simFrame != null ? this.accountedCreepHandles.add(creepHandles.get(i))
+					: this.accountedCreeps.add(creeps.get(i))) {
 				newCreepPoints.add(creepPoints.get(i));
 			}
 		}
-		this.accountedCreeps.removeIf(CUnit::isDead);
+		if (simFrame != null) {
+			this.accountedCreepHandles.removeIf((handle) -> {
+				final int row = simFrame.units.indexOf(handle);
+				return (row < 0) || ((simFrame.units.flags[row] & UnitFrameState.DEAD) != 0);
+			});
+		}
+		else {
+			this.accountedCreeps.removeIf(CUnit::isDead);
+		}
 		for (final float[] camp : groupCreepCamps(newCreepPoints, linkDistanceSq)) {
 			if (!isKnownCreepCamp(camp, linkDistanceSq)) {
 				camp[2] = 0;
 				this.knownCreepCamps.add(camp);
 			}
 		}
-		final CPlayerFogOfWar fogOfWar = this.ui.war3MapViewer.getFogOfWar();
+		final CPlayerFogOfWar fogOfWar = this.ui.meleeUIMinimap.getFogOfWar();
 		final PathingGrid pathingGrid = simulation.getPathingGrid();
 		final java.util.Iterator<float[]> knownIterator = this.knownCreepCamps.iterator();
 		while (knownIterator.hasNext()) {
@@ -351,8 +413,8 @@ final class MeleeUIMinimapPanel {
 			if ((fogOfWar != null) && CFogState.VISIBLE.equals(fogOfWar.getFogState(simulation,
 					pathingGrid.getFogOfWarIndexX(known[0]), pathingGrid.getFogOfWarIndexY(known[1])))) {
 				boolean present = false;
-				for (final CUnit creep : creeps) {
-					if (distanceSquared(known, creep.getX(), creep.getY()) <= linkDistanceSq) {
+				for (final float[] creep : creepPoints) {
+					if (distanceSquared(known, creep[0], creep[1]) <= linkDistanceSq) {
 						present = true;
 						break;
 					}
@@ -538,6 +600,13 @@ final class MeleeUIMinimapPanel {
 	 * AttackNotifyDelay seconds and AttackNotifyRange of its last alert, and then Space keeps the last alert's place too.
 	 */
 	public void unitAttacked(final CUnit unit, final CUnit attacker) {
+		final PresentationClock clock = this.ui.war3MapViewer.getPresentation();
+		if (clock != null) {
+			// The alert is judged on what the frames of the game say (the unit's place and owner, the players'
+			// relations); the live objects are only named by their handles.
+			unitAttackedFromFrame(clock, unit.getHandleId(), attacker.getHandleId());
+			return;
+		}
 		final CSimulation simulation = this.ui.war3MapViewer.simulation;
 		final int localPlayerIndex = this.ui.war3MapViewer.getLocalPlayerIndex();
 		final int owner = unit.getPlayerIndex();
@@ -557,24 +626,71 @@ final class MeleeUIMinimapPanel {
 		if (unit.isBuilding() && (unit.getAbilityByRawcode(CUnitData.ALARM_ABILITY_ID) == null)) {
 			return;
 		}
-		if (isOnScreen(unit.getX(), unit.getY())) {
+		raiseAttackAlert(owner, ownerPlayer.getName(), own, unit.isBuilding(), unit.getX(), unit.getY(),
+				simulation.getGameTurnTick());
+	}
+
+	private void unitAttackedFromFrame(final PresentationClock clock, final int unitHandle,
+			final int attackerHandle) {
+		final UiFrameState players = presentedPlayers();
+		// The frame after the one on screen is the closest to the moment of the event; a unit made since has a row
+		// only there.
+		final SimFrame after = clock.frameAfter();
+		final SimFrame before = clock.frameBefore();
+		final SimFrame frame = (after != null) && (after.units.indexOf(unitHandle) >= 0) ? after : before;
+		final int row = frame == null ? -1 : frame.units.indexOf(unitHandle);
+		if ((row < 0) || (players == null)) {
+			return;
+		}
+		final UnitFrameState units = frame.units;
+		final int localPlayerIndex = this.ui.war3MapViewer.getLocalPlayerIndex();
+		final int owner = units.owner[row];
+		// An attacker the frames no longer have (it died or left in the meantime) cannot be told from an enemy.
+		int attackerRow = units.indexOf(attackerHandle);
+		int attackerOwner = attackerRow < 0 ? -1 : units.owner[attackerRow];
+		if (attackerRow < 0) {
+			final SimFrame other = frame == after ? before : after;
+			attackerRow = other == null ? -1 : other.units.indexOf(attackerHandle);
+			attackerOwner = attackerRow < 0 ? -1 : other.units.owner[attackerRow];
+		}
+		if ((attackerOwner >= 0) && ((attackerOwner == owner)
+				|| (((players.alliancePassive[owner] >>> attackerOwner) & 1) != 0))) {
+			return;
+		}
+		final boolean own = (owner == localPlayerIndex)
+				|| (((players.allianceSharedControl[owner] >>> localPlayerIndex) & 1) != 0);
+		if (!own && !((((players.userPlayingMask >>> owner) & 1) != 0)
+				&& (((players.alliancePassive[owner] >>> localPlayerIndex) & 1) != 0)
+				&& (((players.alliancePassive[localPlayerIndex] >>> owner) & 1) != 0))) {
+			return;
+		}
+		final int flags = units.flags[row];
+		final boolean building = (flags & UnitFrameState.BUILDING) != 0;
+		if (building && ((flags & UnitFrameState.ALARM) == 0)) {
+			return;
+		}
+		raiseAttackAlert(owner, players.playerName[owner], own, building, units.x[row], units.y[row], frame.tick);
+	}
+
+	private void raiseAttackAlert(final int owner, final String ownerName, final boolean own, final boolean town,
+			final float x, final float y, final int tick) {
+		if (isOnScreen(x, y)) {
 			return;
 		}
 		if (this.attackNotifyDelay < 0) {
 			readAttackNotifySettings();
 		}
-		final float now = simulation.getGameTurnTick() * WarsmashConstants.SIMULATION_STEP_TIME;
+		final float now = tick * WarsmashConstants.SIMULATION_STEP_TIME;
 		final float[] last = this.lastAttackAlerts.get(owner);
 		if (last != null) {
-			final float dx = unit.getX() - last[1];
-			final float dy = unit.getY() - last[2];
+			final float dx = x - last[1];
+			final float dy = y - last[2];
 			if (((now - last[0]) < this.attackNotifyDelay)
 					&& (((dx * dx) + (dy * dy)) <= (this.attackNotifyRange * this.attackNotifyRange))) {
 				return;
 			}
 		}
-		this.lastAttackAlerts.put(owner, new float[] { now, unit.getX(), unit.getY() });
-		final boolean town = unit.isBuilding();
+		this.lastAttackAlerts.put(owner, new float[] { now, x, y });
 		final String soundKey;
 		if (own) {
 			soundKey = town ? "TownAttackSound" : "UnderAttackSound";
@@ -583,7 +699,7 @@ final class MeleeUIMinimapPanel {
 			soundKey = town ? "AllyTownUnderAttackSound" : "AllyUnderAttackSound";
 			final String format = this.ui.rootFrame.getErrorString(town ? "Allytownattack" : "Allyunderattack");
 			if ((format != null) && !format.isEmpty()) {
-				this.ui.messages.showGameMessage(format.replace("%s", ownerPlayer.getName()),
+				this.ui.messages.showGameMessage(format.replace("%s", ownerName),
 						MeleeUI.CHAT_MESSAGE_SECONDS);
 			}
 		}
@@ -595,9 +711,9 @@ final class MeleeUIMinimapPanel {
 			}
 		}
 		final int[] color = attackPingColor();
-		pingMinimap(unit.getX(), unit.getY(), ATTACK_PING_SECONDS, color[0], color[1], color[2], MINIMAP_PING_BIRTH,
+		pingMinimap(x, y, ATTACK_PING_SECONDS, color[0], color[1], color[2], MINIMAP_PING_BIRTH,
 				MINIMAP_PING_STAND, MINIMAP_PING_DEATH);
-		this.ui.getCameraManager().setQuickPosition(unit.getX(), unit.getY());
+		this.ui.getCameraManager().setQuickPosition(x, y);
 	}
 
 	private boolean isOnScreen(final float x, final float y) {

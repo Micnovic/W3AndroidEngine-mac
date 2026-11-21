@@ -66,7 +66,7 @@ abstract class LauncherViews {
 	String issueText(final MapIssue issue, final boolean tag) {
 		final String name = tag ? issue.tag : issue.message;
 		return this.activity.getString(this.activity.getResources().getIdentifier(name, "string",
-				this.activity.getPackageName()));
+				R.class.getPackage().getName()));
 	}
 
 	int px(final float design) {

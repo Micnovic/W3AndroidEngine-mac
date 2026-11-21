@@ -25,6 +25,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderSpellEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UnitFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.WorldObjectFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidgetFilterFunction;
@@ -37,7 +41,56 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
  * Selecting, highlighting and picking units, trees and trackables in the world.
  */
 final class MapViewerSelection {
+	private static final int BUILDING_RISING = UnitFrameState.BUILDING | UnitFrameState.RISING;
+
 	private MapViewerSelection() {
+	}
+
+	/**
+	 * What the frame being shown says about a unit, 0 for none: how the local player sees it (selection circle colour,
+	 * water) and its state. Used only when the game is shown from frames; the live unit is read otherwise.
+	 */
+	private static int frameFlags(final War3MapViewer viewer, final RenderWidget widget) {
+		final PresentationClock clock = viewer.getPresentation();
+		final SimFrame frame = clock == null ? null : clock.frameBefore();
+		if (frame == null) {
+			return 0;
+		}
+		final int row = frame.units.indexOf(widget.getSimulationWidget().getHandleId());
+		return row < 0 ? 0 : frame.units.flags[row];
+	}
+
+	/** The selection circle's colour key: n neutral, e enemy, f friend (shared control). */
+	private static String allyKey(final War3MapViewer viewer, final RenderWidget widget) {
+		if (!(widget instanceof RenderUnit)) {
+			return "n:";
+		}
+		if (viewer.getPresentation() != null) {
+			final int flags = frameFlags(viewer, widget);
+			if ((flags & UnitFrameState.SELECT_ENEMY) != 0) {
+				return "e:";
+			}
+			return (flags & UnitFrameState.SELECT_FRIEND) != 0 ? "f:" : "n:";
+		}
+		final CUnit simulationUnit = ((RenderUnit) widget).getSimulationUnit();
+		final int selectedUnitPlayerIndex = simulationUnit.getFakePlayerIndex();
+		final CPlayer localPlayer = viewer.simulation.getPlayer(viewer.localPlayerIndex);
+		if (!localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.PASSIVE)) {
+			return "e:";
+		}
+		if (localPlayer.hasAlliance(simulationUnit.getPlayerIndex(), CAllianceType.SHARED_CONTROL)
+				|| localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.SHARED_CONTROL)) {
+			return "f:";
+		}
+		return "n:";
+	}
+
+	private static boolean aboveWater(final War3MapViewer viewer, final RenderWidget widget) {
+		if (viewer.getPresentation() != null) {
+			return (widget instanceof RenderUnit)
+					&& ((frameFlags(viewer, widget) & UnitFrameState.ABOVE_WATER) != 0);
+		}
+		return widget.isShowSelectionCircleAboveWater();
 	}
 
 	static void showTrackable(final War3MapViewer viewer, final CTrackable trackable) {
@@ -123,19 +176,10 @@ final class MapViewerSelection {
 				if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 					path += ".blp";
 				}
-				if (unit instanceof RenderUnit) {
-					final int selectedUnitPlayerIndex = ((RenderUnit) unit).getSimulationUnit().getFakePlayerIndex();
-					final CPlayer localPlayer = viewer.simulation.getPlayer(viewer.localPlayerIndex);
-					if (!localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.PASSIVE)) {
-						allyKey = "e:";
-					} else if (localPlayer.hasAlliance(((RenderUnit) unit).getSimulationUnit().getPlayerIndex(),
-							CAllianceType.SHARED_CONTROL)
-							|| localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.SHARED_CONTROL)) {
-						allyKey = "f:";
-					}
-				}
+				allyKey = allyKey(viewer, unit);
+				final boolean aboveWater = aboveWater(viewer, unit);
 				path = allyKey + path;
-				if (unit.isShowSelectionCircleAboveWater()) {
+				if (aboveWater) {
 					path = path + ":abovewater";
 				}
 				final SplatModel splatModel = viewer.terrain.getSplatModel("selection:" + path);
@@ -155,7 +199,7 @@ final class MapViewerSelection {
 					final float x = unit.getX();
 					final float y = unit.getY();
 					Log.info("Selecting a unit at " + x + "," + y);
-					if (unit.isShowSelectionCircleAboveWater()) {
+					if (aboveWater) {
 						splats.get(path).aboveWater = true;
 					}
 					splats.get(path).locations.add(new float[] { x - (selectionSize / 2), y - (selectionSize / 2),
@@ -245,19 +289,10 @@ final class MapViewerSelection {
 			if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
 				path += ".blp";
 			}
-			if (unit instanceof RenderUnit) {
-				final CUnit simulationUnit = ((RenderUnit) unit).getSimulationUnit();
-				final int selectedUnitPlayerIndex = simulationUnit.getFakePlayerIndex();
-				final CPlayer localPlayer = viewer.simulation.getPlayer(viewer.localPlayerIndex);
-				if (!localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.PASSIVE)) {
-					allyKey = "e:";
-				} else if (localPlayer.hasAlliance(simulationUnit.getPlayerIndex(), CAllianceType.SHARED_CONTROL)
-						|| localPlayer.hasAlliance(selectedUnitPlayerIndex, CAllianceType.SHARED_CONTROL)) {
-					allyKey = "f:";
-				}
-			}
+			allyKey = allyKey(viewer, unit);
+			final boolean aboveWater = aboveWater(viewer, unit);
 			path = allyKey + path;
-			if (unit.isShowSelectionCircleAboveWater()) {
+			if (aboveWater) {
 				path = path + ":abovewater";
 			}
 			final SplatModel splatModel = viewer.terrain.getSplatModel("mouseover:" + path);
@@ -276,7 +311,7 @@ final class MapViewerSelection {
 				}
 				final float x = unit.getX();
 				final float y = unit.getY();
-				if (unit.isShowSelectionCircleAboveWater()) {
+				if (aboveWater) {
 					splats.get(path).aboveWater = true;
 				}
 				splats.get(path).locations.add(new float[] { x - (selectionSize / 2), y - (selectionSize / 2),
@@ -506,6 +541,11 @@ final class MapViewerSelection {
 		getClickLocation(viewer, viewer.constructionPickHeap, (int) x, (int) y, false, false);
 		final float pickX = viewer.constructionPickHeap.x;
 		final float pickY = viewer.constructionPickHeap.y;
+		final PresentationClock clock = viewer.getPresentation();
+		final SimFrame frame = clock == null ? null : clock.frameBefore();
+		if ((clock != null) && (frame == null)) {
+			return null;
+		}
 		RenderWidget best = null;
 		float bestDistance = Float.MAX_VALUE;
 		for (final RenderWidget widget : viewer.widgets) {
@@ -513,13 +553,31 @@ final class MapViewerSelection {
 				continue;
 			}
 			final CUnit unit = ((RenderUnit) widget).getSimulationUnit();
-			if (!unit.isBuilding() || !unit.isConstructing() || !widget.getInstance().shown()
-					|| !filter.call(unit)) {
-				continue;
+			final float collisionSize;
+			final float unitX;
+			final float unitY;
+			if (frame != null) {
+				final int row = frame.units.indexOf(unit.getHandleId());
+				if ((row < 0) || ((frame.units.flags[row] & BUILDING_RISING) != BUILDING_RISING)
+						|| !widget.getInstance().shown() || !filter.call(unit)) {
+					continue;
+				}
+				collisionSize = frame.units.collisionSize[row];
+				unitX = widget.getX();
+				unitY = widget.getY();
 			}
-			final float radius = Math.max(unit.getUnitType().getCollisionSize(), 48f);
-			final float dx = unit.getX() - pickX;
-			final float dy = unit.getY() - pickY;
+			else {
+				if (!unit.isBuilding() || !unit.isConstructing() || !widget.getInstance().shown()
+						|| !filter.call(unit)) {
+					continue;
+				}
+				collisionSize = unit.getUnitType().getCollisionSize();
+				unitX = unit.getX();
+				unitY = unit.getY();
+			}
+			final float radius = Math.max(collisionSize, 48f);
+			final float dx = unitX - pickX;
+			final float dy = unitY - pickY;
 			final float distance = (dx * dx) + (dy * dy);
 			if ((distance <= (radius * radius)) && (distance < bestDistance)) {
 				best = widget;
@@ -541,6 +599,11 @@ final class MapViewerSelection {
 		getClickLocation(viewer, viewer.constructionPickHeap, (int) (x + tolerancePx), (int) y, false, false);
 		final float tolerance = (float) Math.hypot(viewer.constructionPickHeap.x - pickX,
 				viewer.constructionPickHeap.y - pickY);
+		final PresentationClock clock = viewer.getPresentation();
+		final SimFrame frame = clock == null ? null : clock.frameBefore();
+		if ((clock != null) && (frame == null)) {
+			return null;
+		}
 		RenderWidget best = null;
 		float bestDistance = Float.MAX_VALUE;
 		for (final RenderWidget widget : viewer.widgets) {
@@ -548,13 +611,29 @@ final class MapViewerSelection {
 				continue;
 			}
 			final CDestructable tree = ((RenderDestructable) widget).getSimulationDestructable();
-			if (tree.isDead() || !tree.getDestType().getTargetedAs().contains(CTargetType.TREE)
-					|| !widget.getInstance().shown() || !widget.getInstance().isVisible(viewer.worldScene.camera)) {
-				continue;
+			final float treeX;
+			final float treeY;
+			if (frame != null) {
+				final int row = frame.trees.indexOf(tree.getHandleId());
+				if ((row < 0) || ((frame.trees.flags[row] & WorldObjectFrameState.DEAD) != 0)
+						|| ((frame.trees.flags[row] & WorldObjectFrameState.TREE) == 0)
+						|| !widget.getInstance().shown() || !widget.getInstance().isVisible(viewer.worldScene.camera)) {
+					continue;
+				}
+				treeX = frame.trees.x[row];
+				treeY = frame.trees.y[row];
+			}
+			else {
+				if (tree.isDead() || !tree.getDestType().getTargetedAs().contains(CTargetType.TREE)
+						|| !widget.getInstance().shown() || !widget.getInstance().isVisible(viewer.worldScene.camera)) {
+					continue;
+				}
+				treeX = tree.getX();
+				treeY = tree.getY();
 			}
 			final float radius = (widget.getSelectionScale() / 2) + tolerance;
-			final float dx = tree.getX() - pickX;
-			final float dy = tree.getY() - pickY;
+			final float dx = treeX - pickX;
+			final float dy = treeY - pickY;
 			final float distance = (dx * dx) + (dy * dy);
 			if ((distance <= (radius * radius)) && (distance < bestDistance) && filter.call(tree)) {
 				best = widget;

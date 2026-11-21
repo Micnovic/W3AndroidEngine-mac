@@ -402,8 +402,11 @@ final class MeleeUIMessages {
 				: format.replaceFirst("%s", Matcher.quoteReplacement(name))
 						.replaceFirst("%s", Matcher.quoteReplacement(hero.getUnitType().getName()))
 						.replaceFirst("%d", Integer.toString(hero.getHeroData().getHeroLevel()));
-		this.pendingHeroDeaths.addLast(new PendingHeroDeath(gameClock() + HERO_DEATH_MESSAGE_DELAY_MILLIS, message,
-				own ? "HeroDiesSound" : "AllyHeroDiesSound"));
+		// What is shown was read from the hero above, where the death happened; only the queue of messages is the
+		// interface's.
+		final String sound = own ? "HeroDiesSound" : "AllyHeroDiesSound";
+		this.ui.afterSimulation(() -> this.pendingHeroDeaths
+				.addLast(new PendingHeroDeath(gameClock() + HERO_DEATH_MESSAGE_DELAY_MILLIS, message, sound)));
 	}
 
 	/** Measured on 1.29: an ally answering calls for help gives the message; passive or shared vision alone not. */
@@ -442,8 +445,10 @@ final class MeleeUIMessages {
 		}
 		final CPlayer owner = this.ui.war3MapViewer.simulation.getPlayer(ownerIndex);
 		final String name = "|cff" + MeleeChat.playerTextHex(owner.getColor()) + owner.getName() + "|r";
-		showGameMessage(format.replaceFirst("%s", Matcher.quoteReplacement(name)), SHARED_CONTROL_MESSAGE_COLOR,
-				SHARED_CONTROL_MESSAGE_SECONDS, false);
+		final String message = format.replaceFirst("%s", Matcher.quoteReplacement(name));
+		// told by the simulation: the message is laid out by the interface
+		this.ui.afterSimulation(() -> showGameMessage(message, SHARED_CONTROL_MESSAGE_COLOR,
+				SHARED_CONTROL_MESSAGE_SECONDS, false));
 	}
 
 	private final class SharedControlWatcher implements CPlayerStateListener {

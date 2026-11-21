@@ -15,6 +15,7 @@ import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.parsers.jass.Jass2.CommonEnvironment;
 import com.etheller.warsmash.parsers.jass.triggers.LocationJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.camera.CustomCameraSetup;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CBlendMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CCameraField;
@@ -24,6 +25,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
  * Camera, camera setup and cinematic filter natives.
  */
 final class CameraNatives extends CommonNatives {
+	/** How long reads go to the render thread after a command that moves the camera at its own rate. */
+	private static final float UNTIMED_MOVE_SECONDS = 8f;
+	private static final float FOLLOW_SECONDS = 30f;
 	private boolean cameraAllowsHotkeyTargetLock = true;
 
 	CameraNatives(final CommonEnvironment environment) {
@@ -35,6 +39,26 @@ final class CameraNatives extends CommonNatives {
 		registerCamera();
 		registerCameraSetups();
 		registerCineFilter();
+	}
+
+	/**
+	 * The setup the camera is given. The camera keeps the object it is handed and the script goes on changing its own,
+	 * so a camera on another thread gets a copy; the same thread keeps getting the object itself.
+	 */
+	private CustomCameraSetup appliedSetup(final CustomCameraSetup setup) {
+		if ((setup == null) || !this.link.isQueued()) {
+			return setup;
+		}
+		final CustomCameraSetup copy = new CustomCameraSetup(setup.getAoa(), setup.getFov(), setup.getRotation(),
+				setup.getRoll(), setup.getDistance(), setup.getFarZ(), setup.getNearZ(), setup.getHeight());
+		copy.setField(CCameraField.LOCAL_PITCH, setup.getLocalPitch());
+		copy.setField(CCameraField.LOCAL_YAW, setup.getLocalYaw());
+		copy.setField(CCameraField.LOCAL_ROLL, setup.getLocalRoll());
+		copy.setDestPositionX(setup.getDestPositionX());
+		copy.setDestPositionY(setup.getDestPositionY());
+		copy.setLabel(setup.getLabel());
+		copy.setCameraType(setup.getCameraType());
+		return copy;
 	}
 
 	private void registerCamera() {
@@ -61,21 +85,21 @@ final class CameraNatives extends CommonNatives {
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraBoundMinX",
 				(arguments, globalScope, triggerScope) -> {
-					return RealJassValue.of(meleeUI.getCameraManager().getCameraBounds().getX());
+					return RealJassValue.of(this.link.view().boundsX());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraBoundMinY",
 				(arguments, globalScope, triggerScope) -> {
-					return RealJassValue.of(meleeUI.getCameraManager().getCameraBounds().getY());
+					return RealJassValue.of(this.link.view().boundsY());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraBoundMaxX",
 				(arguments, globalScope, triggerScope) -> {
-					final Rectangle cameraBounds = meleeUI.getCameraManager().getCameraBounds();
-					return RealJassValue.of(cameraBounds.getX() + cameraBounds.getWidth());
+					final LocalUiLink.View view = this.link.view();
+					return RealJassValue.of(view.boundsX() + view.boundsWidth());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraBoundMaxY",
 				(arguments, globalScope, triggerScope) -> {
-					final Rectangle cameraBounds = meleeUI.getCameraManager().getCameraBounds();
-					return RealJassValue.of(cameraBounds.getY() + cameraBounds.getHeight());
+					final LocalUiLink.View view = this.link.view();
+					return RealJassValue.of(view.boundsY() + view.boundsHeight());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraBounds",
 				(arguments, globalScope, triggerScope) -> {
@@ -91,8 +115,8 @@ final class CameraNatives extends CommonNatives {
 					final float bottom = (float) Math.min(Math.min(y1, y2), Math.min(y3, y4));
 					final float right = (float) Math.max(Math.max(x1, x2), Math.max(x3, x4));
 					final float top = (float) Math.max(Math.max(y1, y2), Math.max(y3, y4));
-					meleeUI.getCameraManager()
-							.setCameraBounds(new Rectangle(left, bottom, right - left, top - bottom));
+					final Rectangle bounds = new Rectangle(left, bottom, right - left, top - bottom);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().setCameraBounds(bounds));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraTargetController",
@@ -102,29 +126,31 @@ final class CameraNatives extends CommonNatives {
 					final float yoffset = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final boolean inheritOrientation = arguments.get(3)
 							.visit(BooleanJassValueVisitor.getInstance());
-					meleeUI.getCameraManager().setTargetController(war3MapViewer.getRenderPeer(whichUnit), xoffset,
-							yoffset, inheritOrientation);
+					// the unit's peer belongs to the render side: it is looked up there
+					this.link.sendCamera(() -> meleeUI.getCameraManager().setTargetController(
+							war3MapViewer.getRenderPeer(whichUnit), xoffset, yoffset, inheritOrientation),
+							FOLLOW_SECONDS);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraPosition",
 				(arguments, globalScope, triggerScope) -> {
 					final float x = arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().jumpTo(x, y);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().jumpTo(x, y));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PanCameraTo",
 				(arguments, globalScope, triggerScope) -> {
 					final float x = arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().panTo(x, y);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().panTo(x, y), UNTIMED_MOVE_SECONDS);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraQuickPosition",
 				(arguments, globalScope, triggerScope) -> {
 					final float x = arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().setQuickPosition(x, y);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().setQuickPosition(x, y));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PanCameraToTimed",
@@ -132,7 +158,7 @@ final class CameraNatives extends CommonNatives {
 					final float x = arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float y = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float duration = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().panToTimed(x, y, duration);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().panToTimed(x, y, duration), duration);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PanCameraToWithZ",
@@ -141,8 +167,10 @@ final class CameraNatives extends CommonNatives {
 					final float y = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float zOffsetDest = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
-					meleeUI.getCameraManager().panTo(x, y);
-					meleeUI.getCameraManager().setTargetZOffset(zOffsetDest);
+					this.link.sendCamera(() -> {
+						meleeUI.getCameraManager().panTo(x, y);
+						meleeUI.getCameraManager().setTargetZOffset(zOffsetDest);
+					}, UNTIMED_MOVE_SECONDS);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PanCameraToTimedWithZ",
@@ -152,8 +180,10 @@ final class CameraNatives extends CommonNatives {
 					final float zOffsetDest = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
 					final float duration = arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().panToTimed(x, y, duration);
-					meleeUI.getCameraManager().setTargetZOffset(zOffsetDest, duration);
+					this.link.sendCamera(() -> {
+						meleeUI.getCameraManager().panToTimed(x, y, duration);
+						meleeUI.getCameraManager().setTargetZOffset(zOffsetDest, duration);
+					}, duration);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraField",
@@ -164,7 +194,7 @@ final class CameraNatives extends CommonNatives {
 					}
 					// The player's own camera: see the camera position natives.
 					return RealJassValue
-							.of(war3MapViewer.replayedLocalValue(meleeUI.getCameraManager().getField(field)));
+							.of(war3MapViewer.replayedLocalValue(this.link.view().cameraField(field)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraField",
 				(arguments, globalScope, triggerScope) -> {
@@ -173,7 +203,7 @@ final class CameraNatives extends CommonNatives {
 					final float duration = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
 					if (field != null) {
-						meleeUI.getCameraManager().setField(field, value, duration);
+						this.link.sendCamera(() -> meleeUI.getCameraManager().setField(field, value, duration), duration);
 					}
 					return null;
 				});
@@ -184,20 +214,20 @@ final class CameraNatives extends CommonNatives {
 					final float duration = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
 					if (field != null) {
-						meleeUI.getCameraManager().adjustField(field, offset, duration);
+						this.link.sendCamera(() -> meleeUI.getCameraManager().adjustField(field, offset, duration), duration);
 					}
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("StopCamera",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCameraManager().stopPan();
+					this.link.sendCamera(() -> meleeUI.getCameraManager().stopPan());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ResetToGameCamera",
 				(arguments, globalScope, triggerScope) -> {
 					final float forceDuration = arguments.get(0).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
-					meleeUI.getCameraManager().resetToGameCamera(forceDuration);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().resetToGameCamera(forceDuration), forceDuration);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCameraFieldControlledByInput",
@@ -205,7 +235,8 @@ final class CameraNatives extends CommonNatives {
 					final CCameraField field = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					final boolean controlled = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 					if (field != null) {
-						meleeUI.getCameraManager().setFieldControlledByInput(field, controlled);
+						this.link.sendCamera(
+								() -> meleeUI.getCameraManager().setFieldControlledByInput(field, controlled));
 					}
 					return null;
 				});
@@ -213,17 +244,16 @@ final class CameraNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CCameraField field = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					return BooleanJassValue
-							.of((field == null) || meleeUI.getCameraManager().isFieldControlledByInput(field));
+							.of((field == null) || this.link.view().fieldControlledByInput(field));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraSetCameraType",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCameraManager()
-							.setCameraType(arguments.get(0).visit(IntegerJassValueVisitor.getInstance()));
+					final int cameraType = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
+					this.link.sendCamera(() -> meleeUI.getCameraManager().setCameraType(cameraType));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("BlzCameraGetCameraType",
-				(arguments, globalScope, triggerScope) -> IntegerJassValue
-						.of(meleeUI.getCameraManager().getCameraType()));
+				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(this.link.view().cameraType()));
 		jassProgramVisitor.getJassNativeManager().createNative("BlzSetCameraAllowsHotkeyTargetLock",
 				(arguments, globalScope, triggerScope) -> {
 					this.cameraAllowsHotkeyTargetLock = arguments.get(0)
@@ -348,7 +378,9 @@ final class CameraNatives extends CommonNatives {
 							ObjectJassValueVisitor.getInstance());
 					final boolean doPan = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 					final boolean panTimed = arguments.get(2).visit(BooleanJassValueVisitor.getInstance());
-					meleeUI.getCameraManager().applyCameraSetup(cameraSetup, doPan, panTimed);
+					final CustomCameraSetup applied = appliedSetup(cameraSetup);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().applyCameraSetup(applied, doPan, panTimed),
+							UNTIMED_MOVE_SECONDS);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CameraSetupApplyWithZ",
@@ -356,8 +388,11 @@ final class CameraNatives extends CommonNatives {
 					final CustomCameraSetup cameraSetup = nullable(arguments, 0,
 							ObjectJassValueVisitor.getInstance());
 					final float zOffset = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					meleeUI.getCameraManager().applyCameraSetup(cameraSetup, true, true);
-					meleeUI.getCameraManager().setTargetZOffset(zOffset);
+					final CustomCameraSetup applied = appliedSetup(cameraSetup);
+					this.link.sendCamera(() -> {
+						meleeUI.getCameraManager().applyCameraSetup(applied, true, true);
+						meleeUI.getCameraManager().setTargetZOffset(zOffset);
+					}, UNTIMED_MOVE_SECONDS);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CameraSetupApplyForceDuration",
@@ -367,7 +402,9 @@ final class CameraNatives extends CommonNatives {
 					final boolean doPan = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 					final float forceDuration = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
-					meleeUI.getCameraManager().applyCameraSetupForceDuration(cameraSetup, doPan, forceDuration);
+					final CustomCameraSetup applied = appliedSetup(cameraSetup);
+					this.link.sendCamera(() -> meleeUI.getCameraManager().applyCameraSetupForceDuration(applied, doPan,
+							forceDuration), forceDuration);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CameraSetupApplyForceDurationWithZ",
@@ -377,8 +414,11 @@ final class CameraNatives extends CommonNatives {
 					final float zOffset = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float forceDuration = arguments.get(2).visit(RealJassValueVisitor.getInstance())
 							.floatValue();
-					meleeUI.getCameraManager().applyCameraSetupForceDuration(cameraSetup, true, forceDuration);
-					meleeUI.getCameraManager().setTargetZOffset(zOffset, forceDuration);
+					final CustomCameraSetup applied = appliedSetup(cameraSetup);
+					this.link.sendCamera(() -> {
+						meleeUI.getCameraManager().applyCameraSetupForceDuration(applied, true, forceDuration);
+						meleeUI.getCameraManager().setTargetZOffset(zOffset, forceDuration);
+					}, forceDuration);
 					return null;
 				});
 	}
@@ -386,59 +426,65 @@ final class CameraNatives extends CommonNatives {
 	private void registerCineFilter() {
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterTexture",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setTexture(nullable(arguments, 0, StringJassValueVisitor.getInstance()));
+					final String texture = nullable(arguments, 0, StringJassValueVisitor.getInstance());
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setTexture(texture));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterBlendMode",
 				(arguments, globalScope, triggerScope) -> {
 					final CBlendMode mode = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-					meleeUI.getCineFilter().setBlendMode(mode);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setBlendMode(mode));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterTexMapFlags",
 				(arguments, globalScope, triggerScope) -> {
 					final Object flags = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-					meleeUI.getCineFilter()
-							.setTexMapFlags(flags instanceof CTexMapFlags ? ((CTexMapFlags) flags).ordinal() : 0);
+					final int texMapFlags = flags instanceof CTexMapFlags ? ((CTexMapFlags) flags).ordinal() : 0;
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setTexMapFlags(texMapFlags));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterStartUV",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setStartUV(realArg(arguments, 0), realArg(arguments, 1),
-							realArg(arguments, 2), realArg(arguments, 3));
+					final float u1 = realArg(arguments, 0), v1 = realArg(arguments, 1), u2 = realArg(arguments, 2),
+							v2 = realArg(arguments, 3);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setStartUV(u1, v1, u2, v2));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterEndUV",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setEndUV(realArg(arguments, 0), realArg(arguments, 1),
-							realArg(arguments, 2), realArg(arguments, 3));
+					final float u1 = realArg(arguments, 0), v1 = realArg(arguments, 1), u2 = realArg(arguments, 2),
+							v2 = realArg(arguments, 3);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setEndUV(u1, v1, u2, v2));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterStartColor",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setStartColor(intArg(arguments, 0), intArg(arguments, 1),
-							intArg(arguments, 2), intArg(arguments, 3));
+					final int r = intArg(arguments, 0), g = intArg(arguments, 1), b = intArg(arguments, 2),
+							a = intArg(arguments, 3);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setStartColor(r, g, b, a));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterEndColor",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setEndColor(intArg(arguments, 0), intArg(arguments, 1),
-							intArg(arguments, 2), intArg(arguments, 3));
+					final int r = intArg(arguments, 0), g = intArg(arguments, 1), b = intArg(arguments, 2),
+							a = intArg(arguments, 3);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setEndColor(r, g, b, a));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetCineFilterDuration",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter().setDuration(realArg(arguments, 0));
+					final float duration = realArg(arguments, 0);
+					this.link.sendCamera(() -> meleeUI.getCineFilter().setDuration(duration));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("DisplayCineFilter",
 				(arguments, globalScope, triggerScope) -> {
-					meleeUI.getCineFilter()
-							.display(arguments.get(0).visit(BooleanJassValueVisitor.getInstance()));
+					final boolean display = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
+					this.link.sendCamera(() -> meleeUI.getCineFilter().display(display));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("IsCineFilterDisplayed",
 				(arguments, globalScope, triggerScope) -> BooleanJassValue
-						.of(meleeUI.getCineFilter().isDisplayed()));
+						.of(this.link.view().cineFilterDisplayed()));
 	}
 }

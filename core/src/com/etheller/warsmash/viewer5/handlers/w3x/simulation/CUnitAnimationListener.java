@@ -42,6 +42,10 @@ public interface CUnitAnimationListener {
 
 	void clearHeadFacing();
 
+	/** The owner's render side has something to do again (a destructable asleep in its loop). Most listeners ignore it. */
+	default void wake() {
+	}
+
 	/** Stands in for the model of a unit that left the game, so the unit no longer keeps its model alive. */
 	CUnitAnimationListener NONE = new CUnitAnimationListener() {
 		@Override

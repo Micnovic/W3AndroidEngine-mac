@@ -32,10 +32,13 @@ final class ScriptObjectNatives {
 	private final War3MapViewer viewer;
 	private final CSimulation simulation;
 
+	private final RenderSide render;
+
 	private ScriptObjectNatives(final JassProgram program, final War3MapViewer viewer) {
 		this.program = program;
 		this.viewer = viewer;
 		this.simulation = viewer.simulation;
+		this.render = RenderSide.of(viewer);
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer) {
@@ -210,7 +213,7 @@ final class ScriptObjectNatives {
 			final CTrackable trackable = ids().assign(
 					new CTrackable(string(arguments, 0), real(arguments, 1), real(arguments, 2), real(arguments, 3)));
 			this.simulation.addTrackable(trackable);
-			this.viewer.showTrackable(trackable);
+			this.render.post(RenderSide.WORLD, () -> this.viewer.showTrackable(trackable));
 			return new HandleJassValue(trackableType, trackable);
 		});
 	}
@@ -225,7 +228,7 @@ final class ScriptObjectNatives {
 					real(arguments, 5), real(arguments, 6), real(arguments, 7), real(arguments, 8), kind);
 			if (CImage.isKnownType(kind) && this.viewer.dataSource.has(file)) {
 				this.simulation.addImage(image);
-				this.viewer.updateImage(image);
+				this.render.post(RenderSide.WORLD, () -> this.viewer.updateImage(image));
 			}
 			return new HandleJassValue(imageType, image);
 		});
@@ -248,7 +251,7 @@ final class ScriptObjectNatives {
 			final CImage image = object(arguments, 0);
 			if ((image != null) && image.isValid() && !image.isDestroyed()) {
 				setter.accept(image, arguments);
-				this.viewer.updateImage(image);
+				this.render.post(RenderSide.WORLD, () -> this.viewer.updateImage(image));
 			}
 			return null;
 		};

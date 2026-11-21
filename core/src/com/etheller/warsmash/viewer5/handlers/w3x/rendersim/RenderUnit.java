@@ -26,6 +26,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.Moveme
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityDataUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons.CommandButtonListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons.CommandCardPopulatingAbilityVisitor;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.Extrapolator;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UnitFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -44,6 +47,9 @@ public class RenderUnit implements RenderWidget {
 	public static final Color DEFAULT = new Color(1, 1, 1, 1);
 	public static final Quaternion tempQuat = new Quaternion();
 	private static final float[] heapZ = new float[3];
+	// Where the unit shows after the presentation clock ran past the newest frame is corrected over a few frames.
+	private static final float CORRECTION_DECAY = 0.6f;
+	private static final float MAX_CORRECTION = 256f;
 	public MdxComplexInstance instance;
 	public final float[] location = new float[3];
 	public float selectionScale;
@@ -95,11 +101,34 @@ public class RenderUnit implements RenderWidget {
 	private RenderUnit preferredSelectionReplacement;
 	private float[] currentColor = { 1, 1, 1, 1 };
 
+	// With a presentation clock the unit is shown from the frames of the game, never from the live simulation unit.
+	private int handleId;
+	private final MovementType[] movementTypes = MovementType.values();
+	private boolean frameMode;
+	private boolean havePose;
+	private final Extrapolator.UnitPose pose = new Extrapolator.UnitPose();
+	private float poseX;
+	private float poseY;
+	private boolean poseDead;
+	private int frameLandmark = LANDMARK_NONE;
+	private boolean frameMinimapIconHidden;
+	private boolean frameUsesAltMinimapIcon;
+	private int frameTeamPlayer;
+	private int frameTeamRelation;
+	private boolean fadeActive;
+	private float fadeRemaining;
+	private float fadeTimeout;
+	private boolean extrapolatedBefore;
+	private float correctionX;
+	private float correctionY;
+
 	public RenderUnit(final War3MapViewer map, final float x, final float y, final float z, final int playerIndex,
 			final CUnit simulationUnit, final RenderUnitType typeData, final BuildingShadow buildingShadow,
 			final float selectionCircleScaleFactor, final float animationWalkSpeed, final float animationRunSpeed,
 			final float scalingValue) {
 		this.simulationUnit = simulationUnit;
+		this.handleId = simulationUnit.getHandleId();
+		this.frameMode = map.getPresentation() != null;
 		resetRenderUnit(map, x, y, z, playerIndex, simulationUnit, typeData, true, buildingShadow,
 				selectionCircleScaleFactor, animationWalkSpeed, animationRunSpeed, scalingValue);
 
@@ -136,7 +165,7 @@ public class RenderUnit implements RenderWidget {
 		instance.setTeamColor(this.playerIndex);
 		instance.setScene(map.worldScene);
 		this.unitAnimationListenerImpl = new UnitAnimationListenerImpl(instance, animationWalkSpeed, animationRunSpeed);
-		simulationUnit.setUnitAnimationListener(this.unitAnimationListenerImpl);
+		map.setSimulationAnimationListener(simulationUnit, this.unitAnimationListenerImpl);
 
 		if (typeData != null) {
 			boolean changedAnimProps = false;
@@ -148,6 +177,7 @@ public class RenderUnit implements RenderWidget {
 			if (changedAnimProps) {
 				this.unitAnimationListenerImpl.forceResetCurrentAnimation();
 			}
+			map.simulationAnimationTagsReady(simulationUnit, this.unitAnimationListenerImpl);
 
 			heapZ[2] = simulationUnit.getFlyHeight();
 			this.location[2] += heapZ[2];
@@ -203,15 +233,51 @@ public class RenderUnit implements RenderWidget {
 
 	@Override
 	public void updateAnimations(final War3MapViewer map) {
-		final int teamColor = map.getAllyColorFilter().worldColor(map.simulation, map.getLocalPlayerIndex(),
-				this.simulationUnit.getFakePlayerIndex(), this.playerIndex);
+		final PresentationClock clock = map.getPresentation();
+		final boolean fromFrame = clock != null;
+		final UnitFrameState frameState;
+		final int frameRow;
+		final int frameFlags;
+		final int teamColor;
+		if (fromFrame) {
+			this.frameMode = true;
+			this.havePose = Extrapolator.sampleUnit(clock, this.handleId, this.pose);
+			if (!this.havePose) {
+				// no frame has the unit yet, it shows once one has
+				this.instance.hide();
+				return;
+			}
+			frameState = this.pose.state;
+			frameRow = this.pose.row;
+			frameFlags = frameState.flags[frameRow];
+			this.poseX = this.pose.x;
+			this.poseY = this.pose.y;
+			this.poseDead = (frameFlags & UnitFrameState.DEAD) != 0;
+			this.frameTeamPlayer = frameState.teamPlayer[frameRow];
+			this.frameTeamRelation = frameState.relation[frameRow];
+			this.frameLandmark = frameState.landmark[frameRow];
+			this.frameMinimapIconHidden = (frameFlags & UnitFrameState.HIDE_MINIMAP_ICON) != 0;
+			this.frameUsesAltMinimapIcon = (frameFlags & UnitFrameState.ALT_MINIMAP_ICON) != 0;
+			this.fadeActive = (frameFlags & UnitFrameState.FADING) != 0;
+			this.fadeRemaining = this.pose.fadeRemaining;
+			this.fadeTimeout = frameState.fadeTimeout[frameRow];
+			teamColor = map.getAllyColorFilter().worldColorOfRelation(this.frameTeamRelation, this.playerIndex);
+		}
+		else {
+			frameState = null;
+			frameRow = -1;
+			frameFlags = 0;
+			teamColor = map.getAllyColorFilter().worldColor(map.simulation, map.getLocalPlayerIndex(),
+					this.simulationUnit.getFakePlayerIndex(), this.playerIndex);
+		}
 		if (teamColor != this.shownTeamColor) {
 			this.shownTeamColor = teamColor;
 			this.instance.setTeamColor(teamColor);
 		}
-		this.instance.teamGlowHidden = !this.simulationUnit.isTeamGlowShown();
+		this.instance.teamGlowHidden = !(fromFrame ? (frameFlags & UnitFrameState.TEAM_GLOW) != 0
+				: this.simulationUnit.isTeamGlowShown());
 		final boolean wasHidden = this.instance.hidden();
-		final boolean removed = this.simulationUnit.isHidden();
+		final boolean removed = fromFrame ? (frameFlags & UnitFrameState.HIDDEN) != 0 : this.simulationUnit.isHidden();
 		if (removed != this.decalsRemovedWhileHidden) {
 			// A hidden building (a gold mine under a Haunted Gold Mine or Entangled Gold Mine) takes its ground
 			// texture and building shadow with it; fog alone keeps them, as for any remembered building.
@@ -219,16 +285,18 @@ public class RenderUnit implements RenderWidget {
 			if (removed) {
 				removeBuildingDecalSplats(map);
 			}
-			else if (this.building && !this.simulationUnit.isDead()) {
+			else if (this.building && !simulationDead()) {
 				createBuildingDecalSplats(map);
 			}
 		}
-		if (this.simulationUnit.isHidden() || !isShownToLocalPlayer(map)) {
+		if (removed || !isShownToLocalPlayer(map, fromFrame, frameFlags)) {
 			if (this.shownToLocalPlayer) {
 				this.shownToLocalPlayer = false;
-				if (!this.dead && (this.fogGhost == null) && !this.simulationUnit.isHidden()
-						&& this.simulationUnit.isBuilding()
-						&& (this.simulationUnit.getPlayerIndex() != map.getLocalPlayerIndex())) {
+				if (!this.dead && (this.fogGhost == null) && !removed
+						&& (fromFrame ? (frameFlags & UnitFrameState.BUILDING) != 0
+								: this.simulationUnit.isBuilding())
+						&& ((fromFrame ? frameState.owner[frameRow] : this.simulationUnit.getPlayerIndex()) != map
+								.getLocalPlayerIndex())) {
 					this.fogGhost = map.addFogGhost(this);
 				}
 			}
@@ -265,33 +333,41 @@ public class RenderUnit implements RenderWidget {
 		}
 		final float prevX = this.location[0];
 		final float prevY = this.location[1];
-		final float simulationX = this.simulationUnit.getX();
-		final float simulationY = this.simulationUnit.getY();
 		final float deltaTime = Gdx.graphics.getDeltaTime();
-		final float simDx = simulationX - this.location[0];
-		final float simDy = simulationY - this.location[1];
-		final float distanceToSimulation = (float) Math.sqrt((simDx * simDx) + (simDy * simDy));
-		final int speed = this.simulationUnit.getSpeed();
-		final float speedDelta = speed * deltaTime;
-		if ((distanceToSimulation > speedDelta) && (deltaTime < 1.0)) {
-			// The 1.0 here says that after 1 second of lag, units just teleport to show
-			// where they actually are
-			this.location[0] += (speedDelta * simDx) / distanceToSimulation;
-			this.location[1] += (speedDelta * simDy) / distanceToSimulation;
-		} else {
-			this.location[0] = simulationX;
-			this.location[1] = simulationY;
+		if (fromFrame) {
+			placeFromFrame();
+		}
+		else {
+			final float simulationX = this.simulationUnit.getX();
+			final float simulationY = this.simulationUnit.getY();
+			final float simDx = simulationX - this.location[0];
+			final float simDy = simulationY - this.location[1];
+			final float distanceToSimulation = (float) Math.sqrt((simDx * simDx) + (simDy * simDy));
+			final int speed = this.simulationUnit.getSpeed();
+			final float speedDelta = speed * deltaTime;
+			if ((distanceToSimulation > speedDelta) && (deltaTime < 1.0)) {
+				// The 1.0 here says that after 1 second of lag, units just teleport to show
+				// where they actually are
+				this.location[0] += (speedDelta * simDx) / distanceToSimulation;
+				this.location[1] += (speedDelta * simDy) / distanceToSimulation;
+			} else {
+				this.location[0] = simulationX;
+				this.location[1] = simulationY;
+			}
 		}
 		final float dx = this.location[0] - prevX;
 		final float dy = this.location[1] - prevY;
 		final float groundHeight;
-		final MovementType movementType = this.simulationUnit.getMovementType();
+		final MovementType movementType = fromFrame ? this.movementTypes[frameState.movementType[frameRow]]
+				: this.simulationUnit.getMovementType();
 		final short terrainPathing = map.terrain.pathingGrid.getPathing(this.location[0], this.location[1]);
 		boolean swimming = (movementType == MovementType.AMPHIBIOUS)
 				&& PathingGrid.isPathingFlag(terrainPathing, PathingGrid.PathingType.SWIMMABLE)
 				&& !PathingGrid.isPathingFlag(terrainPathing, PathingGrid.PathingType.WALKABLE);
-		final boolean invisible = (this.simulationUnit.getInvisLevels() & 1) > 0;
-		final boolean working = this.simulationUnit.getBuildQueueTypes()[0] != null;
+		final boolean invisible = ((fromFrame ? frameState.invisLevels[frameRow] : this.simulationUnit.getInvisLevels())
+				& 1) > 0;
+		final boolean working = fromFrame ? (frameFlags & UnitFrameState.BUSY) != 0
+				: this.simulationUnit.getBuildQueueTypes()[0] != null;
 		final float groundHeightTerrain = map.terrain.getGroundHeight(this.location[0], this.location[1]);
 		float groundHeightTerrainAndWater;
 		MdxComplexInstance currentWalkableUnder;
@@ -351,11 +427,13 @@ public class RenderUnit implements RenderWidget {
 		} else if (!invisible && this.invisible) {
 			// show instantly
 			colorNeedsUpdate = true;
-		} else if ((this.simulationUnit.getFadeTimer() != null) && this.simulationUnit.getFadeTimer().isRunning()) {
+		} else if (fromFrame ? this.fadeActive
+				: (this.simulationUnit.getFadeTimer() != null) && this.simulationUnit.getFadeTimer().isRunning()) {
 			colorNeedsUpdate = true;
 		}
-		final boolean illusionTint = this.simulationUnit.isIllusion() && map.simulation
-				.getPlayer(map.getLocalPlayerIndex()).hasAlliance(this.simulationUnit.getPlayerIndex(), CAllianceType.PASSIVE);
+		final boolean illusionTint = fromFrame ? (frameFlags & UnitFrameState.ILLUSION_ALLY) != 0
+				: this.simulationUnit.isIllusion() && map.simulation.getPlayer(map.getLocalPlayerIndex())
+						.hasAlliance(this.simulationUnit.getPlayerIndex(), CAllianceType.PASSIVE);
 		if (illusionTint != this.illusionTint) {
 			this.illusionTint = illusionTint;
 			colorNeedsUpdate = true;
@@ -366,10 +444,12 @@ public class RenderUnit implements RenderWidget {
 		if (colorNeedsUpdate) {
 			updateColor(map);
 		}
-		final boolean dead = this.simulationUnit.isDead();
-		final boolean corpse = this.simulationUnit.isCorpse();
-		final boolean boneCorpse = this.simulationUnit.isBoneCorpse();
-		final boolean building = this.simulationUnit.isBuilding();
+		final boolean dead = fromFrame ? (frameFlags & UnitFrameState.DEAD) != 0 : this.simulationUnit.isDead();
+		final boolean corpse = fromFrame ? (frameFlags & UnitFrameState.CORPSE) != 0 : this.simulationUnit.isCorpse();
+		final boolean boneCorpse = fromFrame ? (frameFlags & UnitFrameState.BONE_CORPSE) != 0
+				: this.simulationUnit.isBoneCorpse();
+		final boolean building = fromFrame ? (frameFlags & UnitFrameState.BUILDING) != 0
+				: this.simulationUnit.isBuilding();
 		this.instance.groundShadow = !dead && (building ? map.getDynamicShadowManager().isSceneShadows()
 				: this.typeData.getRenderShadowType() != null);
 		if (dead) {
@@ -392,24 +472,28 @@ public class RenderUnit implements RenderWidget {
 			this.building = building;
 		}
 		if (boneCorpse && !this.boneCorpse) {
-			if (this.simulationUnit.getUnitType().isHero()) {
+			final float endingDecayTime = fromFrame ? frameState.decayTime[frameRow]
+					: this.simulationUnit.getEndingDecayTime(map.simulation);
+			if (fromFrame ? (frameFlags & UnitFrameState.HERO) != 0 : this.simulationUnit.getUnitType().isHero()) {
 				this.unitAnimationListenerImpl.playAnimationWithDuration(true, PrimaryTag.DISSIPATE,
-						SequenceUtils.EMPTY, this.simulationUnit.getEndingDecayTime(map.simulation), true);
+						SequenceUtils.EMPTY, endingDecayTime, true);
 			} else {
 				this.unitAnimationListenerImpl.playAnimationWithDuration(true, PrimaryTag.DECAY, SequenceUtils.BONE,
-						this.simulationUnit.getEndingDecayTime(map.simulation), true);
+						endingDecayTime, true);
 			}
 		} else if (corpse && !this.corpse) {
 			this.unitAnimationListenerImpl.playAnimationWithDuration(true, PrimaryTag.DECAY, SequenceUtils.FLESH,
-					map.simulation.getGameplayConstants().getDecayTime(), true);
+					fromFrame ? frameState.decayTime[frameRow]
+							: map.simulation.getGameplayConstants().getDecayTime(),
+					true);
 		}
 		this.dead = dead;
 		this.corpse = corpse;
 		this.boneCorpse = boneCorpse;
-		this.location[2] = this.simulationUnit.getFlyHeight() + groundHeight;
+		this.location[2] = (fromFrame ? this.pose.z : this.simulationUnit.getFlyHeight()) + groundHeight;
 		final float selectionCircleHeight = this.selectionHeight + groundHeight;
 		this.instance.moveTo(this.location);
-		float simulationFacing = this.simulationUnit.getFacing();
+		float simulationFacing = fromFrame ? this.pose.facing : this.simulationUnit.getFacing();
 		if (simulationFacing < 0) {
 			simulationFacing += 360;
 		}
@@ -530,7 +614,12 @@ public class RenderUnit implements RenderWidget {
 					selectionCircleHeight + map.imageWalkableZOffset);
 		}
 		this.unitAnimationListenerImpl.update();
-		if (!dead && this.simulationUnit.isConstructingOrUpgrading()) {
+		if (fromFrame) {
+			if (!dead && ((frameFlags & UnitFrameState.CONSTRUCTING) != 0)) {
+				this.instance.setFrameByRatio(this.pose.constructRatio);
+			}
+		}
+		else if (!dead && this.simulationUnit.isConstructingOrUpgrading()) {
 			final War3ID upgradeIdType = this.simulationUnit.getUpgradeIdType();
 			final CUnitType constructedType = upgradeIdType != null
 					? map.simulation.getUnitData().getUnitType(upgradeIdType)
@@ -538,6 +627,51 @@ public class RenderUnit implements RenderWidget {
 			this.instance.setFrameByRatio(
 					this.simulationUnit.getConstructionProgress() / constructedType.getBuildTime());
 		}
+	}
+
+	/** Places the unit where the frames around the presentation time put it. */
+	private void placeFromFrame() {
+		float x = this.pose.x;
+		float y = this.pose.y;
+		if (this.pose.extrapolated) {
+			this.extrapolatedBefore = true;
+		}
+		else if (this.extrapolatedBefore) {
+			// a frame came after the clock ran past the last one: the way back to the real position is walked, not jumped
+			this.extrapolatedBefore = false;
+			final float errorX = this.location[0] - x;
+			final float errorY = this.location[1] - y;
+			if (((errorX * errorX) + (errorY * errorY)) <= (MAX_CORRECTION * MAX_CORRECTION)) {
+				this.correctionX = errorX;
+				this.correctionY = errorY;
+			}
+			else {
+				this.correctionX = 0;
+				this.correctionY = 0;
+			}
+		}
+		x += this.correctionX;
+		y += this.correctionY;
+		this.correctionX *= CORRECTION_DECAY;
+		this.correctionY *= CORRECTION_DECAY;
+		if (((this.correctionX * this.correctionX) + (this.correctionY * this.correctionY)) < 0.01f) {
+			this.correctionX = 0;
+			this.correctionY = 0;
+		}
+		this.location[0] = x;
+		this.location[1] = y;
+	}
+
+	private float simulationX() {
+		return this.frameMode ? (this.havePose ? this.poseX : this.location[0]) : this.simulationUnit.getX();
+	}
+
+	private float simulationY() {
+		return this.frameMode ? (this.havePose ? this.poseY : this.location[1]) : this.simulationUnit.getY();
+	}
+
+	private boolean simulationDead() {
+		return this.frameMode ? this.poseDead : this.simulationUnit.isDead();
 	}
 
 	private void removeSplats(final War3MapViewer map) {
@@ -568,8 +702,8 @@ public class RenderUnit implements RenderWidget {
 	}
 
 	public void createBuildingDecalSplats(final War3MapViewer map) {
-		final float unitX = this.simulationUnit.getX();
-		final float unitY = this.simulationUnit.getY();
+		final float unitX = simulationX();
+		final float unitY = simulationY();
 		if (this.buildingShadowInstance == null) {
 			final String buildingShadow = this.typeData.getBuildingShadow();
 			if (buildingShadow != null) {
@@ -620,8 +754,8 @@ public class RenderUnit implements RenderWidget {
 	public void repositioned(final War3MapViewer map) {
 		final float prevX = this.location[0];
 		final float prevY = this.location[1];
-		final float simulationX = this.simulationUnit.getX();
-		final float simulationY = this.simulationUnit.getY();
+		final float simulationX = simulationX();
+		final float simulationY = simulationY();
 		final float dx = simulationX - prevX;
 		final float dy = simulationY - prevY;
 		if (this.shadow != null) {
@@ -636,8 +770,8 @@ public class RenderUnit implements RenderWidget {
 		if (this.building && ((dx != 0) || (dy != 0))) {
 			moveBuildingDecals(map, simulationX, simulationY, dx, dy);
 		}
-		this.location[0] = this.simulationUnit.getX();
-		this.location[1] = this.simulationUnit.getY();
+		this.location[0] = simulationX;
+		this.location[1] = simulationY;
 	}
 
 	@Override
@@ -652,7 +786,7 @@ public class RenderUnit implements RenderWidget {
 
 	@Override
 	public boolean isIntersectedOnMeshAlways() {
-		return this.simulationUnit.isBuilding();
+		return this.frameMode ? this.building : this.simulationUnit.isBuilding();
 	}
 
 	@Override
@@ -735,9 +869,9 @@ public class RenderUnit implements RenderWidget {
 				this.buildingShadowHidden = false;
 				final String buildingShadow = this.typeData.getBuildingShadow();
 				if ((this.buildingShadowInstance == null) && (buildingShadow != null) && this.building
-						&& !this.simulationUnit.isDead()) {
-					this.buildingShadowInstance = map.terrain.addShadow(buildingShadow, this.simulationUnit.getX(),
-							this.simulationUnit.getY());
+						&& !simulationDead()) {
+					this.buildingShadowInstance = map.terrain.addShadow(buildingShadow, simulationX(),
+							simulationY());
 				}
 			}
 		}
@@ -769,9 +903,12 @@ public class RenderUnit implements RenderWidget {
 	/**
 	 * A unit that dies where the local player cannot see stays out of sight, a building as it was last seen.
 	 */
-	private boolean isShownToLocalPlayer(final War3MapViewer map) {
+	private boolean isShownToLocalPlayer(final War3MapViewer map, final boolean fromFrame, final int frameFlags) {
 		if (map.isObserverView()) {
 			return true;
+		}
+		if (fromFrame) {
+			return (frameFlags & UnitFrameState.VISIBLE_TO_LOCAL) != 0;
 		}
 		if (this.simulationUnit.isDead()) {
 			return map.getFogOfWar().isVisible(map.simulation, map.simulation.getPathingGrid(),
@@ -794,6 +931,9 @@ public class RenderUnit implements RenderWidget {
 	}
 
 	public boolean groupsWith(final RenderUnit selectedUnit) {
+		if (this.frameMode) {
+			return this.typeData == selectedUnit.typeData;
+		}
 		return this.simulationUnit.getUnitType() == selectedUnit.getSimulationUnit().getUnitType();
 	}
 
@@ -823,6 +963,9 @@ public class RenderUnit implements RenderWidget {
 	 * searched for the mine data, and the minimap asks for every unit every frame.
 	 */
 	public int getMinimapLandmarkKind() {
+		if (this.frameMode) {
+			return this.frameLandmark;
+		}
 		final int abilityCount = this.simulationUnit.getAbilities().size();
 		final CUnitType unitType = this.simulationUnit.getUnitType();
 		if ((abilityCount != this.landmarkAbilityCount) || (unitType != this.landmarkUnitType)) {
@@ -842,6 +985,23 @@ public class RenderUnit implements RenderWidget {
 			return overlayed instanceof CAbilityEntangledMine ? LANDMARK_ENTANGLED_MINE : LANDMARK_OTHER_OVERLAY_MINE;
 		}
 		return unit.getUnitType().isNeutralBuildingShowMinimapIcon() ? LANDMARK_NEUTRAL_BUILDING : LANDMARK_NONE;
+	}
+
+	/** The player the unit is drawn as, and what the local player takes it for; from the frames of the game. */
+	public int getFrameTeamPlayer() {
+		return this.frameTeamPlayer;
+	}
+
+	public int getFrameTeamRelation() {
+		return this.frameTeamRelation;
+	}
+
+	public boolean isFrameMinimapIconHidden() {
+		return this.frameMinimapIconHidden;
+	}
+
+	public boolean isFrameUsesAltMinimapIcon() {
+		return this.frameUsesAltMinimapIcon;
 	}
 
 	public RenderUnitType getTypeData() {
@@ -868,6 +1028,10 @@ public class RenderUnit implements RenderWidget {
 		float finalAlpha = this.currentColor[3];
 		if (this.invisible) {
 			finalAlpha *= 0.5f;
+		} else if (this.frameMode) {
+			if (this.fadeActive && (this.fadeTimeout > 0)) {
+				finalAlpha *= ((this.fadeRemaining / this.fadeTimeout) * 0.5f) + 0.5f;
+			}
 		} else {
 			final CTimer fadeTimer = this.simulationUnit.getFadeTimer();
 			if ((fadeTimer != null) && fadeTimer.isRunning()) {

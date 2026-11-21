@@ -36,7 +36,9 @@ public final class ScriptPreload {
 	public static void load(final War3MapViewer war3MapViewer, final String filename) {
 		if (isLoadable(war3MapViewer, filename)) {
 			try {
-				war3MapViewer.load(filename.trim(), war3MapViewer.mapPathSolver, war3MapViewer.solverParams);
+				// loading makes models and textures, which only the render thread can
+				RenderSide.of(war3MapViewer).run("Preload", () -> war3MapViewer.load(filename.trim(),
+						war3MapViewer.mapPathSolver, war3MapViewer.solverParams));
 			}
 			catch (final Exception exc) {
 				Log.error("Preload(\"" + filename + "\") failed!");

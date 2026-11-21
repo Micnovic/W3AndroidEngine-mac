@@ -105,6 +105,7 @@ final class MapViewerSaves {
 			viewer.setSkyModel(state.skyModel);
 		}
 		viewer.terrain.restoreBlight(state.blightGround, state.blightSeen);
+		viewer.simulation.getTerrainData().restoreBlight(state.blightGround);
 		if (state.fogColor != null) {
 			final FogSettings fog = viewer.worldScene.fogSettings;
 			fog.setStyleByIndex(state.fogStyle);

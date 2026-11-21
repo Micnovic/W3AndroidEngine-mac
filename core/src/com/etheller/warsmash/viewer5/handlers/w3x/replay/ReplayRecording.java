@@ -50,17 +50,17 @@ public final class ReplayRecording implements ReplaySession {
 	}
 
 	/** After each step, before the commands that wait for the step's end are applied. */
-	public void afterStep() {
+	public synchronized void afterStep() {
 		this.recorder.afterStep();
 	}
 
 	@Override
-	public void gameEnded() {
+	public synchronized void gameEnded() {
 		this.recorder.gameEnded();
 	}
 
 	@Override
-	public void close() {
+	public synchronized void close() {
 		if (this.closed) {
 			return;
 		}

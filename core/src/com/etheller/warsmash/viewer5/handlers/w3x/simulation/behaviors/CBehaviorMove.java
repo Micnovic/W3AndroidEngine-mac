@@ -182,6 +182,24 @@ public class CBehaviorMove implements CBehavior {
 		return this.pathfindingActive || ((this.path != null) && !this.path.isEmpty() && this.pathReachesGoal);
 	}
 
+	/**
+	 * Copies the next points of the way being walked, nearest first, as x/y pairs into out starting at offset; returns
+	 * how many points were copied. Only reads.
+	 */
+	public int copyPathPoints(final float[] out, final int offset, final int maxPoints) {
+		final List<CPathPoint> points = this.path;
+		if (points == null) {
+			return 0;
+		}
+		final int count = Math.min(maxPoints, points.size());
+		for (int i = 0; i < count; i++) {
+			final CPathPoint point = points.get(i);
+			out[offset + (i * 2)] = point.x;
+			out[offset + (i * 2) + 1] = point.y;
+		}
+		return count;
+	}
+
 	public CBehaviorMove reset(final AbilityTarget target, final CRangedBehavior rangedBehavior,
 			final boolean disableCollision) {
 		final int highlightOrderId = rangedBehavior.getHighlightOrderId();

@@ -32,6 +32,8 @@ import com.etheller.warsmash.viewer5.FogSettings;
 import com.etheller.warsmash.viewer5.FogStyle;
 import com.etheller.warsmash.viewer5.handlers.w3x.ScriptUiState;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderCommands;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -62,11 +64,15 @@ final class ReforgedMiscNatives {
 	private final War3MapViewer viewer;
 	private final CSimulation simulation;
 	private int minShadowPointLights;
+	private final RenderCommands commands;
+	private final SoundVoices voices;
 
 	private ReforgedMiscNatives(final JassProgram program, final War3MapViewer viewer) {
 		this.program = program;
 		this.viewer = viewer;
 		this.simulation = viewer.simulation;
+		this.commands = new RenderCommands(LocalUiLink.of(viewer, null));
+		this.voices = new SoundVoices(viewer, null, LocalUiLink.of(viewer, null));
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer) {
@@ -85,6 +91,21 @@ final class ReforgedMiscNatives {
 
 	private void add(final String name, final JassFunction function) {
 		this.program.getJassNativeManager().createNative(name, function);
+	}
+
+	/** A native that changes the picture or the interface and returns nothing: it runs on the render side in the frame's order. */
+	private void addCommand(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> {
+			final List<JassValue> copy = new ArrayList<>(arguments);
+			this.commands.send(() -> function.call(copy, globalScope, triggerScope));
+			return null;
+		});
+	}
+
+	/** A native whose result needs the render side: the render thread runs it, after the commands sent before it. */
+	private void addCall(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> this.commands.call(name,
+				() -> function.call(arguments, globalScope, triggerScope)));
 	}
 
 	private static <T> T object(final List<JassValue> arguments, final int index) {
@@ -247,7 +268,7 @@ final class ReforgedMiscNatives {
 			if (unit != null) {
 				final War3ID skin = new War3ID(integer(arguments, 1));
 				unit.setScriptSkinId(skin);
-				this.viewer.setUnitSkin(unit, skin);
+				this.commands.send(() -> this.viewer.setUnitSkin(unit, skin));
 			}
 			return null;
 		});
@@ -259,7 +280,7 @@ final class ReforgedMiscNatives {
 			final CItem item = object(arguments, 0);
 			if (item != null) {
 				final War3ID skin = new War3ID(integer(arguments, 1));
-				if (this.viewer.setItemSkin(item, skin)) {
+				if (this.commands.call("BlzSetItemSkin", () -> this.viewer.setItemSkin(item, skin))) {
 					item.setSkinId(skin);
 				}
 			}
@@ -462,49 +483,49 @@ final class ReforgedMiscNatives {
 
 	private void registerEnvironment() {
 		// The one terrain fog of the renderer: the z range and the linear range both set its range.
-		add("BlzSetTerrainFogStyle", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogStyle", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.setStyleByIndex(constant(arguments, 0) + 1);
 			return null;
 		});
-		add("BlzSetTerrainFogZStart", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogZStart", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.start = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogZEnd", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogZEnd", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.end = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogLinearStart", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogLinearStart", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.start = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogLinearEnd", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogLinearEnd", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.end = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogDensity", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogDensity", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.density = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogHeightStart", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogHeightStart", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.heightMin = real(arguments, 0);
 			return null;
 		});
-		add("BlzSetTerrainFogHeightEnd", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogHeightEnd", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.heightMax = real(arguments, 0);
 			return null;
 		});
 		// Same reading as the map's own fog setting: a value outside (0, 1) is the uncapped fog.
-		add("BlzSetTerrainFogMaxLinearDensity", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogMaxLinearDensity", (arguments, globalScope, triggerScope) -> {
 			final float maxOpacity = real(arguments, 0);
 			this.viewer.worldScene.fogSettings.maxOpacity = ((maxOpacity > 0) && (maxOpacity < 1)) ? maxOpacity : 1f;
 			return null;
 		});
-		add("BlzSetTerrainFogDrawOverSky", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogDrawOverSky", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.drawOverSky = bool(arguments, 0);
 			return null;
 		});
-		add("SetTerrainFogExV", (arguments, globalScope, triggerScope) -> {
+		addCommand("SetTerrainFogExV", (arguments, globalScope, triggerScope) -> {
 			final FogSettings fog = this.viewer.worldScene.fogSettings;
 			fog.setStyleByIndex(integer(arguments, 0) + 1);
 			fog.start = real(arguments, 1);
@@ -521,16 +542,17 @@ final class ReforgedMiscNatives {
 			fog.color = new Color(real(arguments, 8), real(arguments, 9), real(arguments, 10), 1f);
 			return null;
 		});
-		add("BlzSetTerrainFogColor", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzSetTerrainFogColor", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.color = new Color(real(arguments, 0), real(arguments, 1),
 					real(arguments, 2), 1f);
 			return null;
 		});
 		add("StartSoundEx", (arguments, globalScope, triggerScope) -> {
 			final CSound sound = object(arguments, 0);
+			final int tick = this.simulation.getGameTurnTick();
 			// A fade in is not supported: the sound starts at its full volume.
 			if (sound != null) {
-				sound.start(this.simulation.getGameTurnTick());
+				this.voices.start(sound, tick);
 			}
 			return null;
 		});
@@ -628,15 +650,15 @@ final class ReforgedMiscNatives {
 	 */
 	private void registerScriptInterface() {
 		final ScriptUiState state = this.viewer.scriptUiState;
-		add("BlzShowTerrain", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzShowTerrain", (arguments, globalScope, triggerScope) -> {
 			state.setTerrainShown(bool(arguments, 0));
 			return null;
 		});
-		add("BlzShowSkyBox", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzShowSkyBox", (arguments, globalScope, triggerScope) -> {
 			state.setSkyBoxShown(bool(arguments, 0));
 			return null;
 		});
-		add("BlzChangeMinimapTerrainTex", (arguments, globalScope, triggerScope) -> {
+		addCall("BlzChangeMinimapTerrainTex", (arguments, globalScope, triggerScope) -> {
 			final String path = string(arguments, 0);
 			if (!textureExists(path)) {
 				return BooleanJassValue.FALSE;
@@ -644,15 +666,15 @@ final class ReforgedMiscNatives {
 			state.setMinimapTerrainTexture(path);
 			return BooleanJassValue.TRUE;
 		});
-		add("SetPortraitLight", (arguments, globalScope, triggerScope) -> {
+		addCommand("SetPortraitLight", (arguments, globalScope, triggerScope) -> {
 			this.viewer.setPortraitLight(string(arguments, 0));
 			return null;
 		});
-		add("BlzPauseThematicMusicOnFocusLost", (arguments, globalScope, triggerScope) -> {
+		addCommand("BlzPauseThematicMusicOnFocusLost", (arguments, globalScope, triggerScope) -> {
 			state.setPauseThematicMusicOnFocusLost(bool(arguments, 0));
 			return null;
 		});
-		add("SetMaxCheckpointSaves", (arguments, globalScope, triggerScope) -> {
+		addCommand("SetMaxCheckpointSaves", (arguments, globalScope, triggerScope) -> {
 			CheckpointSaves.delete(state.getCheckpointSaves().setMax(integer(arguments, 0)));
 			return null;
 		});
@@ -676,7 +698,7 @@ final class ReforgedMiscNatives {
 				CommandButtonEffect.upgrade(integer(arguments, 0))));
 		add("CreateLearnCommandButtonEffect", (arguments, globalScope, triggerScope) -> newButtonEffect(globalScope,
 				CommandButtonEffect.learn(integer(arguments, 0))));
-		add("DestroyCommandButtonEffect", (arguments, globalScope, triggerScope) -> {
+		addCommand("DestroyCommandButtonEffect", (arguments, globalScope, triggerScope) -> {
 			final CommandButtonEffect effect = object(arguments, 0);
 			if (effect != null) {
 				state.removeCommandButtonEffect(effect);
@@ -686,7 +708,7 @@ final class ReforgedMiscNatives {
 	}
 
 	private JassValue newButtonEffect(final GlobalScope globalScope, final CommandButtonEffect effect) {
-		this.viewer.scriptUiState.addCommandButtonEffect(effect);
+		this.commands.send(() -> this.viewer.scriptUiState.addCommandButtonEffect(effect));
 		return new HandleJassValue(globalScope.getHandleType("commandbuttoneffect"), effect);
 	}
 

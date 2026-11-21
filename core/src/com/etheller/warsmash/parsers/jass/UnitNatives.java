@@ -69,8 +69,11 @@ import java.util.List;
  * Unit natives: creation, life and state, position and movement, appearance and properties.
  */
 final class UnitNatives extends CommonNatives {
+	private final RenderSide render;
+
 	UnitNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.render = RenderSide.of(this.war3MapViewer);
 	}
 
 	@Override
@@ -1330,10 +1333,12 @@ final class UnitNatives extends CommonNatives {
 						return null;
 					}
 					whichUnit.setFacingAndDrawnFacing((float) facing);
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.setFacing((float) facing);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.setFacing((float) facing);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("RemoveGuardPosition",
@@ -1548,10 +1553,12 @@ final class UnitNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final Object whichPlayerColor = arguments.get(1).visit(ObjectJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if ((renderPeer != null) && (whichPlayerColor instanceof CPlayerColor)) {
-						renderPeer.setPlayerColor(((CPlayerColor) whichPlayerColor).ordinal());
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if ((renderPeer != null) && (whichPlayerColor instanceof CPlayerColor)) {
+							renderPeer.setPlayerColor(((CPlayerColor) whichPlayerColor).ordinal());
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitScale",
@@ -1560,30 +1567,36 @@ final class UnitNatives extends CommonNatives {
 					final float scaleX = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float scaleY = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float scaleZ = arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue();
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.instance.setUniformScale(scaleX);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.instance.setUniformScale(scaleX);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitTimeScale",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final float timeScale = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.instance.setAnimationSpeed(timeScale);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.instance.setAnimationSpeed(timeScale);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitBlendTime",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final float blendTime = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.instance.setBlendTime(blendTime);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.instance.setBlendTime(blendTime);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitVertexColor",
@@ -1603,20 +1616,24 @@ final class UnitNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String whichAnimation = arguments.get(1).visit(StringJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if ((renderPeer != null) && (whichAnimation != null)) {
-						renderPeer.queueAnimation(whichAnimation);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if ((renderPeer != null) && (whichAnimation != null)) {
+							renderPeer.queueAnimation(whichAnimation);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitAnimation",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String whichAnimation = arguments.get(1).visit(StringJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if ((renderPeer != null) && (whichAnimation != null)) {
-						renderPeer.playAnimation(whichAnimation);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if ((renderPeer != null) && (whichAnimation != null)) {
+							renderPeer.playAnimation(whichAnimation);
+						}
+					});
 					if (whichUnit != null) {
 						whichUnit.holdScriptAnimation();
 					}
@@ -1625,9 +1642,13 @@ final class UnitNatives extends CommonNatives {
 		jassProgramVisitor.getJassNativeManager().createNative("ResetUnitAnimation",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = whichUnit == null ? null : war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.resetAnimation();
+					if (whichUnit != null) {
+						render.post(RenderSide.WORLD, () -> {
+							final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+							if (renderPeer != null) {
+								renderPeer.resetAnimation();
+							}
+						});
 					}
 					if (whichUnit != null) {
 						whichUnit.releaseScriptAnimation();
@@ -1638,10 +1659,12 @@ final class UnitNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final int whichAnimation = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.playAnimation(whichAnimation);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.playAnimation(whichAnimation);
+						}
+					});
 					if (whichUnit != null) {
 						whichUnit.holdScriptAnimation();
 					}
@@ -1653,10 +1676,12 @@ final class UnitNatives extends CommonNatives {
 					final String whichAnimation = arguments.get(1).visit(StringJassValueVisitor.getInstance());
 					final CRarityControl rarityControl = nullable(arguments, 2,
 							ObjectJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.playAnimationWithRarity(whichAnimation, rarityControl);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.playAnimationWithRarity(whichAnimation, rarityControl);
+						}
+					});
 					if (whichUnit != null) {
 						whichUnit.holdScriptAnimation();
 					}
@@ -1667,10 +1692,12 @@ final class UnitNatives extends CommonNatives {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String animProperties = arguments.get(1).visit(StringJassValueVisitor.getInstance());
 					final boolean add = arguments.get(2).visit(BooleanJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.addAnimationProperties(animProperties, add);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.addAnimationProperties(animProperties, add);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitLookAt",
@@ -1681,20 +1708,24 @@ final class UnitNatives extends CommonNatives {
 					final float offsetX = arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float offsetY = arguments.get(4).visit(RealJassValueVisitor.getInstance()).floatValue();
 					final float offsetZ = arguments.get(5).visit(RealJassValueVisitor.getInstance()).floatValue();
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					final RenderUnit renderPeerTarget = war3MapViewer.getRenderPeer(lookAtTarget);
-					if ((renderPeer != null) && (renderPeerTarget != null)) {
-						renderPeer.lockTargetFacing(boneNameString, renderPeerTarget, offsetX, offsetY, offsetZ);
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						final RenderUnit renderPeerTarget = war3MapViewer.getRenderPeer(lookAtTarget);
+						if ((renderPeer != null) && (renderPeerTarget != null)) {
+							renderPeer.lockTargetFacing(boneNameString, renderPeerTarget, offsetX, offsetY, offsetZ);
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ResetUnitLookAt",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
-					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
-						renderPeer.resetLookAt();
-					}
+					render.post(RenderSide.WORLD, () -> {
+						final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
+						if (renderPeer != null) {
+							renderPeer.resetLookAt();
+						}
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetUnitAnimationByTag",

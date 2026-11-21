@@ -54,6 +54,18 @@ final class MapViewerUpdate {
 		final long frameStart = System.nanoTime();
 		final long frameEnd = frameStart + War3MapViewer.FAST_FORWARD_FRAME_NANOS;
 		viewer.updateTime = 0;
+		viewer.beginSimulationFrame();
+		// with the thread on the skip makes its steps there one by one, the thread makes none of its own meanwhile
+		viewer.beginFastForwardFrame();
+		try {
+			fastForwardFrame(viewer, frameStart, frameEnd);
+		}
+		finally {
+			viewer.endFastForwardFrame();
+		}
+	}
+
+	private static void fastForwardFrame(final War3MapViewer viewer, final long frameStart, final long frameEnd) {
 		boolean blocked = viewer.worldHidden;
 		while (!blocked && (viewer.simulation.getGameTurnTick() < viewer.fastForwardTarget)) {
 			if (viewer.gameEnded
@@ -63,9 +75,9 @@ final class MapViewerUpdate {
 			}
 			viewer.renderController
 					.setPresenting(!War3MapViewer.NO_RENDER && ((viewer.simulation.getGameTurnTick() + 1) >= viewer.fastForwardTarget));
-			viewer.simulation.update();
+			viewer.runSimulationUpdate();
 			viewer.fastForwardSteps++;
-			viewer.gameTurnManager.turnCompleted(viewer.simulation.getGameTurnTick());
+			viewer.runTurnCompleted();
 			MapViewerSaves.runPendingSaveRequests(viewer);
 			if (viewer.isGamePaused() || (System.nanoTime() >= frameEnd)) {
 				break;
@@ -103,9 +115,14 @@ final class MapViewerUpdate {
 	}
 
 	static void stepSimulationWithoutRender(final War3MapViewer viewer) {
+		viewer.beginSimulationFrame();
+		if (viewer.isSimulationThreaded()) {
+			stepThreadedWithoutRender(viewer);
+			return;
+		}
 		if (viewer.isGamePaused()) {
 			MapViewerSaves.runPendingSaveRequests(viewer);
-			viewer.gameTurnManager.whilePaused();
+			viewer.runWhilePaused();
 			return;
 		}
 		if (viewer.worldHidden || viewer.gameEnded) {
@@ -117,14 +134,29 @@ final class MapViewerUpdate {
 				&& (viewer.gameTurnManager.getLatestCompletedTurn() >= viewer.simulation.getGameTurnTick())
 				&& !viewer.isGamePaused()) {
 			viewer.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
-			viewer.simulation.update();
-			viewer.gameTurnManager.turnCompleted(viewer.simulation.getGameTurnTick());
+			viewer.runSimulationUpdate();
+			viewer.runTurnCompleted();
 			MapViewerSaves.runPendingSaveRequests(viewer);
 		}
 		if (viewer.updateTime > (WarsmashConstants.SIMULATION_STEP_TIME * 3)) {
 			viewer.gameTurnManager.framesSkipped(viewer.updateTime / WarsmashConstants.SIMULATION_STEP_TIME);
 			viewer.updateTime = 0;
 		}
+	}
+
+	/**
+	 * A game not drawn, with the thread on: the frame's steps are made there and waited for, as there is nothing else
+	 * to do meanwhile. A pause, a turn not there yet or the game's end stop them there, as the loop above does here.
+	 */
+	private static void stepThreadedWithoutRender(final War3MapViewer viewer) {
+		if (viewer.isGamePaused() || viewer.worldHidden || viewer.gameEnded) {
+			viewer.runGrantedSteps(0);
+			return;
+		}
+		viewer.updateTime += Gdx.graphics.getRawDeltaTime() * viewer.timeScale;
+		final int due = (int) (viewer.updateTime / WarsmashConstants.SIMULATION_STEP_TIME);
+		viewer.updateTime -= due * WarsmashConstants.SIMULATION_STEP_TIME;
+		viewer.runGrantedSteps(due);
 	}
 
 	/**
@@ -192,6 +224,14 @@ final class MapViewerUpdate {
 	}
 
 	static void updateUnitIndicators(final War3MapViewer viewer, final float deltaTime) {
+		if (viewer.unitIndicators.isEmpty()) {
+			return;
+		}
+		// the pulse is around the colour the simulation has for the unit; a frame a step runs, the pulse waits
+		viewer.tryWhileSimulationHeld(() -> pulseUnitIndicators(viewer, deltaTime));
+	}
+
+	private static void pulseUnitIndicators(final War3MapViewer viewer, final float deltaTime) {
 		for (final Iterator<UnitIndicator> iterator = viewer.unitIndicators.iterator(); iterator.hasNext();) {
 			final UnitIndicator indicator = iterator.next();
 			indicator.elapsed += deltaTime;

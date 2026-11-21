@@ -4,6 +4,7 @@ import com.badlogic.gdx.files.FileHandle;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import com.badlogic.gdx.math.Rectangle;
@@ -39,7 +40,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRaceManage
 import com.etheller.warsmash.viewer5.FogSettings;
 import com.etheller.warsmash.viewer5.handlers.w3x.UnitSound;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.camera.CustomCameraSetup;
 import com.etheller.warsmash.viewer5.handlers.w3x.camera.GameCameraManager;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.RenderEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderSpellEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ScriptEffect;
@@ -68,6 +72,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CStoredUni
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerChatEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSound;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.SoundLabelParams;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CSoundVolumeGroup;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitInRangeEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.MeleeUI;
@@ -85,6 +90,11 @@ final class CampaignNatives {
 	private final War3MapViewer viewer;
 	private final WarsmashUI ui;
 	private final CSimulation simulation;
+	/** How long reads go to the render thread after a shake starts (the script names no end for it). */
+	private static final float NOISE_SECONDS = 20f;
+	/** How the natives that reach the local interface do it; see {@link LocalUiLink}. */
+	private final LocalUiLink link;
+	private final SoundVoices voices;
 	private final Map<Integer, CLeaderboard> playerLeaderboards = new HashMap<>();
 
 	private CampaignNatives(final JassProgram program, final War3MapViewer viewer, final WarsmashUI ui) {
@@ -93,6 +103,8 @@ final class CampaignNatives {
 		this.viewer = viewer;
 		this.ui = ui;
 		this.simulation = viewer.simulation;
+		this.link = LocalUiLink.of(viewer, ui);
+		this.voices = new SoundVoices(viewer, ui, this.link);
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer, final WarsmashUI ui) {
@@ -114,6 +126,15 @@ final class CampaignNatives {
 
 	private void add(final String name, final JassFunction function) {
 		this.program.getJassNativeManager().createNative(name, function);
+	}
+
+	/**
+	 * A native that touches objects only the render thread may use. With the simulation on its own thread the caller
+	 * waits while the render thread runs it; the simulation state it needs must be read before it is called.
+	 */
+	private void addRender(final String name, final JassFunction function) {
+		add(name, (arguments, globalScope, triggerScope) -> this.link.onRender(name,
+				() -> function.call(arguments, globalScope, triggerScope)));
 	}
 
 	private HandleJassType type(final String name) {
@@ -316,24 +337,24 @@ final class CampaignNatives {
 			CCampaignProgress.setEndingCinematicAvailable(integer(arguments, 0), bool(arguments, 1));
 			return null;
 		});
-		add("PlayModelCinematic", (arguments, globalScope, triggerScope) -> {
+		addRender("PlayModelCinematic", (arguments, globalScope, triggerScope) -> {
 			this.viewer.playModelCinematic(string(arguments, 0));
 			return null;
 		});
-		add("BlzPlayModelCinematicGameAtPosition", (arguments, globalScope, triggerScope) -> {
+		addRender("BlzPlayModelCinematicGameAtPosition", (arguments, globalScope, triggerScope) -> {
 			this.viewer.playModelCinematicAtPosition(string(arguments, 0), real(arguments, 1), real(arguments, 2),
 					real(arguments, 3), real(arguments, 4));
 			return null;
 		});
-		add("BlzPreloadModelCinematicGame", (arguments, globalScope, triggerScope) -> BooleanJassValue
+		addRender("BlzPreloadModelCinematicGame", (arguments, globalScope, triggerScope) -> BooleanJassValue
 				.of(this.viewer.preloadModelCinematic(string(arguments, 0))));
-		add("BlzGetModelCinematicGameShotCount", (arguments, globalScope, triggerScope) -> IntegerJassValue
+		addRender("BlzGetModelCinematicGameShotCount", (arguments, globalScope, triggerScope) -> IntegerJassValue
 				.of(this.viewer.getModelCinematicShotCount()));
-		add("BlzGetModelCinematicGameCurrentShot", (arguments, globalScope, triggerScope) -> IntegerJassValue
+		addRender("BlzGetModelCinematicGameCurrentShot", (arguments, globalScope, triggerScope) -> IntegerJassValue
 				.of(this.viewer.getModelCinematicCurrentShot()));
-		add("BlzGetModelCinematicGameRemainingTime", (arguments, globalScope, triggerScope) -> RealJassValue
+		addRender("BlzGetModelCinematicGameRemainingTime", (arguments, globalScope, triggerScope) -> RealJassValue
 				.of(this.viewer.getModelCinematicRemainingTime()));
-		add("BlzSetCinematicEnabledDE", (arguments, globalScope, triggerScope) -> {
+		addRender("BlzSetCinematicEnabledDE", (arguments, globalScope, triggerScope) -> {
 			this.viewer.setModelCinematicsEnabled(bool(arguments, 0));
 			return null;
 		});
@@ -350,7 +371,7 @@ final class CampaignNatives {
 		});
 		add("GetCustomCampaignButtonVisible", (arguments, globalScope, triggerScope) -> BooleanJassValue
 				.of(isCampaignMission() && CCampaignProgress.isCustomCampaignButtonVisible(integer(arguments, 0))));
-		add("ReloadGame", (arguments, globalScope, triggerScope) -> {
+		addRender("ReloadGame", (arguments, globalScope, triggerScope) -> {
 			this.viewer.runAfterPendingSave(() -> {
 				this.viewer.setRestartAsNextLevel();
 				this.ui.endGame(false);
@@ -358,10 +379,12 @@ final class CampaignNatives {
 			return null;
 		});
 		add("DisplayLoadDialog", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.displayLoadDialog();
-			}
+			this.link.send(RenderEvent.DIALOG, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.displayLoadDialog();
+				}
+			});
 			return null;
 		});
 		add("SetTutorialCleared", (arguments, globalScope, triggerScope) -> {
@@ -380,11 +403,11 @@ final class CampaignNatives {
 			}
 			return null;
 		});
-		add("ForceCampaignSelectScreen", (arguments, globalScope, triggerScope) -> {
+		addRender("ForceCampaignSelectScreen", (arguments, globalScope, triggerScope) -> {
 			this.viewer.getGameExit().forceCampaignSelectScreen();
 			return null;
 		});
-		add("ChangeLevel", (arguments, globalScope, triggerScope) -> {
+		addRender("ChangeLevel", (arguments, globalScope, triggerScope) -> {
 			final String level = campaignEditionLevel(string(arguments, 0));
 			final boolean showScoreScreen = bool(arguments, 1);
 			this.viewer.runAfterPendingSave(() -> {
@@ -419,25 +442,25 @@ final class CampaignNatives {
 			source.moveTo(target);
 			return BooleanJassValue.of(target.isDirectory());
 		});
-		add("SaveGame", (arguments, globalScope, triggerScope) -> {
+		addRender("SaveGame", (arguments, globalScope, triggerScope) -> {
 			this.viewer.requestSaveGame(CSaveStorage.savedGame(noneIfNull(string(arguments, 0))));
 			return null;
 		});
-		add("LoadGame", (arguments, globalScope, triggerScope) -> {
+		addRender("LoadGame", (arguments, globalScope, triggerScope) -> {
 			this.viewer.requestLoadGame(CSaveStorage.savedGame(noneIfNull(string(arguments, 0))), true);
 			return null;
 		});
-		add("SaveGameCheckpoint", (arguments, globalScope, triggerScope) -> {
+		addRender("SaveGameCheckpoint", (arguments, globalScope, triggerScope) -> {
 			final FileHandle checkpoint = CSaveStorage.savedGame(noneIfNull(string(arguments, 0)));
 			this.viewer.requestSaveGame(checkpoint);
 			CheckpointSaves.delete(this.viewer.scriptUiState.getCheckpointSaves().record(checkpoint));
 			return null;
 		});
-		add("DisableRestartMission", (arguments, globalScope, triggerScope) -> {
+		addRender("DisableRestartMission", (arguments, globalScope, triggerScope) -> {
 			this.viewer.setRestartMissionDisabled(bool(arguments, 0));
 			return null;
 		});
-		add("DoNotSaveReplay", (arguments, globalScope, triggerScope) -> {
+		addRender("DoNotSaveReplay", (arguments, globalScope, triggerScope) -> {
 			this.viewer.doNotSaveReplay();
 			return null;
 		});
@@ -520,26 +543,74 @@ final class CampaignNatives {
 		}
 	}
 
+	/** What a sound native changes, read from its arguments when it is called: it runs again on the voice later. */
+	private interface SoundChange {
+		Consumer<CSound> read(List<JassValue> arguments);
+	}
+
+	private void soundSetter(final String name, final SoundChange change) {
+		add(name, (arguments, globalScope, triggerScope) -> {
+			final CSound sound = object(arguments, 0);
+			if (sound != null) {
+				this.voices.apply(sound, change.read(arguments));
+			}
+			return null;
+		});
+	}
+
 	private void registerSounds() {
 		// The World Editor writes this instead of the separate setters when a sound keeps its label's defaults; the
 		// files and the looping come from CreateSound.
-		add("SetSoundParamsFromLabel", soundSetter(
-				(sound, arguments) -> applyLabelParameters(sound, this.viewer.getSoundLabel(string(arguments, 1)))));
-		add("SetSoundVolume", soundSetter((sound, arguments) -> sound.setVolume(integer(arguments, 1))));
-		add("SetSoundPitch", soundSetter((sound, arguments) -> sound.setPitch(real(arguments, 1))));
-		add("SetSoundChannel", soundSetter((sound, arguments) -> sound.setChannel(integer(arguments, 1))));
-		add("SetSoundPosition", soundSetter(
-				(sound, arguments) -> sound.setPosition(real(arguments, 1), real(arguments, 2), real(arguments, 3))));
-		add("SetSoundPlayPosition", soundSetter((sound, arguments) -> sound.setPlayPosition(integer(arguments, 1))));
-		add("SetSoundVelocity", soundSetter(
-				(sound, arguments) -> sound.setVelocity(real(arguments, 1), real(arguments, 2), real(arguments, 3))));
-		add("SetSoundDistances",
-				soundSetter((sound, arguments) -> sound.setDistances(real(arguments, 1), real(arguments, 2))));
-		add("SetSoundDistanceCutoff", soundSetter((sound, arguments) -> sound.setDistanceCutoff(real(arguments, 1))));
-		add("SetSoundConeAngles", soundSetter((sound, arguments) -> sound.setConeAngles(real(arguments, 1),
-				real(arguments, 2), integer(arguments, 3))));
-		add("SetSoundConeOrientation", soundSetter((sound, arguments) -> sound.setConeOrientation(real(arguments, 1),
-				real(arguments, 2), real(arguments, 3))));
+		soundSetter("SetSoundParamsFromLabel", arguments -> {
+			final String label = string(arguments, 1);
+			SoundLabelParams known = this.viewer.cachedSoundLabelParams(label);
+			if (known == null) {
+				known = this.link.onRender("SoundLabelParams", () -> this.viewer.getSoundLabelParams(label));
+			}
+			final SoundLabelParams params = known;
+			return sound -> params.applyTo(sound);
+		});
+		soundSetter("SetSoundVolume", arguments -> {
+			final int volume = integer(arguments, 1);
+			return sound -> sound.setVolume(volume);
+		});
+		soundSetter("SetSoundPitch", arguments -> {
+			final float pitch = real(arguments, 1);
+			return sound -> sound.setPitch(pitch);
+		});
+		soundSetter("SetSoundChannel", arguments -> {
+			final int channel = integer(arguments, 1);
+			return sound -> sound.setChannel(channel);
+		});
+		soundSetter("SetSoundPosition", arguments -> {
+			final float x = real(arguments, 1), y = real(arguments, 2), z = real(arguments, 3);
+			return sound -> sound.setPosition(x, y, z);
+		});
+		soundSetter("SetSoundPlayPosition", arguments -> {
+			final int millisecs = integer(arguments, 1);
+			return sound -> sound.setPlayPosition(millisecs);
+		});
+		soundSetter("SetSoundVelocity", arguments -> {
+			final float x = real(arguments, 1), y = real(arguments, 2), z = real(arguments, 3);
+			return sound -> sound.setVelocity(x, y, z);
+		});
+		soundSetter("SetSoundDistances", arguments -> {
+			final float min = real(arguments, 1), max = real(arguments, 2);
+			return sound -> sound.setDistances(min, max);
+		});
+		soundSetter("SetSoundDistanceCutoff", arguments -> {
+			final float cutoff = real(arguments, 1);
+			return sound -> sound.setDistanceCutoff(cutoff);
+		});
+		soundSetter("SetSoundConeAngles", arguments -> {
+			final float inside = real(arguments, 1), outside = real(arguments, 2);
+			final int outsideVolume = integer(arguments, 3);
+			return sound -> sound.setConeAngles(inside, outside, outsideVolume);
+		});
+		soundSetter("SetSoundConeOrientation", arguments -> {
+			final float x = real(arguments, 1), y = real(arguments, 2), z = real(arguments, 3);
+			return sound -> sound.setConeOrientation(x, y, z);
+		});
 		add("SetDialogueSpeakerNameKey", (arguments, globalScope, triggerScope) -> {
 			final CSound sound = object(arguments, 0);
 			if (sound != null) {
@@ -566,7 +637,7 @@ final class CampaignNatives {
 			final CSound sound = object(arguments, 0);
 			final CUnit unit = object(arguments, 1);
 			if ((sound != null) && (unit != null)) {
-				sound.attachToUnit(this.viewer.getRenderPeer(unit));
+				this.voices.attach(sound, unit);
 			}
 			return null;
 		});
@@ -576,11 +647,11 @@ final class CampaignNatives {
 		});
 		add("GetSoundFileDuration", (arguments, globalScope, triggerScope) -> {
 			final String fileName = string(arguments, 0);
-			return IntegerJassValue.of(fileName == null ? 0
-					: Math.round(UnitSound.fileDuration(this.viewer.mapMpq, fileName) * 1000));
+			return IntegerJassValue.of(fileName == null ? 0 : Math.round(this.voices.lengthOfFile(fileName) * 1000));
 		});
 		add("SetThematicMusicVolume", (arguments, globalScope, triggerScope) -> {
-			this.ui.setMusicVolume(integer(arguments, 0));
+			final int volume = integer(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.ui.setMusicVolume(volume));
 			return null;
 		});
 		add("GetSoundIsLoading", (arguments, globalScope, triggerScope) -> {
@@ -590,16 +661,17 @@ final class CampaignNatives {
 		add("VolumeGroupSetVolume", (arguments, globalScope, triggerScope) -> {
 			final CSoundVolumeGroup group = object(arguments, 0);
 			if (group != null) {
-				this.viewer.getSoundMixer().setGroupScale(group, real(arguments, 1));
+				final float scale = real(arguments, 1);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.getSoundMixer().setGroupScale(group, scale));
 			}
 			return null;
 		});
 		add("VolumeGroupReset", (arguments, globalScope, triggerScope) -> {
-			this.viewer.getSoundMixer().reset();
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.getSoundMixer().reset());
 			return null;
 		});
 		add("ClearMapMusic", (arguments, globalScope, triggerScope) -> {
-			this.ui.setMapMusic(null, false, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.ui.setMapMusic(null, false, 0));
 			return null;
 		});
 		// Reforged lip sync data for models this engine does not have; stacking only thins out overlapping sounds of
@@ -608,102 +680,90 @@ final class CampaignNatives {
 				"SetSoundFacialAnimationSetFilepath" }) {
 			add(facial, (arguments, globalScope, triggerScope) -> BooleanJassValue.of(object(arguments, 0) != null));
 		}
-		add("RegisterStackedSound", soundSetter((sound, arguments) -> this.viewer.getStackedSounds().register(sound,
-				bool(arguments, 1), real(arguments, 2), real(arguments, 3))));
-		add("UnregisterStackedSound", soundSetter((sound, arguments) -> this.viewer.getStackedSounds()
-				.unregister(sound, bool(arguments, 1), real(arguments, 2), real(arguments, 3))));
-		add("SetCinematicAudio", (arguments, globalScope, triggerScope) -> {
-			this.viewer.getSoundMixer().setCinematicAudio(bool(arguments, 0));
-			return null;
-		});
-		add("KillSoundWhenDone", soundSetter((sound, arguments) -> sound.killWhenDone()));
-	}
-
-	static void applyLabelParameters(final CSound sound, final Element row) {
-		if (row == null) {
-			return;
-		}
-		// Dialogue and MIDI labels only carry a volume.
-		if (!row.getField("Volume").isEmpty()) {
-			sound.setVolume(row.getFieldValue("Volume"));
-		}
-		if (!row.getField("Pitch").isEmpty()) {
-			sound.setPitch(row.getFieldFloatValue("Pitch"));
-			sound.setPitchVariance(hasFlag(row, "RANDOMPITCH") ? row.getFieldFloatValue("PitchVariance") : 0f);
-		}
-		if (!row.getField("Channel").isEmpty()) {
-			sound.setChannel(row.getFieldValue("Channel"));
-		}
-		if (!row.getField("MinDistance").isEmpty()) {
-			sound.setDistances(row.getFieldFloatValue("MinDistance"), row.getFieldFloatValue("MaxDistance"));
-			if (row.hasFieldValue("DistanceCutoff")) {
-				sound.setDistanceCutoff(row.getFieldFloatValue("DistanceCutoff"));
-			}
-		}
-	}
-
-	private static boolean hasFlag(final Element row, final String flag) {
-		for (final String value : row.getField("Flags").split("[,|]")) {
-			if (flag.equals(value.trim())) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private interface SoundSetter {
-		void set(CSound sound, List<JassValue> arguments);
-	}
-
-	private static JassFunction soundSetter(final SoundSetter setter) {
-		return (arguments, globalScope, triggerScope) -> {
+		add("RegisterStackedSound", (arguments, globalScope, triggerScope) -> {
 			final CSound sound = object(arguments, 0);
 			if (sound != null) {
-				setter.set(sound, arguments);
+				final boolean byPosition = bool(arguments, 1);
+				final float width = real(arguments, 2), height = real(arguments, 3);
+				this.voices.render(sound,
+						voice -> this.viewer.getStackedSounds().register(voice, byPosition, width, height));
 			}
 			return null;
-		};
+		});
+		add("UnregisterStackedSound", (arguments, globalScope, triggerScope) -> {
+			final CSound sound = object(arguments, 0);
+			if (sound != null) {
+				final boolean byPosition = bool(arguments, 1);
+				final float width = real(arguments, 2), height = real(arguments, 3);
+				this.voices.render(sound,
+						voice -> this.viewer.getStackedSounds().unregister(voice, byPosition, width, height));
+			}
+			return null;
+		});
+		add("SetCinematicAudio", (arguments, globalScope, triggerScope) -> {
+			final boolean cinematic = bool(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.getSoundMixer().setCinematicAudio(cinematic));
+			return null;
+		});
+		add("KillSoundWhenDone", (arguments, globalScope, triggerScope) -> {
+			final CSound sound = object(arguments, 0);
+			if (sound != null) {
+				this.voices.apply(sound, CSound::killWhenDone);
+			}
+			return null;
+		});
 	}
 
 	private void registerCamera() {
 		final HandleJassType locationType = type("location");
 		add("CameraSetSourceNoise", (arguments, globalScope, triggerScope) -> {
-			camera().setSourceNoise(real(arguments, 0), real(arguments, 1), false);
+			final float magnitude = real(arguments, 0), velocity = real(arguments, 1);
+			this.link.sendCamera(() -> camera().setSourceNoise(magnitude, velocity, false), NOISE_SECONDS);
 			return null;
 		});
 		add("CameraSetTargetNoise", (arguments, globalScope, triggerScope) -> {
-			camera().setTargetNoise(real(arguments, 0), real(arguments, 1), false);
+			final float magnitude = real(arguments, 0), velocity = real(arguments, 1);
+			this.link.sendCamera(() -> camera().setTargetNoise(magnitude, velocity, false), NOISE_SECONDS);
 			return null;
 		});
 		add("CameraSetSourceNoiseEx", (arguments, globalScope, triggerScope) -> {
-			camera().setSourceNoise(real(arguments, 0), real(arguments, 1), bool(arguments, 2));
+			final float magnitude = real(arguments, 0), velocity = real(arguments, 1);
+			final boolean verticalOnly = bool(arguments, 2);
+			this.link.sendCamera(() -> camera().setSourceNoise(magnitude, velocity, verticalOnly), NOISE_SECONDS);
 			return null;
 		});
 		add("CameraSetTargetNoiseEx", (arguments, globalScope, triggerScope) -> {
-			camera().setTargetNoise(real(arguments, 0), real(arguments, 1), bool(arguments, 2));
+			final float magnitude = real(arguments, 0), velocity = real(arguments, 1);
+			final boolean verticalOnly = bool(arguments, 2);
+			this.link.sendCamera(() -> camera().setTargetNoise(magnitude, velocity, verticalOnly), NOISE_SECONDS);
 			return null;
 		});
 		// The camera is the player's own (the mouse, the screen size move it), so a replay keeps what scripts read.
 		add("GetCameraTargetPositionX",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getNoisyTargetX())));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().targetX())));
 		add("GetCameraTargetPositionY",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getNoisyTargetY())));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().targetY())));
 		add("GetCameraTargetPositionZ",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getNoisyTargetZ())));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().targetZ())));
 		add("GetCameraEyePositionX",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getEyeX())));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().eyeX())));
 		add("GetCameraEyePositionY",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getEyeY())));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().eyeY())));
 		add("GetCameraEyePositionZ",
-				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(camera().getEyeZ())));
-		add("GetCameraTargetPositionLoc", (arguments, globalScope, triggerScope) -> new HandleJassValue(locationType,
-				new AbilityPointTarget(local(camera().getNoisyTargetX()), local(camera().getNoisyTargetY()))));
-		add("GetCameraEyePositionLoc", (arguments, globalScope, triggerScope) -> new HandleJassValue(locationType,
-				new AbilityPointTarget(local(camera().getEyeX()), local(camera().getEyeY()))));
+				(arguments, globalScope, triggerScope) -> RealJassValue.of(local(this.link.view().eyeZ())));
+		add("GetCameraTargetPositionLoc", (arguments, globalScope, triggerScope) -> {
+			final LocalUiLink.View view = this.link.view();
+			return new HandleJassValue(locationType, new AbilityPointTarget(local(view.targetX()), local(view.targetY())));
+		});
+		add("GetCameraEyePositionLoc", (arguments, globalScope, triggerScope) -> {
+			final LocalUiLink.View view = this.link.view();
+			return new HandleJassValue(locationType, new AbilityPointTarget(local(view.eyeX()), local(view.eyeY())));
+		});
 		// Measured: a smoothing factor does not change a timed pan (linear with it too); it eases the movement the
 		// player makes with the keys and the screen edge.
 		add("CameraSetSmoothingFactor", (arguments, globalScope, triggerScope) -> {
-			camera().setSmoothingFactor(real(arguments, 0));
+			final float factor = real(arguments, 0);
+			this.link.sendCamera(() -> camera().setSmoothingFactor(factor));
 			return null;
 		});
 		// The picture has no depth of field pass.
@@ -712,32 +772,42 @@ final class CampaignNatives {
 		add("SetCinematicCamera", (arguments, globalScope, triggerScope) -> {
 			final String file = string(arguments, 0);
 			if ((file != null) && !file.isEmpty()) {
-				final String mdx = War3MapViewer.mdx(file);
-				if (this.viewer.dataSource.has(mdx) || this.viewer.dataSource.has(War3MapViewer.mdl(mdx))) {
-					final com.etheller.warsmash.viewer5.handlers.mdx.MdxModel model = this.viewer.loadModelMdx(file);
-					if ((model != null) && !model.getCameras().isEmpty()) {
-						camera().setCinematicCamera(model.getCameras().get(0), model);
+				// loading the model is the render side's work
+				this.link.sendCamera(() -> {
+					final String mdx = War3MapViewer.mdx(file);
+					if (this.viewer.dataSource.has(mdx) || this.viewer.dataSource.has(War3MapViewer.mdl(mdx))) {
+						final com.etheller.warsmash.viewer5.handlers.mdx.MdxModel model = this.viewer.loadModelMdx(file);
+						if ((model != null) && !model.getCameras().isEmpty()) {
+							camera().setCinematicCamera(model.getCameras().get(0), model);
+						}
 					}
-				}
+				}, 60f);
 			}
 			return null;
 		});
 		// Measured: neither changes the camera's rotation or the target the camera natives report, with the unit
 		// turning or moving or the rotation running its time.
 		add("SetCameraRotateMode", (arguments, globalScope, triggerScope) -> {
-			camera().setRotateMode(real(arguments, 0), real(arguments, 1), real(arguments, 2), real(arguments, 3));
+			final float x = real(arguments, 0), y = real(arguments, 1), radians = real(arguments, 2),
+					duration = real(arguments, 3);
+			this.link.sendCamera(() -> camera().setRotateMode(x, y, radians, duration), duration);
 			return null;
 		});
 		add("SetCameraOrientController", (arguments, globalScope, triggerScope) -> {
 			final CUnit unit = object(arguments, 0);
-			camera().setOrientController(unit == null ? null : this.viewer.getRenderPeer(unit), real(arguments, 1),
-					real(arguments, 2));
+			final float xOffset = real(arguments, 1), yOffset = real(arguments, 2);
+			// the unit's peer belongs to the render side: it is looked up there
+			this.link.sendCamera(() -> camera().setOrientController(unit == null ? null : this.viewer.getRenderPeer(unit),
+					xOffset, yOffset));
 			return null;
 		});
 		add("BlzCameraSetupApplyForceDurationSmooth", (arguments, globalScope, triggerScope) -> {
 			final com.etheller.warsmash.viewer5.handlers.w3x.camera.CustomCameraSetup setup = object(arguments, 0);
 			if (setup != null) {
-				camera().applyCameraSetupForceDuration(setup, bool(arguments, 1), real(arguments, 2));
+				final CustomCameraSetup applied = appliedSetup(setup);
+				final boolean doPan = bool(arguments, 1);
+				final float duration = real(arguments, 2);
+				this.link.sendCamera(() -> camera().applyCameraSetupForceDuration(applied, doPan, duration), duration);
 			}
 			return null;
 		});
@@ -754,6 +824,26 @@ final class CampaignNatives {
 		return this.ui.getCameraManager();
 	}
 
+	/** A camera on another thread gets a copy of the script's setup, as for the camera natives of {@link CameraNatives}. */
+	private CustomCameraSetup appliedSetup(final CustomCameraSetup setup) {
+		if (!this.link.isQueued()) {
+			return setup;
+		}
+		final CustomCameraSetup copy = new CustomCameraSetup(setup.getAoa(), setup.getFov(), setup.getRotation(),
+				setup.getRoll(), setup.getDistance(), setup.getFarZ(), setup.getNearZ(), setup.getHeight());
+		copy.setField(com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CCameraField.LOCAL_PITCH,
+				setup.getLocalPitch());
+		copy.setField(com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CCameraField.LOCAL_YAW,
+				setup.getLocalYaw());
+		copy.setField(com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CCameraField.LOCAL_ROLL,
+				setup.getLocalRoll());
+		copy.setDestPositionX(setup.getDestPositionX());
+		copy.setDestPositionY(setup.getDestPositionY());
+		copy.setLabel(setup.getLabel());
+		copy.setCameraType(setup.getCameraType());
+		return copy;
+	}
+
 	private float local(final float value) {
 		return this.viewer.replayedLocalValue(value);
 	}
@@ -764,7 +854,8 @@ final class CampaignNatives {
 			return null;
 		});
 		add("SetSkyModel", (arguments, globalScope, triggerScope) -> {
-			this.viewer.setSkyModel(string(arguments, 0));
+			final String sky = string(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.setSkyModel(sky));
 			return null;
 		});
 		add("MathRound", (arguments, globalScope, triggerScope) -> IntegerJassValue.of(Math.round(real(arguments, 0))));
@@ -776,87 +867,120 @@ final class CampaignNatives {
 					(gameUI != null) && gameUI.hasSkinField(key) ? gameUI.getSkinField(key) : key);
 		});
 		add("EnableSelect", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.enableSelect(bool(arguments, 0), bool(arguments, 1));
-			}
+			final boolean enable = bool(arguments, 0), flag = bool(arguments, 1);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.enableSelect(enable, flag);
+				}
+			});
 			return null;
 		});
 		add("EnableDragSelect", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.enableDragSelect(bool(arguments, 0), bool(arguments, 1));
-			}
+			final boolean enable = bool(arguments, 0), flag = bool(arguments, 1);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.enableDragSelect(enable, flag);
+				}
+			});
 			return null;
 		});
 		add("EnablePreSelect", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.enablePreSelect(bool(arguments, 0), bool(arguments, 1));
-			}
+			final boolean enable = bool(arguments, 0), flag = bool(arguments, 1);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.enablePreSelect(enable, flag);
+				}
+			});
 			return null;
 		});
 		add("EnableMinimapFilterButtons", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.enableMinimapFilterButtons(bool(arguments, 0), bool(arguments, 1));
-			}
+			final boolean enable = bool(arguments, 0), flag = bool(arguments, 1);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.enableMinimapFilterButtons(enable, flag);
+				}
+			});
 			return null;
 		});
 		add("SetCreepCampFilterState", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.setCreepCampFilterState(bool(arguments, 0));
-			}
+			final boolean state = bool(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.setCreepCampFilterState(state);
+				}
+			});
 			return null;
 		});
-		add("GetCreepCampFilterState", (arguments, globalScope, triggerScope) -> {
+		addRender("GetCreepCampFilterState", (arguments, globalScope, triggerScope) -> {
 			final MeleeUI meleeUI = meleeUI();
 			return BooleanJassValue.of((meleeUI != null) && meleeUI.getCreepCampFilterState());
 		});
 		add("SetDoodadAnimation", (arguments, globalScope, triggerScope) -> {
-			this.viewer.setDoodadAnimation(new War3ID(integer(arguments, 3)).toString(), null, real(arguments, 0),
-					real(arguments, 1), real(arguments, 2), bool(arguments, 4), noneIfNull(string(arguments, 5)));
+			final String doodad = new War3ID(integer(arguments, 3)).toString();
+			final float x = real(arguments, 0), y = real(arguments, 1), radius = real(arguments, 2);
+			final boolean nearestOnly = bool(arguments, 4);
+			final String animation = noneIfNull(string(arguments, 5));
+			this.link.send(RenderEvent.FRAME_COMMAND,
+					() -> this.viewer.setDoodadAnimation(doodad, null, x, y, radius, nearestOnly, animation));
 			return null;
 		});
 		add("SetDoodadAnimationRect", (arguments, globalScope, triggerScope) -> {
 			final Rectangle area = object(arguments, 0);
 			if (area != null) {
-				this.viewer.setDoodadAnimation(new War3ID(integer(arguments, 1)).toString(), area, 0, 0, 0, false,
-						noneIfNull(string(arguments, 2)));
+				final String doodad = new War3ID(integer(arguments, 1)).toString();
+				final String animation = noneIfNull(string(arguments, 2));
+				final Rectangle copy = new Rectangle(area);
+				this.link.send(RenderEvent.FRAME_COMMAND,
+						() -> this.viewer.setDoodadAnimation(doodad, copy, 0, 0, 0, false, animation));
 			}
 			return null;
 		});
 		add("SetReservedLocalHeroButtons", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.setReservedLocalHeroButtons(integer(arguments, 0));
-			}
+			final int reserved = integer(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.setReservedLocalHeroButtons(reserved);
+				}
+			});
 			return null;
 		});
 		add("ForceUIKey", (arguments, globalScope, triggerScope) -> {
-			final MeleeUI meleeUI = meleeUI();
-			if (meleeUI != null) {
-				meleeUI.forceUIKey(string(arguments, 0));
-			}
+			final String key = string(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final MeleeUI meleeUI = meleeUI();
+				if (meleeUI != null) {
+					meleeUI.forceUIKey(key);
+				}
+			});
 			return null;
 		});
 		registerUbersplats();
 		registerTerrainDeformations();
 		// Nothing draws occluded units or the water ripples yet. HD water does not exist in the classic graphics.
 		add("EnableOcclusion", (arguments, globalScope, triggerScope) -> {
-			this.viewer.viewSettings.occlusion = bool(arguments, 0);
+			final boolean value = bool(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.viewSettings.occlusion = value);
 			return null;
 		});
 		add("EnableWorldFogBoundary", (arguments, globalScope, triggerScope) -> {
-			this.viewer.viewSettings.worldFogBoundary = bool(arguments, 0);
-			if (this.viewer.terrain != null) {
-				this.viewer.terrain.setWorldFogBoundary(this.viewer.viewSettings.worldFogBoundary);
-			}
+			final boolean value = bool(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				this.viewer.viewSettings.worldFogBoundary = value;
+				if (this.viewer.terrain != null) {
+					this.viewer.terrain.setWorldFogBoundary(value);
+				}
+			});
 			return null;
 		});
 		add("SetWaterDeforms", (arguments, globalScope, triggerScope) -> {
-			this.viewer.viewSettings.waterDeforms = bool(arguments, 0);
+			final boolean value = bool(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.viewSettings.waterDeforms = value);
 			return null;
 		});
 		// The old fog natives take the style, the z range and the density of SetTerrainFogEx, with no colour and one
@@ -880,7 +1004,7 @@ final class CampaignNatives {
 	}
 
 	private void addUbersplatAction(final String name, final UbersplatAction action) {
-		add(name, (arguments, globalScope, triggerScope) -> {
+		addRender(name, (arguments, globalScope, triggerScope) -> {
 			final SimulationRenderComponentUbersplat splat = object(arguments, 0);
 			if (splat != null) {
 				action.run(splat, arguments);
@@ -908,7 +1032,8 @@ final class CampaignNatives {
 			if (state.handleId != -1) {
 				state.imageId = this.simulation.getHandleIdAllocator().createImageId();
 			}
-			return new HandleJassValue(ubersplatType, this.viewer.createUbersplat(state));
+			return new HandleJassValue(ubersplatType,
+					this.link.onRender("CreateUbersplat", () -> this.viewer.createUbersplat(state)));
 		});
 		addUbersplatAction("DestroyUbersplat", (splat, arguments) -> {
 			final SimulationRenderComponentUbersplat.State state = splat.getState();
@@ -965,7 +1090,7 @@ final class CampaignNatives {
 	}
 
 	private void addEffectSetter(final String name, final EffectSetter setter) {
-		add(name, (arguments, globalScope, triggerScope) -> {
+		addRender(name, (arguments, globalScope, triggerScope) -> {
 			final ScriptEffect handle = object(arguments, 0);
 			final RenderSpellEffect effect = handle == null ? null : handle.getLiveEffect();
 			if (effect != null) {
@@ -976,7 +1101,7 @@ final class CampaignNatives {
 	}
 
 	private void addEffectGetter(final String name, final java.util.function.ToDoubleFunction<RenderSpellEffect> getter) {
-		add(name, (arguments, globalScope, triggerScope) -> {
+		addRender(name, (arguments, globalScope, triggerScope) -> {
 			final ScriptEffect handle = object(arguments, 0);
 			final RenderSpellEffect effect = handle == null ? null : handle.getLiveEffect();
 			return RealJassValue.of(effect == null ? 0 : getter.applyAsDouble(effect));
@@ -984,11 +1109,11 @@ final class CampaignNatives {
 	}
 
 	private void registerAllyColorFilter() {
-		add("SetAllyColorFilterState", (arguments, globalScope, triggerScope) -> {
+		addRender("SetAllyColorFilterState", (arguments, globalScope, triggerScope) -> {
 			this.viewer.getAllyColorFilter().setState(integer(arguments, 0));
 			return null;
 		});
-		add("GetAllyColorFilterState", (arguments, globalScope, triggerScope) -> IntegerJassValue
+		addRender("GetAllyColorFilterState", (arguments, globalScope, triggerScope) -> IntegerJassValue
 				.of(this.viewer.getAllyColorFilter().getState()));
 	}
 
@@ -1046,27 +1171,33 @@ final class CampaignNatives {
 
 	private void registerMinimapAndIndicators() {
 		add("PingMinimap", (arguments, globalScope, triggerScope) -> {
-			this.ui.pingMinimap(real(arguments, 0), real(arguments, 1), real(arguments, 2));
+			final float x = real(arguments, 0), y = real(arguments, 1), duration = real(arguments, 2);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.ui.pingMinimap(x, y, duration));
 			return null;
 		});
 		add("PingMinimapEx", (arguments, globalScope, triggerScope) -> {
-			this.ui.pingMinimap(real(arguments, 0), real(arguments, 1), real(arguments, 2), integer(arguments, 3),
-					integer(arguments, 4), integer(arguments, 5), bool(arguments, 6));
+			final float x = real(arguments, 0), y = real(arguments, 1), duration = real(arguments, 2);
+			final int red = integer(arguments, 3), green = integer(arguments, 4), blue = integer(arguments, 5);
+			final boolean extraEffects = bool(arguments, 6);
+			this.link.send(RenderEvent.FRAME_COMMAND,
+					() -> this.ui.pingMinimap(x, y, duration, red, green, blue, extraEffects));
 			return null;
 		});
 		add("UnitAddIndicator", (arguments, globalScope, triggerScope) -> {
 			final CUnit unit = object(arguments, 0);
 			if (unit != null) {
-				this.viewer.addIndicator(unit, integer(arguments, 1), integer(arguments, 2), integer(arguments, 3),
-						integer(arguments, 4));
+				final int red = integer(arguments, 1), green = integer(arguments, 2), blue = integer(arguments, 3),
+						alpha = integer(arguments, 4);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.addIndicator(unit, red, green, blue, alpha));
 			}
 			return null;
 		});
 		add("AddIndicator", (arguments, globalScope, triggerScope) -> {
 			final CWidget widget = object(arguments, 0);
 			if (widget != null) {
-				this.viewer.addIndicator(widget, integer(arguments, 1), integer(arguments, 2), integer(arguments, 3),
-						integer(arguments, 4));
+				final int red = integer(arguments, 1), green = integer(arguments, 2), blue = integer(arguments, 3),
+						alpha = integer(arguments, 4);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.addIndicator(widget, red, green, blue, alpha));
 			}
 			return null;
 		});
@@ -1102,12 +1233,13 @@ final class CampaignNatives {
 		add("DestroyMinimapIcon", (arguments, globalScope, triggerScope) -> {
 			final ScriptMinimapIcon icon = object(arguments, 0);
 			if (icon != null) {
-				this.viewer.getScriptMinimapIcons().remove(icon);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.getScriptMinimapIcons().remove(icon));
 			}
 			return null;
 		});
 		add("SetAltMinimapIcon", (arguments, globalScope, triggerScope) -> {
-			this.viewer.setAltMinimapIcon(string(arguments, 0));
+			final String path = string(arguments, 0);
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.setAltMinimapIcon(path));
 			return null;
 		});
 		add("UnitSetUsesAltIcon", (arguments, globalScope, triggerScope) -> {
@@ -1127,7 +1259,7 @@ final class CampaignNatives {
 				: fogState instanceof ConvertedConstant ? ((ConvertedConstant) fogState).getValue() : 7;
 		final ScriptMinimapIcon icon = new ScriptMinimapIcon(x, y, unit, integer(arguments, first),
 				integer(arguments, first + 1), integer(arguments, first + 2), string(arguments, first + 3), fogMask);
-		this.viewer.getScriptMinimapIcons().add(icon);
+		this.link.send(RenderEvent.FRAME_COMMAND, () -> this.viewer.getScriptMinimapIcons().add(icon));
 		return new HandleJassValue(minimapiconType, icon);
 	}
 
@@ -1539,12 +1671,17 @@ final class CampaignNatives {
 		}
 		add("SetDestructableVertexColor", (arguments, globalScope, triggerScope) -> {
 			final CDestructable destructable = object(arguments, 0);
-			final RenderDestructable peer = destructable == null ? null : this.viewer.getRenderPeer(destructable);
-			if ((peer != null) && (peer.instance instanceof com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance)) {
-				((com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance) peer.instance).setVertexColor(
-						integer(arguments, 1) / 255f, integer(arguments, 2) / 255f, integer(arguments, 3) / 255f,
-						integer(arguments, 4) / 255f);
-			}
+			final float red = integer(arguments, 1) / 255f, green = integer(arguments, 2) / 255f,
+					blue = integer(arguments, 3) / 255f, alpha = integer(arguments, 4) / 255f;
+			// the peer is the render side's: it is looked up there
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+				final RenderDestructable peer = destructable == null ? null : this.viewer.getRenderPeer(destructable);
+				if ((peer != null)
+						&& (peer.instance instanceof com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance)) {
+					((com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance) peer.instance).setVertexColor(red,
+							green, blue, alpha);
+				}
+			});
 			return null;
 		});
 		add("SetDestructableMaxLife", (arguments, globalScope, triggerScope) -> {
@@ -1568,30 +1705,39 @@ final class CampaignNatives {
 		add("ShowDestructable", (arguments, globalScope, triggerScope) -> {
 			final CDestructable destructable = object(arguments, 0);
 			if (destructable != null) {
-				final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
-				if (peer != null) {
-					peer.setHidden(!bool(arguments, 1));
-				}
+				final boolean shown = bool(arguments, 1);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+					final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
+					if (peer != null) {
+						peer.setHidden(!shown);
+					}
+				});
 			}
 			return null;
 		});
 		add("QueueDestructableAnimation", (arguments, globalScope, triggerScope) -> {
 			final CDestructable destructable = object(arguments, 0);
 			if (destructable != null) {
-				final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
-				if (peer != null) {
-					peer.queueAnimation(noneIfNull(string(arguments, 1)));
-				}
+				final String animation = noneIfNull(string(arguments, 1));
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+					final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
+					if (peer != null) {
+						peer.queueAnimation(animation);
+					}
+				});
 			}
 			return null;
 		});
 		add("SetDestructableAnimationSpeed", (arguments, globalScope, triggerScope) -> {
 			final CDestructable destructable = object(arguments, 0);
 			if (destructable != null) {
-				final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
-				if (peer != null) {
-					peer.setAnimationSpeed(real(arguments, 1));
-				}
+				final float speed = real(arguments, 1);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> {
+					final RenderDestructable peer = this.viewer.getRenderPeer(destructable);
+					if (peer != null) {
+						peer.setAnimationSpeed(speed);
+					}
+				});
 			}
 			return null;
 		});
@@ -1607,14 +1753,15 @@ final class CampaignNatives {
 				board.setDisplayed(false);
 				board.clear();
 				this.playerLeaderboards.values().removeIf(board::equals);
-				this.ui.setLeaderboard(null);
+				this.link.send(RenderEvent.FRAME_COMMAND, () -> this.ui.setLeaderboard(null));
 				this.simulation.getHandleIdAllocator().release(board);
 			}
 			return null;
 		});
 		add("LeaderboardDisplay", boardSetter((board, arguments) -> {
 			board.setDisplayed(bool(arguments, 1));
-			this.ui.setLeaderboard(board.isDisplayed() ? board : null);
+			final CLeaderboard shown = board.isDisplayed() ? board : null;
+			this.link.send(RenderEvent.FRAME_COMMAND, () -> this.ui.setLeaderboard(shown));
 		}));
 		add("IsLeaderboardDisplayed", (arguments, globalScope, triggerScope) -> {
 			final CLeaderboard board = object(arguments, 0);
@@ -1704,20 +1851,23 @@ final class CampaignNatives {
 		add("DestroyTimerDialog", (arguments, globalScope, triggerScope) -> {
 			final com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CTimerDialog dialog = object(arguments, 0);
 			if (dialog != null) {
-				dialog.setVisible(false);
-				this.ui.removeTimerDialog(dialog);
+				this.link.onRender("DestroyTimerDialog", () -> {
+					dialog.setVisible(false);
+					this.ui.removeTimerDialog(dialog);
+					return null;
+				});
 				this.simulation.getHandleIdAllocator().release(dialog);
 			}
 			return null;
 		});
-		add("TimerDialogSetTitleColor", (arguments, globalScope, triggerScope) -> {
+		addRender("TimerDialogSetTitleColor", (arguments, globalScope, triggerScope) -> {
 			final com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CTimerDialog dialog = object(arguments, 0);
 			if (dialog != null) {
 				dialog.setTitleColor(color(arguments, 1));
 			}
 			return null;
 		});
-		add("TimerDialogSetTimeColor", (arguments, globalScope, triggerScope) -> {
+		addRender("TimerDialogSetTimeColor", (arguments, globalScope, triggerScope) -> {
 			final com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CTimerDialog dialog = object(arguments, 0);
 			if (dialog != null) {
 				dialog.setTimeColor(color(arguments, 1));

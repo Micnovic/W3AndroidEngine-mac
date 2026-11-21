@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UiFrameState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 
@@ -80,7 +81,7 @@ public final class AllyColorFilter {
 		return this.state >= 2;
 	}
 
-	private static int relation(final CSimulation game, final int localPlayer, final int owner) {
+	public static int relation(final CSimulation game, final int localPlayer, final int owner) {
 		if (owner == localPlayer) {
 			return YOU;
 		}
@@ -88,6 +89,20 @@ public final class AllyColorFilter {
 			return CREEP;
 		}
 		if (game.getPlayer(localPlayer).hasAlliance(owner, CAllianceType.PASSIVE)) {
+			return ALLY;
+		}
+		return ENEMY;
+	}
+
+	/** As {@link #relation(CSimulation, int, int)}, from the players' relations a frame of the game carries. */
+	public static int relation(final UiFrameState players, final int localPlayer, final int owner) {
+		if (owner == localPlayer) {
+			return YOU;
+		}
+		if (((players.neutralAggressiveMask >>> owner) & 1) != 0) {
+			return CREEP;
+		}
+		if (((players.alliancePassive[localPlayer] >>> owner) & 1) != 0) {
 			return ALLY;
 		}
 		return ENEMY;
@@ -101,11 +116,27 @@ public final class AllyColorFilter {
 		return this.worldColors[relation(game, localPlayer, owner)];
 	}
 
+	/** As {@link #worldColor} for a relation {@link #relation} gave, which a frame of the game carries. */
+	public int worldColorOfRelation(final int relation, final int playerColor) {
+		if (!isWorldFiltered()) {
+			return playerColor;
+		}
+		return this.worldColors[relation];
+	}
+
 	/** The color of the owner's minimap dots, or null when the minimap shows player colors. */
 	public float[] minimapColor(final CSimulation game, final int localPlayer, final int owner) {
 		if (!isMinimapFiltered()) {
 			return null;
 		}
 		return this.minimapColors[relation(game, localPlayer, owner)];
+	}
+
+	/** As {@link #minimapColor} for a relation {@link #relation} gave, which a frame of the game carries. */
+	public float[] minimapColorOfRelation(final int relation) {
+		if (!isMinimapFiltered()) {
+			return null;
+		}
+		return this.minimapColors[relation];
 	}
 }

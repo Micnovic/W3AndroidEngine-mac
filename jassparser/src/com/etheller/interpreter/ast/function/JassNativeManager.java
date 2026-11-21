@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import com.etheller.interpreter.ast.definition.JassParameterDefinition;
 import com.etheller.interpreter.ast.scope.Scope;
@@ -19,13 +20,19 @@ public class JassNativeManager {
 	private final Map<String, JassFunction> nameToNativeCode;
 	private final Set<String> registeredNativeNames = new HashSet<>();
 	private final Map<String, HandleJassValue> convertedConstants = new HashMap<>();
+	private BiFunction<String, JassFunction, JassFunction> wrapper;
 
 	public JassNativeManager() {
 		this.nameToNativeCode = new HashMap<>();
 	}
 
 	public void createNative(final String name, final JassFunction nativeCode) {
-		this.nameToNativeCode.put(name, nativeCode);
+		this.nameToNativeCode.put(name, this.wrapper == null ? nativeCode : this.wrapper.apply(name, nativeCode));
+	}
+
+	/** Natives created from now on are wrapped by this (or left as they are for null); how a native is called is its business. */
+	public void setNativeWrapper(final BiFunction<String, JassFunction, JassFunction> wrapper) {
+		this.wrapper = wrapper;
 	}
 
 	/**

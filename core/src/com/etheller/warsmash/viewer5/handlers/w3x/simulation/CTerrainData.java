@@ -196,6 +196,30 @@ public final class CTerrainData {
 		return (int) ((y - this.centerOffsetY) / 128.0f);
 	}
 
+	/** The corner of the cell the point is in, or null outside the map's cells. */
+	public CTerrainCorner getCorner(final float x, final float y) {
+		final int column = cellX(x);
+		final int row = cellY(y);
+		if ((column >= 0) && (column < (this.columns - 1)) && (row >= 0) && (row < (this.rows - 1))) {
+			return this.corners[column][row];
+		}
+		return null;
+	}
+
+	/** Puts back the blight of every corner from bits in corner order, as the drawn terrain captures it. */
+	public void restoreBlight(final byte[] ground) {
+		final int count = this.columns * this.rows;
+		if ((ground == null) || ((ground.length * 8) < count)) {
+			return;
+		}
+		for (int row = 0; row < this.rows; row++) {
+			for (int column = 0; column < this.columns; column++) {
+				final int index = (row * this.columns) + column;
+				this.corners[column][row].setBlight((ground[index >> 3] & (1 << (index & 7))) != 0);
+			}
+		}
+	}
+
 	/** The terrain corner nearest to the point, halves rounding up, as a ground type change picks its center. */
 	private CTerrainCorner nearestCorner(final float x, final float y) {
 		final int column = nearestColumn(x);

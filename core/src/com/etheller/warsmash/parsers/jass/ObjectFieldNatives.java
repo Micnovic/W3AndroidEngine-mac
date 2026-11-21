@@ -107,11 +107,11 @@ final class ObjectFieldNatives {
 	private static final List<String> ITEM_ARMOR_TYPES = Arrays.asList("flesh", "metal", "wood", "ethereal", "stone");
 
 	private static void tintItemField(final String code, final int channel) {
-		ITEM_INT_GET.put(id(code), (n, i) -> {
+		ITEM_INT_GET.put(id(code), (n, i) -> n.render.<Integer>call("BlzGetItemIntegerField", () -> {
 			final RenderItem peer = n.viewer.getRenderPeer(i);
 			return peer == null ? 255 : Math.round(peer.getInstance().vertexColor[channel] * 255f);
-		});
-		ITEM_INT_SET.put(id(code), (n, i, v) -> {
+		}));
+		ITEM_INT_SET.put(id(code), (n, i, v) -> n.render.<Boolean>call("BlzSetItemIntegerField", () -> {
 			final RenderItem peer = n.viewer.getRenderPeer(i);
 			if (peer == null) {
 				return false;
@@ -120,7 +120,7 @@ final class ObjectFieldNatives {
 			color[channel] = Math.max(0, Math.min(255, v)) / 255f;
 			peer.getInstance().setVertexColor(color[0], color[1], color[2], color[3]);
 			return true;
-		});
+		}));
 	}
 
 	private static void tintFields(final String code, final int channel) {
@@ -359,18 +359,18 @@ final class ObjectFieldNatives {
 		tintItemField("iclg", 1);
 		tintItemField("iclb", 2);
 		tintItemField("ical", 3);
-		ITEM_REAL_GET.put(id("isca"), (n, i) -> {
+		ITEM_REAL_GET.put(id("isca"), (n, i) -> n.render.<Float>call("BlzGetItemRealField", () -> {
 			final RenderItem peer = n.viewer.getRenderPeer(i);
 			return peer == null ? 1f : peer.getInstance().localScale.x;
-		});
-		ITEM_REAL_SET.put(id("isca"), (n, i, v) -> {
+		}));
+		ITEM_REAL_SET.put(id("isca"), (n, i, v) -> n.render.<Boolean>call("BlzSetItemRealField", () -> {
 			final RenderItem peer = n.viewer.getRenderPeer(i);
 			if (peer == null) {
 				return false;
 			}
 			peer.getInstance().setUniformScale(v);
 			return true;
-		});
+		}));
 		ITEM_BOOL_GET.put(id("idrp"), (n, i) -> i.isDropOnDeath());
 		ITEM_BOOL_SET.put(id("idrp"), (n, i, v) -> {
 			i.setDropOnDeath(v);
@@ -416,10 +416,13 @@ final class ObjectFieldNatives {
 	private final War3MapViewer viewer;
 	private final CSimulation simulation;
 
+	private final RenderSide render;
+
 	private ObjectFieldNatives(final JassProgram program, final War3MapViewer viewer) {
 		this.program = program;
 		this.viewer = viewer;
 		this.simulation = viewer.simulation;
+		this.render = RenderSide.of(viewer);
 	}
 
 	static void register(final JassProgram program, final War3MapViewer viewer) {

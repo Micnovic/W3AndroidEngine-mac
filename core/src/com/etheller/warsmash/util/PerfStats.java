@@ -3,6 +3,8 @@ package com.etheller.warsmash.util;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 import com.badlogic.gdx.Gdx;
 
@@ -18,6 +20,14 @@ public final class PerfStats {
 
 	public enum Step {
 		UNITS, PROJECTILES, PATHING, TIMERS, JASS, AI, FOG, POST, TAIL, TURN, SAVES
+	}
+
+	/**
+	 * What the simulation thread spends its time on while it runs on its own thread. These are kept apart from
+	 * {@link Section} (which belongs to the render thread's frame) and are reported per simulation step.
+	 */
+	public enum SimSection {
+		STEP, ORDERS, PUBLISH, WAIT
 	}
 
 	public static boolean ENABLED = System.getProperty("warsmash.perf") != null;
@@ -80,6 +90,18 @@ public final class PerfStats {
 	private static int evictedTextures;
 	private static long slowestLoadNanos;
 	private static String slowestLoad;
+	// Written by the simulation thread (sections) or the render thread (the rest) and read at the report, so atomic.
+	private static final AtomicLongArray SIM_THREAD_TOTALS = new AtomicLongArray(SimSection.values().length);
+	private static final AtomicLong SIM_THREAD_STEPS = new AtomicLong();
+	private static final AtomicLong SIM_LEAD_SUM = new AtomicLong();
+	private static final AtomicLong STARVED_FRAMES = new AtomicLong();
+	private static final AtomicLong SLOWED_NANOS = new AtomicLong();
+	private static final AtomicLong EXTRAPOLATED_NANOS = new AtomicLong();
+	private static final AtomicLong LATE_PEERS = new AtomicLong();
+	private static final AtomicLong EVENTS_APPLIED = new AtomicLong();
+	private static final AtomicLong LEAD_FRAMES = new AtomicLong();
+	/** Set by the first simulation thread call; until then the report keeps exactly its single-thread form. */
+	private static volatile boolean simThreadSeen;
 
 	/** The memory the game's model textures hold and how many were let go so far, for the next report. */
 	public static void textures(final long bytes, final int evicted) {
@@ -425,6 +447,90 @@ public final class PerfStats {
 		interfaceDraws += draws;
 	}
 
+	/** Simulation thread: time spent in one part of a step. */
+	public static void simThreadSection(final SimSection section, final long nanos) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			SIM_THREAD_TOTALS.addAndGet(section.ordinal(), nanos);
+		}
+	}
+
+	/** Simulation thread: one step finished. */
+	public static void simThreadStep() {
+		if (ENABLED) {
+			simThreadSeen = true;
+			SIM_THREAD_STEPS.incrementAndGet();
+		}
+	}
+
+	/** Render thread, once per frame: how far the newest simulation time is ahead of the presentation time. */
+	public static void simLead(final long millis) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			SIM_LEAD_SUM.addAndGet(millis);
+			LEAD_FRAMES.incrementAndGet();
+		}
+	}
+
+	/** Render thread: a frame that had to hold the picture because the simulation had nothing newer. */
+	public static void starvedFrame() {
+		if (ENABLED) {
+			simThreadSeen = true;
+			STARVED_FRAMES.incrementAndGet();
+		}
+	}
+
+	/** Render thread: presentation time lost to running slower than real time while waiting for a step. */
+	public static void slowed(final long nanos) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			SLOWED_NANOS.addAndGet(nanos);
+		}
+	}
+
+	/** Render thread: presentation time spent past the last frame, moving units along their paths. */
+	public static void extrapolated(final long nanos) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			EXTRAPOLATED_NANOS.addAndGet(nanos);
+		}
+	}
+
+	/** Render thread: a unit whose model was not ready when its creation event came due. */
+	public static void latePeer(final String type) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			LATE_PEERS.incrementAndGet();
+			if (Gdx.app != null) {
+				Gdx.app.log("PERF", "late peer " + type);
+			}
+		}
+	}
+
+	/** Render thread: events applied from frames in this render frame. */
+	public static void eventsApplied(final int count) {
+		if (ENABLED) {
+			simThreadSeen = true;
+			EVENTS_APPLIED.addAndGet(count);
+		}
+	}
+
+	/** The simulation thread's part of the report; only once something on that thread was measured. */
+	private static void appendSimThread(final StringBuilder line, final long frameCount) {
+		final long steps = SIM_THREAD_STEPS.getAndSet(0);
+		final long leadFrames = LEAD_FRAMES.getAndSet(0);
+		line.append(String.format(Locale.ROOT, " | simthread: sim_lead_ms=%.1f starved_frames=%d slowed_ms=%d extrapolated_ms=%d late_peer=%d events_per_frame=%.1f",
+				leadFrames == 0 ? 0 : SIM_LEAD_SUM.getAndSet(0) / (double) leadFrames, STARVED_FRAMES.getAndSet(0),
+				SLOWED_NANOS.getAndSet(0) / 1_000_000L, EXTRAPOLATED_NANOS.getAndSet(0) / 1_000_000L,
+				LATE_PEERS.getAndSet(0), frameCount == 0 ? 0 : EVENTS_APPLIED.getAndSet(0) / (double) frameCount));
+		line.append(String.format(Locale.ROOT, " sim_steps=%d", steps));
+		for (final SimSection section : SimSection.values()) {
+			line.append(' ').append("sim_").append(section.name().toLowerCase(Locale.ROOT)).append('=')
+					.append(String.format(Locale.ROOT, "%.2f",
+							steps == 0 ? 0 : SIM_THREAD_TOTALS.getAndSet(section.ordinal(), 0) / 1e6 / steps));
+		}
+	}
+
 	private static void report(final long now) {
 		final StringBuilder line = new StringBuilder();
 		final double seconds = (now - reportStart) / 1e9;
@@ -501,6 +607,9 @@ public final class PerfStats {
 				line.append(' ').append(name.toLowerCase(Locale.ROOT)).append('=')
 						.append(String.format(Locale.ROOT, "%.1f", WORST_SECTIONS[i] / 1e6));
 			}
+		}
+		if (simThreadSeen) {
+			appendSimThread(line, frames);
 		}
 		Gdx.app.log("PERF", line.toString());
 		frames = 0;

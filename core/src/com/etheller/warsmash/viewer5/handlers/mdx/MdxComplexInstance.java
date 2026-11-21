@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -23,6 +24,7 @@ import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.Node;
 import com.etheller.warsmash.viewer5.PathSolver;
 import com.etheller.warsmash.viewer5.RenderBatch;
+import com.etheller.warsmash.viewer5.SceneUpdateWorkers;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.SkeletalNode;
 import com.etheller.warsmash.viewer5.Texture;
@@ -34,16 +36,8 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.etheller.warsmash.viewer5.gl.BoneAtlas;
 import com.etheller.warsmash.viewer5.handlers.w3x.DynamicShadowManager;
 
-public class MdxComplexInstance extends ModelInstance {
-	private static final float[] visibilityHeap = new float[1];
-	private static final float[] translationHeap = new float[3];
-	private static final float[] rotationHeap = new float[4];
-	private static final float[] scaleHeap = new float[3];
-	private static final float[] colorHeap = new float[3];
-	private static final float[] alphaHeap = new float[1];
-	private static final long[] textureIdHeap = new long[1];
+public class MdxComplexInstance extends ModelInstance implements SceneUpdateWorkers.Deferred {
 	private static final Vector3 intersectionHeap = new Vector3();
-	private static final Quaternion inverseRotationHeap = new Quaternion();
 
 	public List<LightInstance> lights = Collections.emptyList();
 	public List<AttachmentInstance> attachments = Collections.emptyList();
@@ -112,6 +106,12 @@ public class MdxComplexInstance extends ModelInstance {
 	/** A still copy of a model (a fog ghost) shows no particles, ribbons or event effects of its own. */
 	public boolean emittersSuppressed = false;
 	private boolean hasAnyUnselectableMesh = false;
+
+	/** Per node: 0 nothing to update, 1 the node's object is updated hidden, 2 visible (see updateShared). */
+	private byte[] heldObjects;
+	private float heldDt;
+	private boolean heldForced;
+	private Scene heldScene;
 
 	/** Most instances have none of a kind of these, so they share the empty list until the first one is added. */
 	private static <T> List<T> growable(final List<T> list) {
@@ -364,10 +364,24 @@ public class MdxComplexInstance extends ModelInstance {
 	 * @return whether any node transformation was recalculated, so the bone texture needs an upload
 	 */
 	public boolean updateNodes(final float dt, final boolean forced) {
+		return updateNodes(dt, forced, false);
+	}
+
+	/**
+	 * @param holdObjects whether the objects of the nodes (emitters, attachments) are left to
+	 *                    {@link #updateShared()} instead of being updated with their node
+	 */
+	private boolean updateNodes(final float dt, final boolean forced, final boolean holdObjects) {
 		// A model that finishes loading late loads its instances afterwards; until then they have no nodes.
 		if (!this.model.ok || (this.sortedNodes == null)) {
 			return false;
 		}
+		final SceneUpdateWorkers.Heaps heaps = SceneUpdateWorkers.heaps();
+		final float[] visibilityHeap = heaps.visibility;
+		final float[] translationHeap = heaps.translation;
+		final float[] rotationHeap = heaps.rotationValue;
+		final float[] scaleHeap = heaps.scale;
+		final Quaternion inverseRotationHeap = heaps.inverseRotation;
 		boolean updated = false;
 		final int sequence = this.sequence;
 		final int frame = this.frame;
@@ -485,7 +499,7 @@ public class MdxComplexInstance extends ModelInstance {
 				// If this is a forced update, or this node's local data was updated, or the
 				// parent node was updated, do a full world update.
 				if (wasReallyDirty) {
-					node.recalculateTransformation(scene, blendTimeRatio);
+					node.recalculateTransformation(scene, blendTimeRatio, heaps);
 					updated = true;
 				}
 
@@ -496,7 +510,15 @@ public class MdxComplexInstance extends ModelInstance {
 				final UpdatableObject object = node.object;
 
 				if ((object != null) && !(this.emittersSuppressed && (object instanceof MdxEmitter))) {
-					object.update(dt, objectVisible);
+					if (holdObjects) {
+						if (this.heldObjects == null) {
+							this.heldObjects = new byte[sortedNodes.length];
+						}
+						this.heldObjects[i] = (byte) (objectVisible ? 2 : 1);
+					}
+					else {
+						object.update(dt, objectVisible);
+					}
 				}
 
 				// Update all of the node's non-skeletal children, which will update their
@@ -511,6 +533,13 @@ public class MdxComplexInstance extends ModelInstance {
 	 * Update the batch data.
 	 */
 	public void updateBatches(final boolean forced) {
+		final SceneUpdateWorkers.Heaps heaps = SceneUpdateWorkers.heaps();
+		final float[] colorHeap = heaps.color;
+		final float[] alphaHeap = heaps.alpha;
+		final long[] textureIdHeap = heaps.textureId;
+		final float[] translationHeap = heaps.translation;
+		final float[] rotationHeap = heaps.rotationValue;
+		final float[] scaleHeap = heaps.scale;
 		final int sequence = this.sequence;
 		final int frame = this.frame;
 		final int counter = this.counter;
@@ -685,6 +714,11 @@ public class MdxComplexInstance extends ModelInstance {
 	 * Returns false for a model without bones.
 	 */
 	public boolean bindBones(final ShaderProgram shader) {
+		return bindBones(shader, null);
+	}
+
+	/** @param at the shader's locations, or null to find the uniforms by name */
+	boolean bindBones(final ShaderProgram shader, final MdxLocations at) {
 		if (!this.hasBones) {
 			return false;
 		}
@@ -719,6 +753,13 @@ public class MdxComplexInstance extends ModelInstance {
 			base = 0;
 		}
 		texture.bind(15);
+		if (at != null) {
+			shader.setUniformi(at.boneMap, 15);
+			shader.setUniformf(at.vectorSize, 1f / texture.getWidth());
+			shader.setUniformf(at.rowSize, 1f / texture.getHeight());
+			shader.setUniformf(at.boneBase, base);
+			return true;
+		}
 		shader.setUniformi("u_boneMap", 15);
 		shader.setUniformf("u_vectorSize", 1f / texture.getWidth());
 		shader.setUniformf("u_rowSize", 1f / texture.getHeight());
@@ -905,6 +946,12 @@ public class MdxComplexInstance extends ModelInstance {
 			return;
 		}
 		final int sequenceId = this.sequence;
+		final Scene scene = this.scene;
+		final boolean deferrable = (scene != null) && canDefer();
+		if ((scene != null) && !deferrable && hasSharedEffects()) {
+			// What this update does to the scene must happen after what the updates before it did.
+			scene.flushDeferred();
+		}
 
 		advanceSequenceClock(dt);
 
@@ -915,35 +962,70 @@ public class MdxComplexInstance extends ModelInstance {
 		}
 		final boolean forced = this.forced;
 
-		if (sequenceId == -1) {
-			if (forced) {
-				// Update the nodes
+		if ((sequenceId != -1) || forced) {
+			if (deferrable && (this.facePlayback == null) && (this.scene == scene) && scene.defer(this)) {
+				// Runs with the other instances' on the scene's workers.
+				this.heldDt = dt;
+				this.heldForced = forced;
+				this.heldScene = scene;
+			}
+			else {
 				if (updateNodes(dt, forced)) {
 					updateBoneTexture();
 				}
-
-				// Update the batches
 				updateBatches(forced);
 			}
 		}
-		else {
-			// let variants = model.variants;
-
-			// if (forced || variants.nodes[sequenceId]) {
-			// Update the nodes
-			if (updateNodes(dt, forced)) {
-				updateBoneTexture();
-			}
-			// }
-
-			// if (forced || variants.batches[sequenceId]) {
-			// Update the batches
-			updateBatches(forced);
-			// }
-		}
 
 		this.forced = false;
+	}
 
+	/** Whether the update touches only this instance and, in the shared part, the objects of its own nodes. */
+	private boolean canDefer() {
+		return (this.parent == null) && this.childrenInstances.isEmpty() && this.attachments.isEmpty()
+				&& this.lights.isEmpty() && (this.facePlayback == null);
+	}
+
+	/** Whether the update can change other objects: the scene's, or instances attached to this one. */
+	private boolean hasSharedEffects() {
+		return !this.attachments.isEmpty() || !this.lights.isEmpty() || !this.eventObjectEmitters.isEmpty()
+				|| !this.particleEmitters.isEmpty() || !this.particleEmitters2.isEmpty()
+				|| !this.ribbonEmitters.isEmpty();
+	}
+
+	@Override
+	public void updateIsolated() {
+		if (this.heldScene != this.scene) {
+			// Removed from the scene after it was queued.
+			return;
+		}
+		if (this.heldObjects != null) {
+			Arrays.fill(this.heldObjects, (byte) 0);
+		}
+		if (updateNodes(this.heldDt, this.heldForced, true)) {
+			updateBoneTexture();
+		}
+		updateBatches(this.heldForced);
+	}
+
+	@Override
+	public void updateShared() {
+		final Scene queuedIn = this.heldScene;
+		this.heldScene = null;
+		final byte[] held = this.heldObjects;
+		if ((held == null) || (queuedIn != this.scene)) {
+			return;
+		}
+		final SkeletalNode[] sortedNodes = this.sortedNodes;
+		for (int i = 0, l = sortedNodes.length; i < l; i++) {
+			final byte state = held[i];
+			if (state != 0) {
+				final UpdatableObject object = sortedNodes[i].object;
+				if (object != null) {
+					object.update(this.heldDt, state == 2);
+				}
+			}
+		}
 	}
 
 	@Override
@@ -1214,6 +1296,7 @@ public class MdxComplexInstance extends ModelInstance {
 	 */
 	public boolean intersectRayWithMeshSlow(final Ray ray, final Vector3 intersection) {
 		final MdxModel mdxModel = (MdxModel) this.model;
+		final float[] alphaHeap = SceneUpdateWorkers.heaps().alpha;
 		boolean intersected = false;
 		ray.getEndPoint(intersection, 99999);
 		for (final Geoset geoset : mdxModel.geosets) {
@@ -1244,6 +1327,7 @@ public class MdxComplexInstance extends ModelInstance {
 			final boolean onlyUseMesh) {
 		final MdxModel mdxModel = (MdxModel) this.model;
 		final List<CollisionShape> collisionShapes = mdxModel.collisionShapes;
+		final float[] alphaHeap = SceneUpdateWorkers.heaps().alpha;
 		if (!onlyUseMesh) {
 			for (final CollisionShape collisionShape : collisionShapes) {
 				final MdxNode mdxNode = this.nodes[collisionShape.index];

@@ -65,8 +65,13 @@ public final class GameCameraManager extends CameraManager {
 	private final Vector3 noisyTarget = new Vector3();
 	private final MovingState renderState = new MovingState();
 	private IntSupplier stepClock;
+	/** The step the picture shows; with a simulation thread the simulation's own step may be ahead of it. */
+	private IntSupplier presentedClock;
+	private boolean stepPinned;
 	private GroundHeight groundHeight;
 	private int steppedTick;
+	private int lastPresentedTick;
+	private int lastSimulationTick;
 	private float renderLead;
 	private float roll;
 	private float localPitch;
@@ -152,20 +157,73 @@ public final class GameCameraManager extends CameraManager {
 		updateView();
 	}
 
+	/** The interface moves the camera with the step the picture shows, not the simulation's own. */
+	public void setPresentedClock(final IntSupplier presentedClock) {
+		this.presentedClock = presentedClock;
+	}
+
 	/**
-	 * Brings the camera up to the current game step. The camera natives call it before they read.
+	 * Brings the camera up to the step the picture shows. Every camera call of the interface makes it first, so the
+	 * camera is never read from the simulation's own step.
 	 */
 	public void syncToGameStep() {
 		if (this.stepClock == null) {
 			return;
 		}
-		final int tick = this.stepClock.getAsInt();
+		final int tick = (this.presentedClock != null ? this.presentedClock : this.stepClock).getAsInt();
+		if (tick < this.lastPresentedTick) {
+			// a game loaded or restarted: the steps start over
+			this.steppedTick = Math.min(this.steppedTick, tick);
+		}
+		this.lastPresentedTick = tick;
+		syncToTick(tick);
+	}
+
+	/**
+	 * Brings the camera up to the simulation's current step. The camera natives call it before they read, on the thread
+	 * the simulation waits on, so a script sees the camera as of its own step.
+	 */
+	public void syncToSimulationStep() {
+		if (this.stepClock != null) {
+			final int tick = this.stepClock.getAsInt();
+			if (tick < this.lastSimulationTick) {
+				this.steppedTick = Math.min(this.steppedTick, tick);
+			}
+			this.lastSimulationTick = tick;
+			syncToTick(tick);
+		}
+	}
+
+	private void syncToTick(final int tick) {
+		if (this.stepPinned) {
+			return;
+		}
 		while (this.steppedTick < tick) {
 			advance(WarsmashConstants.SIMULATION_STEP_TIME);
 			this.steppedTick++;
 			this.renderLead = Math.max(0, this.renderLead - WarsmashConstants.SIMULATION_STEP_TIME);
 		}
-		this.steppedTick = tick;
+	}
+
+	/**
+	 * Runs what a script asked of the camera at the step it asked it in, whenever the interface gets to it: the camera
+	 * is brought to that step and stays there until the command is done.
+	 */
+	public void runAtStep(final int tick, final Runnable command) {
+		syncToTick(tick);
+		final boolean wasPinned = this.stepPinned;
+		this.stepPinned = true;
+		try {
+			command.run();
+		}
+		finally {
+			this.stepPinned = wasPinned;
+		}
+	}
+
+	/** {@link #runAtStep} for a command made on the thread of the simulation itself. */
+	public void runAtSimulationStep(final Runnable command) {
+		runAtStep(this.stepClock == null ? this.steppedTick : this.stepClock.getAsInt(), command);
 	}
 
 	/**

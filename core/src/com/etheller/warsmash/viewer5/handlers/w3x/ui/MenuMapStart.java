@@ -441,7 +441,7 @@ final class MenuMapStart {
 						final CPlayerUnitOrderListenerDelaying delayingListener = new CPlayerUnitOrderListenerDelaying(
 								new CPlayerCommandRecorder(this.loadingMap.viewer.simulation, localPlayerIndex,
 										executor));
-						uiOrderListener = delayingListener;
+						uiOrderListener = mapViewer.threadedOrderListener(delayingListener, localPlayerIndex);
 						warsmashClient = null;
 						final ReplayRecording recording = startRecording(mapViewer);
 						mapViewer.setGameTurnManager(new GameTurnManager() {

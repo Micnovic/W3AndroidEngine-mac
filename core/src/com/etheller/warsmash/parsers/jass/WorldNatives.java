@@ -37,8 +37,11 @@ import java.util.ArrayList;
  * Fog of war, visibility, weather, time of day, game state and cheats.
  */
 final class WorldNatives extends CommonNatives {
+	private final RenderSide render;
+
 	WorldNatives(final CommonEnvironment environment) {
 		super(environment);
+		this.render = RenderSide.of(this.war3MapViewer);
 	}
 
 	@Override
@@ -75,17 +78,19 @@ final class WorldNatives extends CommonNatives {
 					final Double r = arguments.get(4).visit(RealJassValueVisitor.getInstance());
 					final Double g = arguments.get(5).visit(RealJassValueVisitor.getInstance());
 					final Double b = arguments.get(6).visit(RealJassValueVisitor.getInstance());
-					war3MapViewer.worldScene.fogSettings.color = new Color(r.floatValue(), g.floatValue(),
-							b.floatValue(), 1.0f);
-					war3MapViewer.worldScene.fogSettings.density = density.floatValue();
-					war3MapViewer.worldScene.fogSettings.start = start.floatValue();
-					war3MapViewer.worldScene.fogSettings.end = end.floatValue();
-					war3MapViewer.worldScene.fogSettings.setStyleByIndex(fogStyle + 1);
+					final Color color = new Color(r.floatValue(), g.floatValue(), b.floatValue(), 1.0f);
+					render.post(RenderSide.WORLD, () -> {
+						war3MapViewer.worldScene.fogSettings.color = color;
+						war3MapViewer.worldScene.fogSettings.density = density.floatValue();
+						war3MapViewer.worldScene.fogSettings.start = start.floatValue();
+						war3MapViewer.worldScene.fogSettings.end = end.floatValue();
+						war3MapViewer.worldScene.fogSettings.setStyleByIndex(fogStyle + 1);
+					});
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("ResetTerrainFog",
 				(arguments, globalScope, triggerScope) -> {
-					war3MapViewer.resetTerrainFog();
+					render.post(RenderSide.WORLD, war3MapViewer::resetTerrainFog);
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetFloatGameState",
@@ -136,6 +141,7 @@ final class WorldNatives extends CommonNatives {
 		jassProgramVisitor.getJassNativeManager().createNative("PauseGame",
 				(arguments, globalScope, triggerScope) -> {
 					final boolean flag = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
+					// only sets a bit the simulation reads before its next step, so no render thread is needed
 					war3MapViewer.setGamePaused(War3MapViewer.PauseSource.SCRIPT, flag);
 					return null;
 				});
@@ -145,8 +151,8 @@ final class WorldNatives extends CommonNatives {
 					final int green = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 					final int blue = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 					final int alpha = arguments.get(3).visit(IntegerJassValueVisitor.getInstance());
-					war3MapViewer.setWaterBaseColor(
-							new float[] { red / 255f, green / 255f, blue / 255f, alpha / 255f });
+					final float[] color = { red / 255f, green / 255f, blue / 255f, alpha / 255f };
+					render.post(RenderSide.WORLD, () -> war3MapViewer.setWaterBaseColor(color));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AddWeatherEffect",
@@ -157,8 +163,9 @@ final class WorldNatives extends CommonNatives {
 						return new HandleJassValue(weathereffectType, null);
 					}
 					return new HandleJassValue(weathereffectType,
-							war3MapViewer.createWeatherEffect(new War3ID(effectId), where.x, where.y,
-									where.x + where.width, where.y + where.height));
+							render.<SimulationRenderComponentWeather>call("AddWeatherEffect",
+									() -> war3MapViewer.createWeatherEffect(new War3ID(effectId), where.x, where.y,
+											where.x + where.width, where.y + where.height)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("EnableWeatherEffect",
 				(arguments, globalScope, triggerScope) -> {
@@ -166,7 +173,7 @@ final class WorldNatives extends CommonNatives {
 							ObjectJassValueVisitor.getInstance());
 					final boolean enable = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 					if (weather != null) {
-						weather.setEnabled(enable);
+						render.post(RenderSide.WORLD, () -> weather.setEnabled(enable));
 					}
 					return null;
 				});
@@ -175,7 +182,7 @@ final class WorldNatives extends CommonNatives {
 					final SimulationRenderComponentWeather weather = nullable(arguments, 0,
 							ObjectJassValueVisitor.getInstance());
 					if (weather != null) {
-						weather.remove();
+						render.post(RenderSide.WORLD, weather::remove);
 					}
 					return null;
 				});
@@ -210,7 +217,7 @@ final class WorldNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final String terrainDNCFile = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 					final String unitDNCFile = arguments.get(1).visit(StringJassValueVisitor.getInstance());
-					war3MapViewer.setDayNightModels(terrainDNCFile, unitDNCFile);
+					render.post(RenderSide.WORLD, () -> war3MapViewer.setDayNightModels(terrainDNCFile, unitDNCFile));
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SuspendTimeOfDay",

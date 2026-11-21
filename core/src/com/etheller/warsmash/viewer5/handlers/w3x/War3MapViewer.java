@@ -17,6 +17,9 @@ import com.etheller.interpreter.ast.value.visitor.ArithmeticLeftHandHandleJassVa
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CGlobalWidgetEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CWidgetEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundMixer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.SimSound;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.SoundLabelInfo;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.SoundLabelParams;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CStackedSounds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CWidgetAbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.BuildOnBuildingIntersector;
@@ -41,7 +44,6 @@ import java.nio.channels.SeekableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -55,6 +57,7 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.BiFunction;
 import com.etheller.warsmash.util.StreamBytes;
 import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxLight;
@@ -78,6 +81,7 @@ import com.etheller.warsmash.datasources.GraphicsSet;
 import com.etheller.warsmash.datasources.LayeredDataSource;
 import com.etheller.warsmash.datasources.MpqDataSource;
 import com.etheller.warsmash.datasources.SubdirDataSource;
+import com.etheller.interpreter.ast.function.JassFunction;
 import com.etheller.warsmash.networking.GameTurnManager;
 import com.etheller.warsmash.parsers.facefx.FaceFxLibrary;
 import com.etheller.warsmash.parsers.fdf.FrameTemplatePrefetch;
@@ -125,6 +129,7 @@ import com.etheller.warsmash.viewer5.handlers.mdx.MdxHandler.ShaderEnvironmentTy
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.SplatModel.SplatMover;
+import com.etheller.warsmash.viewer5.handlers.w3x.environment.RenderCorner;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.lightning.LightningEffectModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
@@ -142,6 +147,17 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitTypeData;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget.UnitAnimationListenerImpl;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.LocalUiLink;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.PresentationClock;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameSource;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UiFrameWriter;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadMode;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CProjectile;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderController;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityDataUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.BuffUI;
@@ -171,7 +187,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPla
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState;
-import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightning;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightningMovable;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.MeleeUI;
@@ -184,7 +199,7 @@ import mpq.MPQException;
 
 
 
-public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoader {
+public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoader, UiFrameSource.Holder, LocalUiLink.Holder {
 	private static final int MAX_STEPS_PER_FRAME = 3;
 	// A sound not decoded by then plays as soon as it is; the start of the game does not wait longer for it.
 	static final long SOUND_PRELOAD_WAIT_MILLIS = 3000;
@@ -194,6 +209,8 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	static final byte MASKED_PARTIALLY_VISIBLE_SHADE = (byte) 214;
 	// Supported graphics modes of the map information: 1 Classic, 2 Reforged, 3 either.
 	private static final long SUPPORTED_MODES_REFORGED = 2;
+	/** Bits by {@link PauseSource}; the simulation thread reads it before each step and the commands it applies set it. */
+	private volatile int pauseSources;
 	/** The models read on helper threads that are built in one frame: one at least, more while this lasts. */
 	private static final long MODEL_FINISH_SLICE_NANOS = 2_000_000L;
 	/** Up to the first fog update, 0.4 s into the game, the last of the game's slow first steps. */
@@ -201,7 +218,6 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	/** A scene update with no time passing skips the animation work the first real one has to do. */
 	private static final float OPENING_UPDATE_SECONDS = 0.001f;
 	private boolean openingStepsPlayed;
-	private final EnumSet<PauseSource> pauseSources = EnumSet.noneOf(PauseSource.class);
 	float timeScale = defaultTimeScale;
 	private final CGameExit gameExit = new CGameExit();
 	final CSoundMixer soundMixer = new CSoundMixer();
@@ -230,13 +246,13 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public static final StreamDataCallbackImplementation streamDataCallback = new StreamDataCallbackImplementation();
 
 	public WorldScene worldScene;
-	boolean worldHidden;
+	volatile boolean worldHidden;
 	/** The part of the screen the world is drawn at, stretched to fill (see {@link RenderScaler}). */
 	float renderScale = 1f;
 	final RenderScaler renderScaler = new RenderScaler();
 	NoRenderController renderController;
 	/** The step the game plays on to without drawing (see {@link #fastForwardTo}), or -1. */
-	int fastForwardTarget = -1;
+	volatile int fastForwardTarget = -1;
 	FastForwardListener fastForwardReached;
 	int fastForwardSteps;
 	long fastForwardNanos;
@@ -265,7 +281,6 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private boolean modelCinematicsEnabled = true;
 	final List<UnitIndicator> unitIndicators = new ArrayList<>();
 	public List<RenderDoodad> decals = new ArrayList<>();
-	private int fogDoodadTicks;
 	public List<TerrainDoodad> terrainDoodads = new ArrayList<>();
 	public boolean doodadsReady;
 	public boolean unitsAndItemsLoaded;
@@ -339,7 +354,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	private ReplaySession replaySession;
 	private boolean replayNotSaved;
-	boolean gameEnded;
+	volatile boolean gameEnded;
 	private Runnable gameEndScreen;
 
 	final Map<String, ArgbImage> filePathToPathingMap = new HashMap<>();
@@ -360,8 +375,19 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	KeyedSounds uiSounds;
 	private War3MapRenderController mapRenderController;
+	/** The simulation's own thread and frames, when the mode asks for them; null otherwise. */
+	private MapViewerSimThread simThread;
+	private PresentationClock presentation;
+	private volatile UiFrameSource uiFrameSource;
+	private MapViewerFog mapFog;
 	Collection<String> soundsToPreload;
 	int localPlayerIndex;
+	/**
+	 * The simulation thread's copies of who is viewed (what {@link #isViewedPlayer} answers from), written where the
+	 * interface changes them so the simulation never reads the interface's own fields.
+	 */
+	volatile int viewedLocalPlayer;
+	volatile int viewedReplayPlayer = REPLAY_VISION_NONE;
 	/** The interface switches a map script flips (cursor, selection, frames); local to this machine. */
 	public final ScriptUiState scriptUiState = new ScriptUiState();
 	private final SettableCommandErrorListener commandErrorListener;
@@ -374,13 +400,15 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	int replayVisionPlayer = REPLAY_VISION_NONE;
 	boolean replayFogShown = true;
 	CPlayerFogOfWar replayFogOfWar;
+	/** With frames, the render side's copy of the local player's fog cells as of the frame being shown. */
+	private CPlayerFogOfWar presentedFogOfWar;
 	final List<CPlayerFogOfWar> replayVisionSources = new ArrayList<>();
 	/** A replay's speed: game and animation time both run this many times faster. */
 	private float replaySpeed = 1;
 	public static final int REPLAY_VISION_ALL_PLAYERS = -1;
 	static final int REPLAY_VISION_NONE = -2;
 
-	GameTurnManager gameTurnManager;
+	volatile GameTurnManager gameTurnManager;
 
 	War3MapW3i lastLoadedMapInformation;
 	private String mapFileName;
@@ -390,6 +418,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private FileHandle savedGameToLoad;
 	private boolean savedGameLoadedByScript;
 	InterfaceStateKeeper interfaceStateKeeper;
+	private java.util.function.Consumer<List<SimSound>> soundVoiceRestorer;
 	private Object scriptEnvironment;
 	private final List<SavedGame.AiEntry> loadedScripts = new ArrayList<>();
 	String dayNightTerrainModel;
@@ -397,7 +426,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	String skyModel;
 	float[] waterColor;
 	private AudioContext uiAudioContext;
-	private final Map<String, UnitSound.ScriptFile> scriptSoundFiles = new HashMap<>();
+	// Found on the render side; the simulation reads them, so that a script's sounds need no crossing once known.
+	private final Map<String, UnitSound.ScriptFile> scriptSoundFiles = new java.util.concurrent.ConcurrentHashMap<>();
+	private final Map<String, SoundLabelInfo> soundLabelInfos = new java.util.concurrent.ConcurrentHashMap<>();
+	private final Map<String, SoundLabelParams> soundLabelParams = new java.util.concurrent.ConcurrentHashMap<>();
 	private final SharedFileSounds<Sound> sharedFileSounds = new SharedFileSounds<>(
 			fileName -> UnitSound.createSound(this.mapMpq, getScriptSoundFile(fileName)),
 			(fileName, done) -> UnitSound.createSoundLater(this.mapMpq, getScriptSoundFile(fileName), done),
@@ -421,9 +453,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		}
 	};
 	final List<CreatedDestructable> createdDestructables = new ArrayList<>();
-	FileHandle pendingSave;
-	FileHandle pendingLoad;
-	boolean pendingLoadByScript;
+	volatile FileHandle pendingSave;
+	volatile FileHandle pendingLoad;
+	volatile boolean pendingLoadByScript;
 	Runnable afterPendingSave;
 	SaveGameListener saveGameListener;
 	LoadGameListener loadGameListener;
@@ -473,6 +505,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public SimulationRenderComponentWeather createWeatherEffect(final War3ID weatherId, final float minX,
 			final float minY, final float maxX, final float maxY) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.createWeatherEffect(this, weatherId, minX, minY, maxX, maxY);
 	}
 
@@ -517,10 +550,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public void updateImage(final CImage image) {
+		SimThreadGuard.assertGl();
 		MapViewerEffects.updateImage(this, image);
 	}
 
 	public void showTrackable(final CTrackable trackable) {
+		SimThreadGuard.assertGl();
 		MapViewerSelection.showTrackable(this, trackable);
 	}
 
@@ -567,6 +602,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	@Override
 	public void dispose() {
+		if ((this.simThread != null) && this.simThread.isThreaded()) {
+			// a step that runs ends before the game it plays is taken apart
+			this.simThread.shutdown();
+			this.simThread = null;
+		}
 		endModelCinematic();
 		if ((this.worldScene != null) && (this.worldScene.audioContext != null)) {
 			this.worldScene.audioContext.endLoops();
@@ -612,8 +652,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		CommandCardPopulatingAbilityVisitor.INSTANCE.release();
 		GetInstantTransformationBuffVisitor.getInstance().release();
 		BuildOnBuildingIntersector.INSTANCE.reset(0, 0);
-		TreeBlightingCallback.INSTANCE.reset(null);
 		CWidgetAbilityTargetCheckReceiver.INSTANCE.reset();
+		if (this.simThread != null) {
+			this.simThread.shutdown();
+			this.simThread = null;
+		}
 		if (this.mapRenderController != null) {
 			this.mapRenderController.releaseSounds();
 			this.mapRenderController = null;
@@ -625,6 +668,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public MapLoader createMapLoader(final War3Map war3Map, final War3MapW3i w3iFile, final int localPlayerIndex)
 			throws IOException {
 		this.localPlayerIndex = localPlayerIndex;
+		this.viewedLocalPlayer = localPlayerIndex;
 		this.mapMpq = war3Map;
 		this.pathingTextures = new CPathingTextures(war3Map);
 		this.lastLoadedMapInformation = w3iFile;
@@ -639,22 +683,26 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public SimulationRenderComponentLightning createLightning(final War3ID lightningId,
 			final RenderUnit renderPeerSource, final RenderWidget renderPeerTarget) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.createLightning(this, lightningId, renderPeerSource, renderPeerTarget);
 	}
 
 	public SimulationRenderComponentLightning createLightning(final War3ID lightningId,
 			final RenderUnit renderPeerSource, final RenderWidget renderPeerTarget, final Float duration) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.createLightning(this, lightningId, renderPeerSource, renderPeerTarget, duration);
 	}
 
 	public SimulationRenderComponentLightningMovable createLightning(final War3ID lightningId, final float x1,
 			final float y1, final float z1, final float x2, final float y2, final float z2) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.createLightning(this, lightningId, x1, y1, z1, x2, y2, z2);
 	}
 
 	public SimulationRenderComponentLightningMovable createLightning(final War3ID lightningId, final float x1,
 			final float y1, final float z1, final float x2, final float y2, final float z2,
 			final boolean checkVisibility) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.createLightning(this, lightningId, x1, y1, z1, x2, y2, z2, checkVisibility);
 	}
 
@@ -713,52 +761,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		fogUpdateTimer.setTimeoutTime(1.0f);
 		fogUpdateTimer.setRepeats(true);
 		fogUpdateTimer.start(this.simulation);
-		final CTimer fogGpuUpdateTimer = new FogGpuUpdateTimer(this);
-		fogGpuUpdateTimer.setTimeoutTime(0.03f);
-		fogGpuUpdateTimer.setRepeats(true);
-		fogGpuUpdateTimer.start(this.simulation);
+		this.mapFog = new MapViewerFog(this);
 	}
 
 	private static final class IdleFogTimer extends CTimer {
 		@Override
 		public void onFire(final CSimulation simulation) {
-		}
-	}
-
-	private static final class FogGpuUpdateTimer extends CTimer {
-		@SavedFormerly("this$0")
-		private final War3MapViewer viewer;
-
-		private FogGpuUpdateTimer(final War3MapViewer viewer) {
-			this.viewer = viewer;
-		}
-
-		@Override
-		public boolean isRenderOnly() {
-			return true;
-		}
-
-		@Override
-		public void onFire(final CSimulation simulation) {
-			final boolean fogChanged = this.viewer.terrain.reloadFogOfWarDataToGPU(simulation);
-			this.viewer.terrain.updateShownBlight();
-			// Doodads fade with the ground fog, so they only need the step while it changes; once a second they are
-			// checked anyway.
-			if (fogChanged || ((++this.viewer.fogDoodadTicks % 30) == 0)) {
-				final List<RenderDoodad> doodads = this.viewer.decals;
-				final int doodadCount = doodads.size();
-				if (doodadCount > 0) {
-					final CPlayerFogOfWar fogOfWar = this.viewer.getFogOfWar();
-					final PathingGrid pathingGrid = simulation.getPathingGrid();
-					final byte[] shadeByState = new byte[CFogState.VALUES.length];
-					for (final CFogState state : CFogState.VALUES) {
-						shadeByState[state.ordinal()] = this.viewer.getFogShade(state.getMask());
-					}
-					for (int i = 0; i < doodadCount; i++) {
-						doodads.get(i).updateFog(this.viewer, fogOfWar, pathingGrid, shadeByState);
-					}
-				}
-			}
 		}
 	}
 
@@ -809,21 +817,21 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	 * The game stops while paused (a script, the Pause button, or the game menu in a single player game); the camera,
 	 * the interface and rendering go on.
 	 */
-	public void setGamePaused(final PauseSource source, final boolean paused) {
+	public synchronized void setGamePaused(final PauseSource source, final boolean paused) {
 		if (paused) {
-			this.pauseSources.add(source);
+			this.pauseSources |= 1 << source.ordinal();
 		}
 		else {
-			this.pauseSources.remove(source);
+			this.pauseSources &= ~(1 << source.ordinal());
 		}
 	}
 
 	public boolean isGamePaused() {
-		return !this.pauseSources.isEmpty();
+		return this.pauseSources != 0;
 	}
 
 	public boolean isGamePaused(final PauseSource source) {
-		return this.pauseSources.contains(source);
+		return (this.pauseSources & (1 << source.ordinal())) != 0;
 	}
 
 	public void requestSaveGame(final FileHandle file) {
@@ -901,6 +909,48 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return file;
 	}
 
+	/** Any thread: what {@link #getScriptSoundFile} found for the path before, null when it has not been asked for. */
+	public UnitSound.ScriptFile cachedScriptSoundFile(final String fileName) {
+		return this.scriptSoundFiles.get(fileName);
+	}
+
+	/** The files of a sound label and their lengths, found once for each label. Render thread. */
+	public SoundLabelInfo getSoundLabelInfo(final String label) {
+		final String key = label == null ? "" : label;
+		SoundLabelInfo info = this.soundLabelInfos.get(key);
+		if (info == null) {
+			final UnitSound sound = this.uiSounds.getSound(label);
+			final float[] durations = new float[sound.getSoundCount()];
+			for (int i = 0; i < durations.length; i++) {
+				durations[i] = sound.getDuration(i);
+			}
+			info = new SoundLabelInfo(durations);
+			this.soundLabelInfos.put(key, info);
+		}
+		return info;
+	}
+
+	/** Any thread: what {@link #getSoundLabelInfo} found before, null when it has not been asked for. */
+	public SoundLabelInfo cachedSoundLabelInfo(final String label) {
+		return this.soundLabelInfos.get(label == null ? "" : label);
+	}
+
+	/** What a sound label sets on the sounds made from it, found once for each label. Render thread. */
+	public SoundLabelParams getSoundLabelParams(final String label) {
+		final String key = label == null ? "" : label;
+		SoundLabelParams params = this.soundLabelParams.get(key);
+		if (params == null) {
+			params = SoundLabelParams.of(getSoundLabel(label));
+			this.soundLabelParams.put(key, params);
+		}
+		return params;
+	}
+
+	/** Any thread: what {@link #getSoundLabelParams} found before, null when it has not been asked for. */
+	public SoundLabelParams cachedSoundLabelParams(final String label) {
+		return this.soundLabelParams.get(label == null ? "" : label);
+	}
+
 	/**
 	 * The sound of a file a script creates sounds from. Every handle of the file shares it: a map that creates a sound
 	 * each time it needs one would otherwise decode the file again every time. A handle gives it back through
@@ -930,7 +980,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	private void releaseFinishedSounds() {
 		if (!this.killedSounds.isEmpty() && (this.simulation != null)) {
-			final int tick = this.simulation.getGameTurnTick();
+			final int tick = getPresentedTick();
 			for (int i = this.killedSounds.size() - 1; i >= 0; i--) {
 				if (this.killedSounds.get(i).releaseIfDone(tick)) {
 					this.killedSounds.remove(i);
@@ -1023,10 +1073,28 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public void clearRenderPeersForSavedGame() {
 		MapViewerUnits.clearRenderPeersForSavedGame(this);
+		if (this.simThread != null) {
+			// the removals are for the peers of the game being left, not for the ones the loaded game makes next
+			this.simThread.playFrames();
+		}
 	}
 
 	public void finishLoadingSavedGame(final Collection<CDestructable> preparedDestructables) {
 		MapViewerUnits.finishLoadingSavedGame(this, preparedDestructables);
+		if (this.simThread != null) {
+			this.simThread.playFrames();
+		}
+	}
+
+	/** Set by the sound natives: gives the sounds a saved game held the voices that continue them. */
+	public void setSoundVoiceRestorer(final java.util.function.Consumer<List<SimSound>> restorer) {
+		this.soundVoiceRestorer = restorer;
+	}
+
+	public void restoreSoundVoices(final List<SimSound> sounds) {
+		if ((this.soundVoiceRestorer != null) && !sounds.isEmpty()) {
+			this.soundVoiceRestorer.accept(sounds);
+		}
 	}
 
 	public void setMapFileName(final String mapFileName) {
@@ -1293,6 +1361,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public void update() {
 		PerfStats.frameStart();
 		if (this.anyReady) {
+			beginSimulationFrame();
 			this.successfulFrames++;
 			// while paused everything is still placed and drawn, but no game or animation time passes
 			final boolean paused = isGamePaused();
@@ -1302,6 +1371,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			PerfStats.end(PerfStats.Section.TERRAIN_UPDATE);
 
 			final float rawDeltaTime = paused ? 0 : Gdx.graphics.getRawDeltaTime() * this.replaySpeed;
+			if (this.simThread != null) {
+				this.simThread.advancePresentation(Gdx.graphics.getRawDeltaTime() * this.replaySpeed, this.timeScale,
+						paused);
+			}
 			super.update(rawDeltaTime);
 			if (PerfStats.ENABLED) {
 				PerfStats.textures(getTextureBytes(), getEvictedTextures());
@@ -1363,10 +1436,19 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				// The game is over on the score screen; its scores must not change behind it.
 				this.updateTime = 0;
 			}
+			if ((this.simThread != null) && this.simThread.isThreaded()) {
+				// the simulation thread makes the steps that came due; it waits for a turn or a pause by itself
+				if (!this.gameEnded && !isGamePaused() && !isFastForwarding()
+						&& (this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME)) {
+					final int due = (int) (this.updateTime / WarsmashConstants.SIMULATION_STEP_TIME);
+					this.updateTime -= due * WarsmashConstants.SIMULATION_STEP_TIME;
+					this.simThread.grantSteps(due, this.timeScale * this.replaySpeed);
+				}
+			}
 			int stepsThisFrame = 0;
 			// A pause, from a command or the map's script, stops the very step it comes at, whatever the frame time.
 			while ((this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME) && !this.gameEnded
-					&& !isGamePaused()) {
+					&& !isGamePaused() && !isSimulationThreaded()) {
 				if (stepsThisFrame >= (MAX_STEPS_PER_FRAME * this.timeScale * this.replaySpeed)) {
 					// A slow device would otherwise spend the next frame catching up and fall further behind each
 					// time; like the original, the game runs slower instead.
@@ -1382,10 +1464,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				if (latestTurn >= this.simulation.getGameTurnTick()) {
 					this.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
 					PerfStats.stepEnd(PerfStats.Step.TURN);
-					this.simulation.update();
+					runSimulationUpdate();
 					PerfStats.simulationStep();
 					PerfStats.stepMark();
-					this.gameTurnManager.turnCompleted(this.simulation.getGameTurnTick());
+					runTurnCompleted();
 					PerfStats.stepEnd(PerfStats.Step.TURN);
 					MapViewerSaves.runPendingSaveRequests(this);
 					PerfStats.stepEnd(PerfStats.Step.SAVES);
@@ -1398,42 +1480,276 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				}
 			}
 			PerfStats.end(PerfStats.Section.SIMULATION);
+			if (this.mapFog != null) {
+				this.mapFog.update();
+			}
 			if (hasPendingModels()) {
 				finishReadyModels(MODEL_FINISH_SLICE_NANOS);
 			}
 			if (!this.gameEnded && (this.renderUnitTypeData != null)) {
-				this.typePrewarm.update(this);
+				if (isSimulationThreaded()) {
+					// it reads the units' queues; a frame the simulation is in a step it waits for the next
+					this.simThread.tryWhileHeld(() -> this.typePrewarm.update(this));
+				}
+				else {
+					this.typePrewarm.update(this);
+				}
 			}
-			if (paused) {
-				MapViewerSaves.runPendingSaveRequests(this);
+			if (isSimulationThreaded()) {
+				// the simulation thread does a pause's work and the saves the steps ask for
+				if (paused && ((this.pendingSave != null) || (this.pendingLoad != null))) {
+					whileSimulationHeld(() -> MapViewerSaves.runPendingSaveRequests(this));
+				}
 			}
-			if (isGamePaused()) {
-				this.gameTurnManager.whilePaused();
+			else {
+				if (paused) {
+					MapViewerSaves.runPendingSaveRequests(this);
+				}
+				if (isGamePaused()) {
+					runWhilePaused();
+				}
 			}
+			final float timeOfDay = presentedTimeOfDay();
 			if (this.dncTerrain != null) {
-				final float dayRatio = this.simulation.getGameTimeOfDay()
-						/ this.simulation.getGameplayConstants().getGameDayHours();
+				final float dayRatio = timeOfDay / this.simulation.getGameplayConstants().getGameDayHours();
 				this.dncTerrain.setFrameByRatio(dayRatio);
 				this.dncTerrain.update(rawDeltaTime, null);
 				this.dynamicShadowManager.setSunLight(this.shadowSunDirection, dayRatio);
 			}
 			if (this.dncUnit != null) {
-				this.dncUnit.setFrameByRatio(
-						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
+				this.dncUnit.setFrameByRatio(timeOfDay / this.simulation.getGameplayConstants().getGameDayHours());
 				this.dncUnit.update(rawDeltaTime, null);
 			}
 
 			if (this.dncPortrait != null) {
-				this.dncPortrait.setFrameByRatio(
-						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
+				this.dncPortrait.setFrameByRatio(timeOfDay / this.simulation.getGameplayConstants().getGameDayHours());
 				this.dncPortrait.update(rawDeltaTime, null);
 			}
 
 			if (this.dncTarget != null) {
-				this.dncTarget.setFrameByRatio(
-						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
+				this.dncTarget.setFrameByRatio(timeOfDay / this.simulation.getGameplayConstants().getGameDayHours());
 				this.dncTarget.update(rawDeltaTime, null);
 			}
+		}
+	}
+
+	/**
+	 * The clock that says which game time the picture shows and between which frames of the game; null without a
+	 * simulation thread, where the render objects follow the live simulation.
+	 */
+	public PresentationClock getPresentation() {
+		return this.presentation;
+	}
+
+	/** The time of day of the step the picture shows; with the thread on, the simulation's own is a step ahead. */
+	private float presentedTimeOfDay() {
+		if (isSimulationThreaded() && (this.presentation != null)) {
+			final SimFrame frame = this.presentation.frameBefore();
+			if (frame != null) {
+				return frame.timeOfDay;
+			}
+		}
+		return this.simulation.getGameTimeOfDay();
+	}
+
+	/** Whether the simulation makes its steps on its own thread ({@link SimThreadMode#ON}). */
+	public boolean isSimulationThreaded() {
+		final MapViewerSimThread thread = this.simThread;
+		return (thread != null) && thread.isThreaded();
+	}
+
+	/**
+	 * Render thread: runs the action while the simulation makes no step, waiting for a step that runs; for what reads
+	 * or changes the simulation directly from the render side. Without the thread on, at once.
+	 */
+	public void whileSimulationHeld(final Runnable action) {
+		final MapViewerSimThread thread = this.simThread;
+		if ((thread == null) || !thread.isThreaded()) {
+			action.run();
+			return;
+		}
+		thread.hold();
+		try {
+			action.run();
+		}
+		finally {
+			thread.release();
+		}
+	}
+
+	/**
+	 * Render thread: like {@link #whileSimulationHeld}, but only when no step runs now.
+	 *
+	 * @return false when the action was not run
+	 */
+	public boolean tryWhileSimulationHeld(final Runnable action) {
+		final MapViewerSimThread thread = this.simThread;
+		if ((thread == null) || !thread.isThreaded()) {
+			action.run();
+			return true;
+		}
+		return thread.tryWhileHeld(action);
+	}
+
+	/** Render thread (the app leaves the screen): no step runs until {@link #unparkSimulation}. */
+	public void parkSimulation(final long maxWaitMillis) {
+		if (isSimulationThreaded()) {
+			this.simThread.park(maxWaitMillis);
+		}
+	}
+
+	public void unparkSimulation() {
+		if (isSimulationThreaded()) {
+			this.simThread.unpark();
+		}
+	}
+
+	/**
+	 * Something of the game's flow (a command from the network) that changes the simulation: on the simulation thread
+	 * between steps when it has one, else on the render thread's next frame. The caller does not wait.
+	 */
+	public void postToSimulation(final Runnable job) {
+		if (isSimulationThreaded()) {
+			this.simThread.post(job);
+		}
+		else {
+			Gdx.app.postRunnable(job);
+		}
+	}
+
+	/**
+	 * Something for the interface or the screens that the simulation side asks for: from the simulation thread it
+	 * runs on the render thread while the step waits; elsewhere at once.
+	 */
+	public void onRenderThread(final Runnable action) {
+		final MapViewerSimThread thread = this.simThread;
+		if ((thread != null) && thread.isThreaded() && thread.isSimThread()) {
+			thread.callOnRender(action);
+		}
+		else {
+			action.run();
+		}
+	}
+
+	/**
+	 * Like {@link #onRenderThread}, but from the simulation thread the render thread runs it on its next frame and the
+	 * step does not wait; for what leaves the game (its screen goes away meanwhile).
+	 */
+	public void onRenderThreadLater(final Runnable action) {
+		final MapViewerSimThread thread = this.simThread;
+		if ((thread != null) && thread.isThreaded() && thread.isSimThread()) {
+			Gdx.app.postRunnable(action);
+		}
+		else {
+			action.run();
+		}
+	}
+
+	/** The number the frames of the game give a missile; 0 without a simulation thread. */
+	public int projectileFrameId(final CProjectile projectile) {
+		return this.simThread == null ? 0 : this.simThread.projectileId(projectile);
+	}
+
+	void setPresentation(final PresentationClock presentation) {
+		this.presentation = presentation;
+	}
+
+	/** What the script natives reach the local interface through; null for a game without a simulation thread. */
+	@Override
+	public LocalUiLink localUiLink() {
+		return this.simThread == null ? null : this.simThread.localUiLink();
+	}
+
+	/** How natives that touch the interface or the render side are called when the simulation has its own thread; else null. */
+	public BiFunction<String, JassFunction, JassFunction> renderThreadNativeWrapper() {
+		return this.simThread == null ? null : this.simThread.nativeWrapper();
+	}
+
+	/** Render thread, a game not drawn with the thread on: the steps due are made on it and waited for. */
+	void runGrantedSteps(final int steps) {
+		this.simThread.runGrantedSteps(steps);
+	}
+
+	/** Render thread, a skip ahead with the thread on: it drives the steps itself, the thread only runs them. */
+	void beginFastForwardFrame() {
+		if (isSimulationThreaded()) {
+			this.simThread.dropGrantedSteps();
+			this.simThread.hold();
+		}
+	}
+
+	void endFastForwardFrame() {
+		if (isSimulationThreaded()) {
+			this.simThread.release();
+		}
+	}
+
+	/** One simulation step; on the simulation thread when the game has one. */
+	void runSimulationUpdate() {
+		if (this.simThread != null) {
+			this.simThread.update();
+		}
+		else {
+			this.simulation.update();
+		}
+	}
+
+	/** The game turn manager's end-of-step work, on the simulation thread when the game has one. */
+	void runTurnCompleted() {
+		if (this.simThread != null) {
+			this.simThread.turnCompleted(this.gameTurnManager, this.simulation.getGameTurnTick());
+		}
+		else {
+			this.gameTurnManager.turnCompleted(this.simulation.getGameTurnTick());
+		}
+	}
+
+	void runWhilePaused() {
+		if (this.simThread != null) {
+			this.simThread.whilePaused(this.gameTurnManager);
+		}
+		else {
+			this.gameTurnManager.whilePaused();
+		}
+	}
+
+	/** Before the frame's first look at the game: lets the simulation take the commands the interface queued. */
+	void beginSimulationFrame() {
+		if (this.simThread != null) {
+			this.simThread.beforeFrame();
+		}
+	}
+
+	/**
+	 * The listener the interface gives its commands to: with a simulation thread they are queued and the thread hands
+	 * them to the target between steps; without one the target itself.
+	 */
+	public CPlayerUnitOrderListener threadedOrderListener(final CPlayerUnitOrderListener target,
+			final int playerIndex) {
+		return this.simThread == null ? target : this.simThread.orderListener(target, playerIndex);
+	}
+
+	/** A unit's peer made its real animation listener: the simulation gets it, or its stand-in with a simulation thread. */
+	public void setSimulationAnimationListener(final CUnit unit, final UnitAnimationListenerImpl listener) {
+		if (this.simThread == null) {
+			unit.setUnitAnimationListener(listener);
+		}
+		else {
+			this.simThread.attachAnimationListener(unit, listener);
+		}
+	}
+
+	/** A destructable's peer exists: the events that name its handle can find the object. */
+	public void destructablePeerCreated(final CDestructable destructable) {
+		if (this.simThread != null) {
+			this.simThread.destructablePeerCreated(destructable);
+		}
+	}
+
+	/** The peer has added the tags its type requires to the real listener. */
+	public void simulationAnimationTagsReady(final CUnit unit, final UnitAnimationListenerImpl listener) {
+		if (this.simThread != null) {
+			this.simThread.seedAnimationTags(unit, listener);
 		}
 	}
 
@@ -1454,11 +1770,16 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		else {
 			super.updateAndRender();
 		}
+		if (this.simThread != null) {
+			this.simThread.afterFrame();
+		}
 		// The map's script makes its starting units in the first game step.
-		if ((this.soundsToPreload != null) && (this.simulation.getGameTurnTick() > 0)) {
+		if ((this.soundsToPreload != null) && (getPresentedTick() > 0)) {
 			final Collection<String> interfaceSoundKeys = this.soundsToPreload;
-			this.soundsToPreload = null;
-			MapViewerLoading.preloadSounds(this, interfaceSoundKeys);
+			// it reads the units the game has: with the thread on, while no step runs (else on a later frame)
+			if (tryWhileSimulationHeld(() -> MapViewerLoading.preloadSounds(this, interfaceSoundKeys))) {
+				this.soundsToPreload = null;
+			}
 		}
 	}
 
@@ -1470,8 +1791,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	 */
 	public void prepareFirstFrame() {
 		this.dynamicShadowManager.prepare(this.webGL);
-		if (!this.anyReady || NO_RENDER || (this.fastForwardTarget >= 0) || isReplayPlayback()
-				|| (this.simulation.getGameTurnTick() != 0)) {
+		// A game with a simulation thread makes its first steps there, away from the frames.
+		if (!this.anyReady || NO_RENDER || (this.simThread != null) || (this.fastForwardTarget >= 0)
+				|| isReplayPlayback() || (this.simulation.getGameTurnTick() != 0)) {
 			return;
 		}
 		final long start = System.nanoTime();
@@ -1495,6 +1817,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public void fastForwardTo(final int tick, final FastForwardListener whenReached) {
+		final MapViewerSimThread thread = this.simThread;
+		if ((thread != null) && thread.isThreaded() && thread.isSimThread()) {
+			// the render thread drives a skip; it takes it on its next frame
+			Gdx.app.postRunnable(() -> MapViewerUpdate.fastForwardTo(this, tick, whenReached));
+			return;
+		}
 		MapViewerUpdate.fastForwardTo(this, tick, whenReached);
 	}
 
@@ -1605,11 +1933,13 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	 * plane the map's camera distance settings cannot cut through.
 	 */
 	public void setWaterBaseColor(final float[] color) {
+		SimThreadGuard.assertGl();
 		this.waterColor = color;
 		this.terrain.setWaterBaseColor(color[0], color[1], color[2], color[3]);
 	}
 
 	public void setSkyModel(final String path) {
+		SimThreadGuard.assertGl();
 		this.skyModel = path;
 		if (this.skyInstance != null) {
 			this.skyInstance.detach();
@@ -1633,6 +1963,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public void addIndicator(final CWidget widget, final int red, final int green, final int blue, final int alpha) {
+		SimThreadGuard.assertGl();
 		MapViewerUpdate.addIndicator(this, widget, red, green, blue, alpha);
 	}
 
@@ -1645,11 +1976,13 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public void setDoodadAnimation(final String doodadId, final Rectangle area, final float centerX,
 			final float centerY, final float radius, final boolean nearestOnly, final String animation) {
+		SimThreadGuard.assertGl();
 		MapViewerDoodads.setDoodadAnimation(this, doodadId, area, centerX, centerY, radius, nearestOnly, animation);
 	}
 
 	public void setDoodadColor(final String doodadId, final Rectangle area, final float centerX,
 			final float centerY, final float radius, final boolean nearestOnly, final int playerColor) {
+		SimThreadGuard.assertGl();
 		MapViewerDoodads.setDoodadColor(this, doodadId, area, centerX, centerY, radius, nearestOnly, playerColor);
 	}
 
@@ -1783,10 +2116,6 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	private int localPlayerServerSlot;
 
-	int[] blightChangedCorners = new int[512];
-	float[] blightSources = new float[48];
-	int blightSourceCount;
-
 	RenderUnitTypeData renderUnitTypeData;
 	/** The object data the render unit types above were made for. */
 	Warcraft3MapRuntimeObjectData renderUnitTypeDataObjects;
@@ -1891,6 +2220,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public void setDayNightModels(final String terrainDNCFile, final String unitDNCFile) {
+		SimThreadGuard.assertGl();
 		this.dayNightTerrainModel = terrainDNCFile;
 		this.dayNightUnitModel = unitDNCFile;
 		this.shadowSunDirection = readSunDirection(this.dataSource.graphicsIndependent(), terrainDNCFile);
@@ -1911,6 +2241,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	/** SetPortraitLight: the light of the portraits comes from the day and night model, as the world's does. */
 	public void setPortraitLight(final String portraitDNCFile) {
+		SimThreadGuard.assertGl();
 		this.dncPortrait = null;
 		if ((portraitDNCFile == null) || portraitDNCFile.isEmpty()) {
 			return;
@@ -2055,6 +2386,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	 * False when the id is no unit type or the unit has no drawn peer.
 	 */
 	public boolean setUnitSkin(final CUnit unit, final War3ID skinId) {
+		SimThreadGuard.assertGl();
 		if ((this.renderUnitTypeData == null) || !this.unitToRenderPeer.containsKey(unit)
 				|| (this.renderUnitTypeData.get(skinId) == null)) {
 			return false;
@@ -2065,6 +2397,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	/** Shows the item with the model of another item type (BlzSetItemSkin); false when that type has no model. */
 	public boolean setItemSkin(final CItem item, final War3ID skinId) {
+		SimThreadGuard.assertGl();
 		final RenderItem renderItem = getRenderPeer(item);
 		final RenderItemType renderItemType = this.renderItemTypeData == null ? null
 				: this.renderItemTypeData.get(skinId);
@@ -2154,7 +2487,25 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return this.scriptMinimapIcons;
 	}
 
+	/** The source of interface state both the panels and the simulation side use; null until the interface data exists. */
+	@Override
+	public UiFrameSource uiFrameSource() {
+		UiFrameSource source = this.uiFrameSource;
+		if ((source == null) && (this.abilityDataUI != null) && (this.gameUI != null)) {
+			synchronized (this) {
+				source = this.uiFrameSource;
+				if (source == null) {
+					source = new UiFrameSource(new UiFrameWriter(this.abilityDataUI, this.gameUI.getTemplates(),
+							this.miscData, getAllObjectData().getUnits(), this.localPlayerIndex));
+					this.uiFrameSource = source;
+				}
+			}
+		}
+		return source;
+	}
+
 	public RenderUnit getRenderPeer(final CUnit unit) {
+		SimThreadGuard.assertGl();
 		return this.unitToRenderPeer.get(unit);
 	}
 
@@ -2168,14 +2519,17 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public RenderDestructable getRenderPeer(final CDestructable dest) {
+		SimThreadGuard.assertGl();
 		return this.destructableToRenderPeer.get(dest);
 	}
 
 	public RenderItem getRenderPeer(final CItem item) {
+		SimThreadGuard.assertGl();
 		return this.itemToRenderPeer.get(item);
 	}
 
 	public RenderWidget getRenderPeer(final CWidget damagedDestructable) {
+		SimThreadGuard.assertGl();
 		RenderWidget damagedWidget = War3MapViewer.this.unitToRenderPeer.get(damagedDestructable);
 		if (damagedWidget == null) {
 			damagedWidget = War3MapViewer.this.destructableToRenderPeer.get(damagedDestructable);
@@ -2290,21 +2644,25 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public RenderSpellEffect spawnSpellEffectOnUnitEx(final CWidget unit, final War3ID alias,
 			final CEffectType effectType, final int index) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.spawnSpellEffectOnUnitEx(this, unit, alias, effectType, index);
 	}
 
 	public RenderSpellEffect spawnSpellEffectOnUnitEx(final CWidget unit, final War3ID alias,
 			final CEffectType effectType, final int index, final String attachPointName) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.spawnSpellEffectOnUnitEx(this, unit, alias, effectType, index, attachPointName);
 	}
 
 	public List<RenderSpellEffect> spawnSpellEffectOnUnitEx(final CUnit unit, final War3ID alias,
 			final CEffectType effectType) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.spawnSpellEffectOnUnitEx(this, unit, alias, effectType);
 	}
 
 	public RenderSpellEffect spawnSpellEffectEx(final float x, final float y, final float facing, final War3ID alias,
 			final CEffectType effectType, final int index) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.spawnSpellEffectEx(this, x, y, facing, alias, effectType, index);
 	}
 
@@ -2328,15 +2686,18 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public RenderSpellEffect addSpecialEffectTarget(final String modelName, final CWidget targetWidget,
 			final String attachPointName) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.addSpecialEffectTarget(this, modelName, targetWidget, attachPointName);
 	}
 
 	public RenderSpellEffect addSpecialEffectTarget(final String modelName, final CWidget targetWidget,
 			List<String> attachPointNames) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.addSpecialEffectTarget(this, modelName, targetWidget, attachPointNames);
 	}
 
 	public RenderSpellEffect addSpecialEffect(final String modelName, final float x, final float y, final float yaw) {
+		SimThreadGuard.assertGl();
 		return MapViewerEffects.addSpecialEffect(this, modelName, x, y, yaw);
 	}
 
@@ -2374,14 +2735,17 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return MapViewerEffects.loadModelMdx(dataSource, modelViewer, path, pathSolver, solverParams);
 	}
 
-	public void setBlight(final float whichLocationX, final float whichLocationY, final float radius,
-			final boolean blighted) {
-		MapViewerBlight.setBlight(this, whichLocationX, whichLocationY, radius, blighted);
-	}
-
-	public void setBlight(final float whichLocationX, final float whichLocationY, final float radius,
-			final boolean square, final boolean blighted) {
-		MapViewerBlight.setBlight(this, whichLocationX, whichLocationY, radius, square, blighted);
+	/** The simulation changed the blight of these corners; the ground shows it once the viewer sees the place. */
+	public void blightChanged(final float[] cornerPositions, final boolean blighted) {
+		SimThreadGuard.assertGl();
+		for (int k = 0; k < cornerPositions.length; k += 2) {
+			final RenderCorner corner = this.terrain.getCorner(cornerPositions[k], cornerPositions[k + 1]);
+			if (corner != null) {
+				corner.setBlight(blighted);
+				this.terrain.blightChanged(cornerPositions[k], cornerPositions[k + 1]);
+			}
+		}
+		this.terrain.updateShownBlight();
 	}
 
 	public byte getFogShade(final byte fogState) {
@@ -2424,7 +2788,43 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			}
 			return this.simulation.getPlayer(this.replayVisionPlayer).getFogOfWar();
 		}
+		if ((this.presentation != null) && (this.presentedFogOfWar != null)) {
+			return this.presentedFogOfWar;
+		}
 		return this.simulation.getPlayer(this.localPlayerIndex).getFogOfWar();
+	}
+
+	/**
+	 * Render thread, for each frame the presentation plays: takes the local player's fog cells the frame carries, so
+	 * what the picture asks of the fog never reads the simulation's own.
+	 */
+	void takePresentedFog(final SimFrame frame) {
+		if (!frame.fogChanged || (this.simulation == null)) {
+			return;
+		}
+		CPlayerFogOfWar copy = this.presentedFogOfWar;
+		if ((copy == null) || (copy.getFogOfWarBuffer().capacity() != frame.fogLength)) {
+			copy = new CPlayerFogOfWar(this.simulation.getPathingGrid());
+			if (copy.getFogOfWarBuffer().capacity() != frame.fogLength) {
+				return;
+			}
+			this.presentedFogOfWar = copy;
+		}
+		System.arraycopy(frame.fog, 0, copy.getFogOfWarBuffer().array(), 0, frame.fogLength);
+	}
+
+	/**
+	 * Render thread: the game step the picture shows, which for a game with frames is the one of the frame being shown
+	 * (the simulation itself may be steps ahead).
+	 */
+	public int getPresentedTick() {
+		final PresentationClock clock = this.presentation;
+		if (clock != null) {
+			final SimFrame frame = clock.frameBefore();
+			// no frame yet: the game has not taken a step the picture could show
+			return frame != null ? frame.tick : 0;
+		}
+		return this.simulation.getGameTurnTick();
 	}
 
 	public void setReplayVision(final int playerIndex, final boolean fogShown) {
@@ -2497,6 +2897,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	public void startObserverView() {
+		SimThreadGuard.assertGl();
 		MapViewerVision.startObserverView(this);
 	}
 
@@ -2672,8 +3073,14 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			});
 			this.loadMapTasks.add(() -> {
 				War3MapViewer.this.mapRenderController = new War3MapRenderController(War3MapViewer.this);
-				War3MapViewer.this.renderController = new NoRenderController(
-						War3MapViewer.this.mapRenderController);
+				final SimThreadMode simThreadMode = SimThreadMode.current();
+				SimulationRenderController simulationSide = War3MapViewer.this.mapRenderController;
+				if (simThreadMode.usesFrames()) {
+					War3MapViewer.this.simThread = new MapViewerSimThread(War3MapViewer.this,
+							War3MapViewer.this.mapRenderController);
+					simulationSide = War3MapViewer.this.simThread.controller();
+				}
+				War3MapViewer.this.renderController = new NoRenderController(simulationSide);
 				War3MapViewer.this.renderController.setPresenting(!NO_RENDER);
 				War3MapViewer.this.simulation = new CSimulation(War3MapViewer.this.mapConfig, w3iFile.getVersion(),
 						War3MapViewer.this.gameData.mapGameVersion(War3MapViewer.this.mapFileName,
@@ -2690,8 +3097,13 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 								War3MapViewer.this.dataSource.graphicsIndependent(),
 								War3MapViewer.this.worldEditStrings),
 						War3MapViewer.this.terrain.getEntireMap(),
-						War3MapViewer.this.seededRandom, War3MapViewer.this.commandErrorListener);
+						War3MapViewer.this.seededRandom, War3MapViewer.this.simThread == null
+								? War3MapViewer.this.commandErrorListener
+								: War3MapViewer.this.simThread.onRender(War3MapViewer.this.commandErrorListener));
 				War3MapViewer.this.simulation.setPlayableMapArea(War3MapViewer.this.terrain.getPlayableMapArea());
+				if (War3MapViewer.this.simThread != null) {
+					War3MapViewer.this.simThread.attach(War3MapViewer.this.simulation);
+				}
 			});
 
 			this.loadMapTasks.add(() -> {

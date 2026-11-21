@@ -24,7 +24,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	private final OrderedUdpClient udpClient;
 	private final War3MapViewer game;
 	private final Map<Integer, CPlayerUnitOrderListener> indexToExecutor = new HashMap<>();
-	private int latestCompletedTurn = -1;
+	private volatile int latestCompletedTurn = -1;
 	private int latestLocallyRequestedTurn = -1;
 	private final WarsmashClientWriter writer;
 	private final Queue<QueuedMessage> queuedMessages = new ArrayDeque<>();
@@ -63,7 +63,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	public void issueTargetOrder(final int playerIndex, final int unitHandleId, final int abilityHandleId,
 			final int orderId, final int targetHandleId, final boolean queue) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -90,7 +90,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	public void issuePointOrder(final int playerIndex, final int unitHandleId, final int abilityHandleId,
 			final int orderId, final float x, final float y, final boolean queue) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -119,7 +119,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	public void issueDropItemAtPointOrder(final int playerIndex, final int unitHandleId, final int abilityHandleId,
 			final int orderId, final int targetHandleId, final float x, final float y, final boolean queue) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -148,7 +148,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	public void issueDropItemAtTargetOrder(final int playerIndex, final int unitHandleId, final int abilityHandleId,
 			final int orderId, final int targetHandleId, final int targetHeroHandleId, final boolean queue) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -177,7 +177,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	public void issueImmediateOrder(final int playerIndex, final int unitHandleId, final int abilityHandleId,
 			final int orderId, final boolean queue) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -203,7 +203,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	@Override
 	public void unitCancelTrainingItem(final int playerIndex, final int unitHandleId, final int cancelIndex) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -229,7 +229,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	@Override
 	public void issueGuiPlayerEvent(final int playerIndex, final int eventId) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -255,7 +255,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 	@Override
 	public void issuePlayerCommand(final int playerIndex, final byte[] command) {
 		final CPlayerUnitOrderListener executor = getExecutor(playerIndex);
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				final int currentServerTurnInProgress = WarsmashClient.this.latestCompletedTurn + 1;
@@ -283,7 +283,7 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 		if (WarsmashConstants.VERBOSE_LOGGING) {
 			Log.info("finishedTurn " + gameTurnTick);
 		}
-		Gdx.app.postRunnable(new Runnable() {
+		this.game.postToSimulation(new Runnable() {
 			@Override
 			public void run() {
 				WarsmashClient.this.latestCompletedTurn = gameTurnTick;
@@ -296,8 +296,10 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 		if (WarsmashConstants.VERBOSE_LOGGING) {
 			Log.info("turnCompleted " + gameTurnTick);
 		}
-		this.writer.finishedTurn(gameTurnTick);
-		this.writer.send();
+		send(() -> {
+			this.writer.finishedTurn(gameTurnTick);
+			this.writer.send();
+		});
 		this.latestLocallyRequestedTurn = gameTurnTick;
 		while (!this.queuedMessages.isEmpty()
 				&& (this.queuedMessages.peek().messageTurnTick == this.latestLocallyRequestedTurn)) {
@@ -321,8 +323,20 @@ public class WarsmashClient implements ServerToClientListener, GameTurnManager {
 
 	@Override
 	public void framesSkipped(final float skippedCount) {
-		this.writer.framesSkipped((int) skippedCount);
-		this.writer.send();
+		send(() -> {
+			this.writer.framesSkipped((int) skippedCount);
+			this.writer.send();
+		});
+	}
+
+	/** The writer is the interface's too, which sends the player's orders on the render thread. */
+	private void send(final Runnable write) {
+		if (this.game.isSimulationThreaded()) {
+			Gdx.app.postRunnable(write);
+		}
+		else {
+			write.run();
+		}
 	}
 
 	@Override

@@ -49,6 +49,15 @@ public class FogSettings {
 		shader.setUniformf("u_fogHeight", hasHeightFog() ? 1f : 0f, this.heightMin, this.heightMax, 0f);
 	}
 
+	/** The same with the locations of u_fogColor, u_fogParams and u_fogHeight already found. */
+	public void uploadUniforms(final ShaderProgram shader, final int colorLocation, final int paramsLocation,
+			final int heightLocation) {
+		shader.setUniformf(colorLocation, this.color.r, this.color.g, this.color.b, this.maxOpacity);
+		shader.setUniformf(paramsLocation, this.style.ordinal(), this.start, this.end,
+				this.density * EXP_DENSITY_SCALE);
+		shader.setUniformf(heightLocation, hasHeightFog() ? 1f : 0f, this.heightMin, this.heightMax, 0f);
+	}
+
 	public void setStyleByIndex(final int styleValue) {
 		this.style = ((styleValue >= 0) && (styleValue < FogStyle.values().length)) ? FogStyle.values()[styleValue]
 				: FogStyle.NONE;

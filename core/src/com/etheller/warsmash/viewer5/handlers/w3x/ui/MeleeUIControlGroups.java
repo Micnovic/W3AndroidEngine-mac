@@ -26,9 +26,9 @@ import com.etheller.warsmash.parsers.fdf.frames.SpriteFrame;
 import com.etheller.warsmash.parsers.fdf.frames.TextureFrame;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
-import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.IconUI;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.UiFrameState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.UnitDetailsModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitClassification;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitTypeJass;
@@ -63,9 +63,12 @@ final class MeleeUIControlGroups {
 	private static final long HERO_ALERT_MINIMAP_SHOWN = 300;
 	// The red button keeps its red channel and a quarter of the others.
 	private static final float HERO_ALERT_TINT = 0.25f;
-	private final Map<CUnit, Long> heroAlertStarts = new HashMap<>();
+	private final Map<Integer, Long> heroAlertStarts = new HashMap<>();
 	private final HeroBarIcon[] heroBarIcons = new HeroBarIcon[HERO_BAR_SIZE];
-	private final List<CUnit> heroBarUnits = new ArrayList<>();
+	/** The unit of each hero bar slot, 0 for a slot kept but empty. */
+	private final int[] heroBarHandles = new int[HERO_BAR_SIZE];
+	private int heroBarCount;
+	private int[] shownIdleWorkers = new int[0];
 	// Calibration: the original's default count is not measured; three is the usual hero limit of a player.
 	private int reservedLocalHeroButtons = 3;
 	private int lastHeroBarPressed = -1;
@@ -88,6 +91,10 @@ final class MeleeUIControlGroups {
 
 	public void setReservedLocalHeroButtons(final int reserved) {
 		this.reservedLocalHeroButtons = Math.max(0, reserved);
+	}
+
+	int reservedLocalHeroButtons() {
+		return this.reservedLocalHeroButtons;
 	}
 
 	public void assignControlGroup(final int group, final boolean add) {
@@ -301,31 +308,42 @@ final class MeleeUIControlGroups {
 			return;
 		}
 		final long now = TimeUtils.millis();
-		final Long start = this.heroAlertStarts.get(unit);
+		final Long start = this.heroAlertStarts.get(unit.getHandleId());
 		if ((start == null) || ((now - start) >= HERO_ALERT_MILLIS)) {
-			this.heroAlertStarts.put(unit, now);
+			this.heroAlertStarts.put(unit.getHandleId(), now);
 		}
 	}
 
-	private long heroAlertTime(final CUnit hero, final long now) {
+	private long heroAlertTime(final int hero, final long now) {
 		final Long start = this.heroAlertStarts.get(hero);
 		if (start == null) {
 			return -1;
 		}
 		final long elapsed = now - start;
-		if ((elapsed >= HERO_ALERT_MILLIS) || hero.isDead()) {
+		if ((elapsed >= HERO_ALERT_MILLIS) || isHeroDead(hero)) {
 			this.heroAlertStarts.remove(hero);
 			return -1;
 		}
 		return elapsed;
 	}
 
+	/** Whether the hero is dead in the frame; a hero the frame does not list counts as not dead. */
+	private boolean isHeroDead(final int hero) {
+		final UiFrameState state = this.ui.commands.frameState(false);
+		for (int i = 0; i < state.heroCount; i++) {
+			if (state.heroes[i] == hero) {
+				return state.heroDetails[i].dead;
+			}
+		}
+		return false;
+	}
+
 	boolean isHeroAlertMinimapShown(final CUnit hero) {
-		final long elapsed = heroAlertTime(hero, TimeUtils.millis());
+		final long elapsed = heroAlertTime(hero.getHandleId(), TimeUtils.millis());
 		return (elapsed >= 0) && ((elapsed % HERO_ALERT_MINIMAP_PERIOD) < HERO_ALERT_MINIMAP_SHOWN);
 	}
 
-	private boolean isHeroAlertButtonShown(final CUnit hero, final long now) {
+	private boolean isHeroAlertButtonShown(final int hero, final long now) {
 		final long elapsed = heroAlertTime(hero, now);
 		if (elapsed < 0) {
 			return false;
@@ -335,61 +353,37 @@ final class MeleeUIControlGroups {
 	}
 
 	void updateHeroBar() {
-		this.heroBarUnits.clear();
-		for (final CUnit hero : this.ui.localPlayer.getHeroes()) {
-			if (this.heroBarUnits.size() >= HERO_BAR_SIZE) {
-				break;
-			}
-			this.heroBarUnits.add(hero);
-		}
-		// Heroes of players sharing their units come after the slots kept for the local player's own heroes.
-		final int localPlayerIndex = this.ui.localPlayer.getId();
-		boolean alliedPadding = true;
-		for (int playerIndex = 0; playerIndex < this.ui.war3MapViewer.getGameData().getMaxPlayers(); playerIndex++) {
-			final CPlayer player = this.ui.war3MapViewer.simulation.getPlayer(playerIndex);
-			if ((playerIndex == localPlayerIndex) || !player.hasAlliance(localPlayerIndex, CAllianceType.SHARED_CONTROL)) {
-				continue;
-			}
-			for (final CUnit hero : player.getHeroes()) {
-				if (alliedPadding) {
-					alliedPadding = false;
-					while (this.heroBarUnits.size() < Math.min(this.reservedLocalHeroButtons, HERO_BAR_SIZE)) {
-						this.heroBarUnits.add(null);
-					}
-				}
-				if (this.heroBarUnits.size() < HERO_BAR_SIZE) {
-					this.heroBarUnits.add(hero);
-				}
-			}
-		}
+		final UiFrameState state = this.ui.commands.frameState(false);
+		this.heroBarCount = Math.min(state.heroCount, HERO_BAR_SIZE);
 		final long now = TimeUtils.millis();
 		final boolean barShown = this.ui.heroBar.isVisible();
 		for (int i = 0; i < HERO_BAR_SIZE; i++) {
 			final HeroBarIcon icon = this.heroBarIcons[i];
-			final boolean used = (i < this.heroBarUnits.size()) && (this.heroBarUnits.get(i) != null);
+			final boolean used = (i < this.heroBarCount) && (state.heroes[i] != 0);
+			this.heroBarHandles[i] = used ? state.heroes[i] : 0;
 			if (icon.isVisible() != used) {
 				icon.setVisible(used);
 			}
 			if (used) {
-				final CUnit hero = this.heroBarUnits.get(i);
-				final IconUI unitUI = this.ui.war3MapViewer.getAbilityDataUI().getUnitUI(hero.getTypeId());
-				icon.setTexture(unitUI == null ? null : hero.isDead() ? unitUI.getIconDisabled() : unitUI.getIcon());
-				if (isHeroAlertButtonShown(hero, now)) {
+				final UnitDetailsModel hero = state.heroDetails[i];
+				icon.setTexture(hero.iconPath == null ? null
+						: hero.dead ? this.ui.commands.iconDisabled(hero.iconPath) : this.ui.commands.icon(hero.iconPath));
+				if (isHeroAlertButtonShown(hero.unitHandle, now)) {
 					icon.setIconColor(1f, HERO_ALERT_TINT, HERO_ALERT_TINT, 1f);
 				}
 				else {
 					icon.setIconColor(1f, 1f, 1f, 1f);
 				}
 				// Measured on 1.29: a dead hero's button shows no skill points.
-				icon.setSkillPoints(hero.isDead() ? 0 : hero.getHeroData().getSkillPoints(), barShown);
+				icon.setSkillPoints(hero.dead ? 0 : hero.skillPoints, barShown);
 				icon.setHero(i, hero, this.ui.rootFrame.getTemplates());
-				icon.setLifeRatioRemaining(hero.isDead() ? 0 : hero.getLife() / hero.getMaximumLife());
+				icon.setLifeRatioRemaining(hero.dead ? 0 : hero.hp / hero.maxHp);
 				// Measured on 1.29: a dead hero's button has no bars.
-				icon.setLifeBarVisible(!hero.isDead());
-				final boolean useManaBar = (hero.getMaximumMana() > 0) && !hero.isDead();
+				icon.setLifeBarVisible(!hero.dead);
+				final boolean useManaBar = (hero.maxMana > 0) && !hero.dead;
 				icon.setManaBarVisible(useManaBar);
 				if (useManaBar) {
-					icon.setManaRatioRemaining(hero.isDead() ? 0 : hero.getMana() / hero.getMaximumMana());
+					icon.setManaRatioRemaining(hero.dead ? 0 : hero.mana / hero.maxMana);
 				}
 			}
 			else {
@@ -402,20 +396,27 @@ final class MeleeUIControlGroups {
 	 * Idle workers: the local player's workers standing without an order, not inside a mine or burrow.
 	 */
 	void updateIdleWorkers() {
-		this.ui.idleWorkers.clear();
-		final int localPlayerIndex = this.ui.war3MapViewer.getLocalPlayerIndex();
-		for (final CUnit unit : this.ui.war3MapViewer.simulation.getUnits()) {
-			if ((unit.getPlayerIndex() == localPlayerIndex) && !unit.isDead() && !unit.isHidden()
-					&& !unit.isBuilding() && unit.getClassifications().contains(CUnitClassification.PEON)
-					&& ((unit.getCurrentBehavior() == null) || (unit.getCurrentBehavior() == unit.getStopBehavior()))) {
-				this.ui.idleWorkers.add(unit);
+		final UiFrameState state = this.ui.commands.frameState(false);
+		final int count = state.idleWorkerCount;
+		boolean same = count == this.shownIdleWorkers.length;
+		for (int i = 0; same && (i < count); i++) {
+			same = state.idleWorkers[i] == this.shownIdleWorkers[i];
+		}
+		if (!same) {
+			this.shownIdleWorkers = Arrays.copyOf(state.idleWorkers, count);
+			this.ui.idleWorkers.clear();
+			for (final int handle : this.shownIdleWorkers) {
+				final RenderUnit worker = this.ui.commands.renderUnitOf(handle);
+				if (worker != null) {
+					this.ui.idleWorkers.add(worker.getSimulationUnit());
+				}
 			}
 		}
-		final boolean show = !this.ui.idleWorkers.isEmpty();
+		final boolean show = count > 0;
 		if (this.ui.idleWorkerIcon.isVisible() != show) {
 			this.ui.idleWorkerIcon.setVisible(show);
 		}
-		this.ui.idleWorkerIcon.setCount(this.ui.idleWorkers.size());
+		this.ui.idleWorkerIcon.setCount(count);
 	}
 
 	/**
@@ -447,7 +448,7 @@ final class MeleeUIControlGroups {
 		final List<RenderWidget> selection = Arrays.asList(renderUnit);
 		this.ui.input.selectWidgets(selection);
 		this.ui.war3MapViewer.doSelectUnit(selection);
-		this.ui.cameraManager.jumpTo(worker.getX(), worker.getY());
+		this.ui.cameraManager.jumpTo(renderUnit.getX(), renderUnit.getY());
 	}
 
 	/** The hero's key works as its button: false when the bar has no living hero there. */
@@ -457,12 +458,12 @@ final class MeleeUIControlGroups {
 
 	/** A hero button selects its hero, a second press soon after also centers the camera on it. */
 	private boolean heroBarClicked(final int index) {
-		if (index >= this.heroBarUnits.size()) {
+		if ((index >= this.heroBarCount) || (this.heroBarHandles[index] == 0)) {
 			return false;
 		}
-		final CUnit hero = this.heroBarUnits.get(index);
-		final RenderUnit renderUnit = hero == null ? null : this.ui.war3MapViewer.getRenderPeer(hero);
-		if ((renderUnit == null) || hero.isDead()) {
+		final UnitDetailsModel hero = this.ui.commands.frameState(false).heroDetails[index];
+		final RenderUnit renderUnit = this.ui.commands.renderUnitOf(this.heroBarHandles[index]);
+		if ((renderUnit == null) || hero.dead) {
 			return false;
 		}
 		if (this.ui.activeCommand != null) {
@@ -481,7 +482,7 @@ final class MeleeUIControlGroups {
 		this.ui.input.selectWidgets(selection);
 		this.ui.war3MapViewer.doSelectUnit(selection);
 		if (doublePress) {
-			this.ui.cameraManager.jumpTo(hero.getX(), hero.getY());
+			this.ui.cameraManager.jumpTo(renderUnit.getX(), renderUnit.getY());
 		}
 		return true;
 	}
@@ -516,8 +517,8 @@ final class MeleeUIControlGroups {
 		float x = 0;
 		float y = 0;
 		for (final RenderUnit unit : members) {
-			x += unit.getSimulationUnit().getX();
-			y += unit.getSimulationUnit().getY();
+			x += unit.getX();
+			y += unit.getY();
 		}
 		this.ui.cameraManager.jumpTo(x / members.size(), y / members.size());
 	}
@@ -550,6 +551,13 @@ final class MeleeUIControlGroups {
 		}
 		return Integer.compare(a.getUnitType().getGoldCost() + a.getUnitType().getLumberCost(),
 				b.getUnitType().getGoldCost() + b.getUnitType().getLumberCost());
+	}
+
+	/** The icon of the unit a control group is shown by, null for an empty group. */
+	Texture controlGroupIcon(final int group) {
+		final UiFrameState state = this.ui.commands.frameState(false);
+		return (group < 0) || (group >= UiFrameState.CONTROL_GROUPS) ? null
+				: this.ui.commands.icon(state.controlGroupLeaderIcon[group]);
 	}
 
 	public List<RenderUnit> getControlGroup(final int group) {

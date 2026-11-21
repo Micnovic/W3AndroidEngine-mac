@@ -725,9 +725,7 @@ final class MapViewerPrewarm {
 			final UnitSound sound = viewer.uiSounds.getSound(label);
 			if (sound.getSoundCount() <= MAX_PREFETCHED_FILES) {
 				sound.prefetch();
-				for (int i = 0; i < sound.getSoundCount(); i++) {
-					sound.getDuration(i);
-				}
+				viewer.getSoundLabelInfo(label);
 			}
 			else if (sound.getSoundCount() > 0) {
 				// The script starts the day ambience in the first step, whose file is known from the step and the count.
@@ -768,7 +766,7 @@ final class MapViewerPrewarm {
 		}
 		final Matcher parameters = SCRIPT_LABEL_PARAMETERS.matcher(script);
 		while (parameters.find()) {
-			viewer.getSoundLabel(unescape(parameters.group(1)));
+			viewer.getSoundLabelParams(unescape(parameters.group(1)));
 		}
 		final Set<String> labels = new LinkedHashSet<>();
 		addMatches(labels, SCRIPT_LABEL_CREATE, script);
@@ -776,7 +774,7 @@ final class MapViewerPrewarm {
 			addMatches(labels, SCRIPT_LABEL_CREATE, readText(viewer.mapMpq, BLIZZARD_SCRIPT));
 		}
 		for (final String label : labels) {
-			viewer.uiSounds.getSound(label).getDuration();
+			viewer.getSoundLabelInfo(label);
 		}
 	}
 

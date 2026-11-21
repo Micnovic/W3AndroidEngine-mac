@@ -1,12 +1,8 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
-import java.util.List;
-
 import com.etheller.warsmash.parsers.fdf.GameUI;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.ui.PlayerPanelState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CMultiboard;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 
 /**
  * The "Team Resources" board: one row for every other player that gives the local player full shared control
@@ -47,17 +43,9 @@ final class MeleeUITeamResources {
 
 	/** The board to draw this frame, given the script board shown now (or null); null for none. */
 	CMultiboard update(final CMultiboard scriptBoard) {
-		final CSimulation simulation = this.ui.war3MapViewer.simulation;
-		final int localPlayerIndex = this.ui.war3MapViewer.getViewingPlayerIndex();
-		final List<CPlayer> players = simulation.getPlayers();
-		long sharing = 0;
-		int count = 0;
-		for (int i = 0; i < players.size(); i++) {
-			if (sharesResources(players.get(i), i, localPlayerIndex)) {
-				sharing |= 1L << (i & 63);
-				count++;
-			}
-		}
+		final PlayerPanelState panel = this.ui.commands.frameState(false).panel;
+		final long sharing = panel.teamPlayerMask;
+		final int count = panel.teamCount;
 		if (scriptBoard != this.lastScriptBoard) {
 			this.lastScriptBoard = scriptBoard;
 			if (scriptBoard != null) {
@@ -92,30 +80,19 @@ final class MeleeUITeamResources {
 			}
 		}
 		boolean changed = false;
-		int row = 0;
-		for (int i = 0; i < players.size(); i++) {
-			final CPlayer player = players.get(i);
-			if (!sharesResources(player, i, localPlayerIndex)) {
-				continue;
-			}
-			changed |= set(row, NAME_COLUMN, player.getName(), nameColor(player));
-			changed |= set(row, GOLD_COLUMN, Integer.toString(player.getGold()), VALUE_COLOR);
-			changed |= set(row, LUMBER_COLUMN, Integer.toString(player.getLumber()), VALUE_COLOR);
-			final int foodCap = player.getFoodCap();
-			final String food = foodCap == 0 ? Integer.toString(player.getFoodUsed())
-					: player.getFoodUsed() + "/" + foodCap;
-			changed |= set(row, FOOD_COLUMN, food, foodColor(simulation, player));
-			row++;
+		for (int row = 0; row < count; row++) {
+			changed |= set(row, NAME_COLUMN, panel.teamNames[row], nameColor(panel.teamColors[row]));
+			changed |= set(row, GOLD_COLUMN, Integer.toString(panel.teamGold[row]), VALUE_COLOR);
+			changed |= set(row, LUMBER_COLUMN, Integer.toString(panel.teamLumber[row]), VALUE_COLOR);
+			final int foodCap = panel.teamFoodCap[row];
+			final String food = foodCap == 0 ? Integer.toString(panel.teamFoodUsed[row])
+					: panel.teamFoodUsed[row] + "/" + foodCap;
+			changed |= set(row, FOOD_COLUMN, food, foodColor(panel.teamUpkeepLevel[row]));
 		}
 		if (changed) {
 			this.board.itemChanged();
 		}
 		return this.board;
-	}
-
-	private static boolean sharesResources(final CPlayer player, final int index, final int localPlayerIndex) {
-		return (index != localPlayerIndex) && (localPlayerIndex >= 0)
-				&& player.hasAlliance(localPlayerIndex, CAllianceType.SHARED_ADVANCED_CONTROL);
 	}
 
 	private boolean set(final int row, final int column, final String value, final int color) {
@@ -128,13 +105,12 @@ final class MeleeUITeamResources {
 		return true;
 	}
 
-	private static int nameColor(final CPlayer player) {
-		return (Integer.parseInt(MeleeChat.playerTextHex(player.getColor()), 16) << 8) | 0xFF;
+	private static int nameColor(final int playerColor) {
+		return (Integer.parseInt(MeleeChat.playerTextHex(playerColor), 16) << 8) | 0xFF;
 	}
 
-	private static int foodColor(final CSimulation simulation, final CPlayer player) {
-		final int level = simulation.getGameplayConstants().getUpkeepLevel(player.getFoodUsed());
-		return UPKEEP_COLORS[Math.min(level, UPKEEP_COLORS.length - 1)];
+	private static int foodColor(final int upkeepLevel) {
+		return UPKEEP_COLORS[Math.min(upkeepLevel, UPKEEP_COLORS.length - 1)];
 	}
 
 	private static String skinFile(final GameUI root, final String key) {

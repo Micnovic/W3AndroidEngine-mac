@@ -70,6 +70,10 @@ public abstract class Scene {
 	public Rectangle clip;
 	/** The part of its camera's viewport the scene is drawn at, into a render target of that part of the screen. */
 	private float renderScale = 1f;
+	/** Instances whose isolated update is waiting to run together on the workers. */
+	private final List<SceneUpdateWorkers.Deferred> deferred = new ArrayList<>();
+	private boolean collecting;
+	private boolean flushing;
 
 	public Scene(final ModelViewer viewer, final SceneLightManager lightManager) {
 		final CanvasProvider canvas = viewer.canvas;
@@ -249,7 +253,19 @@ public abstract class Scene {
 		this.currentInstance = 0;
 		this.currentBatchedInstance = 0;
 
-		innerUpdate(dt, frame);
+		this.collecting = true;
+		boolean updated = false;
+		try {
+			innerUpdate(dt, frame);
+			updated = true;
+		}
+		finally {
+			this.collecting = false;
+			if (!updated) {
+				this.deferred.clear();
+			}
+		}
+		flushDeferred();
 
 		for (int i = this.batchedInstances.size() - 1; i >= this.currentBatchedInstance; i--) {
 			this.batchedInstances.remove(i);
@@ -275,6 +291,40 @@ public abstract class Scene {
 	}
 
 	protected abstract void innerUpdate(float dt, int frame);
+
+	/**
+	 * Queues an instance whose update is being made now so its isolated part runs with the others' after the scene
+	 * has gone over all instances. False when nothing is collected (the caller then updates the instance itself).
+	 */
+	public boolean defer(final SceneUpdateWorkers.Deferred instance) {
+		if (!this.collecting) {
+			return false;
+		}
+		this.deferred.add(instance);
+		return true;
+	}
+
+	/**
+	 * Finishes the queued updates, so an update that follows can rely on everything that was queued before it having
+	 * happened first.
+	 */
+	public void flushDeferred() {
+		if (this.flushing || this.deferred.isEmpty()) {
+			return;
+		}
+		this.flushing = true;
+		final boolean wasCollecting = this.collecting;
+		// What the finishing parts do is not queued again.
+		this.collecting = false;
+		try {
+			SceneUpdateWorkers.run(this.deferred);
+		}
+		finally {
+			this.deferred.clear();
+			this.collecting = wasCollecting;
+			this.flushing = false;
+		}
+	}
 
 	public void setRenderScale(final float renderScale) {
 		this.renderScale = renderScale;

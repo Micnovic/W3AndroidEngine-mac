@@ -44,6 +44,16 @@ public class CSoundFromLabel extends AbstractCSound {
 		this.fadeOutRate = fadeOutRate;
 	}
 
+	CSoundParameters getParameters() {
+		return this.parameters;
+	}
+
+	/** A voice made for a loaded game continues the sequence of files the sound had reached. */
+	void restoreStarts(final int starts, final int variant) {
+		this.starts = starts;
+		this.variant = variant;
+	}
+
 	@Override
 	public void setPosition(final float x, final float y, final float z) {
 		this.parameters.positioned = true;

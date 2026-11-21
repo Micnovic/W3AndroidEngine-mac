@@ -16,6 +16,7 @@ import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.datamodel.TextJustify;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimThreadGuard;
 
 public class StringFrame extends AbstractRenderableFrame {
 	private final List<SingleStringFrame> internalFrames = new ArrayList<>();
@@ -219,6 +220,8 @@ public class StringFrame extends AbstractRenderableFrame {
 	 * "|n" breaks the line; spaces next to them are kept. Text wraps at spaces when the frame has a width.
 	 */
 	private void createInternalFrames(final GlyphLayout glyphLayout) {
+		// text layout shares libGDX state across all layouts (its run pool)
+		SimThreadGuard.assertGl();
 		final float wrapWidth = getAssignedWidth();
 		final float fontScale = this.frameFont.getScaleX();
 		final float fontLineHeight = this.frameFont.getLineHeight();

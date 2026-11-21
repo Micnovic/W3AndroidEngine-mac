@@ -28,7 +28,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.ItemUI;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.OncePerStep;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
+import com.etheller.warsmash.viewer5.handlers.w3x.simthread.SimFrame;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitEnumFunction;
@@ -89,8 +91,35 @@ final class MeleeUIInput {
 	}
 
 	boolean isUnitSelectable(final RenderWidget mouseOverUnit) {
+		if (mouseOverUnit instanceof RenderUnit) {
+			final UnitFrameView view = this.ui.unitView;
+			return view.unit((RenderUnit) mouseOverUnit) && view.isSelectableByLocal() && !view.isDead();
+		}
 		return mouseOverUnit.isSelectable(this.ui.war3MapViewer.simulation, this.ui.war3MapViewer.getLocalPlayerIndex())
-				&& !mouseOverUnit.getSimulationWidget().isDead();
+				&& !isDead(mouseOverUnit);
+	}
+
+	/** Whether a widget is dead, from the frame being presented where it has one. */
+	private boolean isDead(final RenderWidget widget) {
+		final UnitFrameView view = this.ui.unitView;
+		return view.widget(widget) && view.isDead();
+	}
+
+	/** The local player gives orders to the unit: it is theirs, or its owner shares control with them. */
+	private boolean isControlledByLocalPlayer(final RenderUnit unit) {
+		final UnitFrameView view = this.ui.unitView;
+		return view.unit(unit) && view.isControlledByLocal();
+	}
+
+	private CUnitType unitTypeOf(final RenderUnit unit) {
+		final UnitFrameView view = this.ui.unitView;
+		return view.unit(unit) ? view.unitType() : unit.getSimulationUnit().getUnitType();
+	}
+
+	/** The step the interface shows. */
+	private int presentedTick() {
+		final SimFrame frame = this.ui.unitView.presentedFrame();
+		return frame != null ? frame.tick : this.ui.war3MapViewer.simulation.getGameTurnTick();
 	}
 
 	private UIFrame getHoveredFrame(final AbstractUIFrame startFrame, final float screenX, final float screenY,
@@ -138,16 +167,15 @@ final class MeleeUIInput {
 	private final class AnyClickableUnitFilter implements CWidgetFilterFunction {
 		@Override
 		public boolean call(final CWidget unit) {
-			final RenderWidget renderPeer = MeleeUIInput.this.ui.war3MapViewer.getRenderPeer(unit);
-			return !unit.isDead() && renderPeer.isSelectable(MeleeUIInput.this.ui.war3MapViewer.simulation,
-					MeleeUIInput.this.ui.war3MapViewer.getLocalPlayerIndex());
+			return isUnitSelectable(MeleeUIInput.this.ui.war3MapViewer.getRenderPeer(unit));
 		}
 	}
 
 	private final class AnyTargetableUnitFilter implements CWidgetFilterFunction {
 		@Override
 		public boolean call(final CWidget unit) {
-			return !unit.isDead();
+			final RenderWidget peer = MeleeUIInput.this.ui.war3MapViewer.getRenderPeer(unit);
+			return (peer != null) ? !isDead(peer) : !unit.isDead();
 		}
 	}
 
@@ -187,7 +215,7 @@ final class MeleeUIInput {
 	public void selectUnit(RenderUnit unit) {
 		flushScriptSelection();
 		this.ui.subMenuOrderIdStack.clear();
-		if ((unit != null) && unit.getSimulationUnit().isDead()) {
+		if ((unit != null) && this.ui.unitView.unit(unit) && this.ui.unitView.isDead()) {
 			unit = null;
 		}
 		if (this.ui.selectedUnit != null) {
@@ -504,7 +532,7 @@ final class MeleeUIInput {
 		final float x = this.mouseEventLocation.x;
 		final float y = this.mouseEventLocation.y;
 		if (eventType == JassGameEventsWar3.EVENT_PLAYER_MOUSE_MOVE) {
-			final int tick = this.ui.war3MapViewer.simulation.getGameTurnTick();
+			final int tick = presentedTick();
 			if (tick == this.mouseMoveSentTick) {
 				this.mouseMovePending = true;
 				this.mouseMovePendingX = x;
@@ -524,7 +552,7 @@ final class MeleeUIInput {
 		if (!this.mouseMovePending || (this.ui.unitOrderListener == null)) {
 			return;
 		}
-		final int tick = this.ui.war3MapViewer.simulation.getGameTurnTick();
+		final int tick = presentedTick();
 		if (tick != this.mouseMoveSentTick) {
 			this.mouseMovePending = false;
 			this.mouseMoveSentTick = tick;
@@ -834,11 +862,7 @@ final class MeleeUIInput {
 					return true;
 				}
 				if (button == Input.Buttons.RIGHT) {
-					if ((this.ui.getSelectedUnit() != null) && ((this.ui.getSelectedUnit().getSimulationUnit()
-							.getPlayerIndex() == this.ui.war3MapViewer.getLocalPlayerIndex())
-							|| this.ui.war3MapViewer.simulation.getPlayer(this.ui.war3MapViewer.getLocalPlayerIndex())
-									.hasAlliance(this.ui.getSelectedUnit().getSimulationUnit().getPlayerIndex(),
-											CAllianceType.SHARED_CONTROL))) {
+					if ((this.ui.getSelectedUnit() != null) && isControlledByLocalPlayer(this.ui.getSelectedUnit())) {
 						RenderWidget rayPickUnit = this.ui.war3MapViewer.rayPickUnit(screenX, worldScreenY,
 								this.anyClickableUnitFilter);
 						if (rayPickUnit == null) {
@@ -1000,9 +1024,7 @@ final class MeleeUIInput {
 		final List<CUnit> walkers = new ArrayList<>();
 		final List<CAbilityView> walkerAbilities = new ArrayList<>();
 		for (final RenderUnit unit : this.ui.selectedUnits) {
-			if ((unit.getSimulationUnit().getPlayerIndex() == this.ui.war3MapViewer.getLocalPlayerIndex())
-					|| this.ui.war3MapViewer.simulation.getPlayer(this.ui.war3MapViewer.getLocalPlayerIndex())
-							.hasAlliance(unit.getSimulationUnit().getPlayerIndex(), CAllianceType.SHARED_CONTROL)) {
+			if (isControlledByLocalPlayer(unit)) {
 				for (final CAbility ability : unit.getSimulationUnit().getAbilities()) {
 					ability.checkCanUse(this.ui.war3MapViewer.simulation, unit.getSimulationUnit(),
 							this.ui.localPlayer.getId(), OrderIds.smart, false,
@@ -1062,13 +1084,13 @@ final class MeleeUIInput {
 		selectUnits(sortedUnits(selectedUnits));
 	}
 
-	private static List<RenderUnit> sortedUnits(final List<RenderWidget> selectedUnits) {
+	private List<RenderUnit> sortedUnits(final List<RenderWidget> selectedUnits) {
 		final List<RenderUnit> units = new ArrayList<>();
 		Collections.sort(selectedUnits, new Comparator<RenderWidget>() {
 			@Override
 			public int compare(final RenderWidget widget1, final RenderWidget widget2) {
-				final CUnitType unitType1 = ((RenderUnit) widget2).getSimulationUnit().getUnitType();
-				final CUnitType unitType2 = ((RenderUnit) widget1).getSimulationUnit().getUnitType();
+				final CUnitType unitType1 = unitTypeOf((RenderUnit) widget2);
+				final CUnitType unitType2 = unitTypeOf((RenderUnit) widget1);
 				final int prioSort = unitType1.getPriority() - unitType2.getPriority();
 				if (prioSort == 0) {
 					final int levelSort = unitType1.getLevel() - unitType2.getLevel();
@@ -1177,10 +1199,14 @@ final class MeleeUIInput {
 				this.ui.selectedSoundCount = 0;
 			}
 			UnitSound USAudio = null;
-			if ((unit.getSimulationUnit().getPlayerIndex() == this.ui.war3MapViewer.getLocalPlayerIndex())
-					|| (((unit.getSimulationUnit().getUnitType().getRace() == CUnitRace.CRITTERS)
-							|| (unit.getSimulationUnit().getUnitType().getRace() == CUnitRace.OTHER))
-							&& (unit.getSimulationUnit().getPlayerIndex() == (this.ui.war3MapViewer.getGameData().getMaxPlayers() - 1)))) {
+			final UnitFrameView selectedView = this.ui.unitView;
+			final boolean selectedInFrame = selectedView.unit(unit);
+			final int selectedOwner = selectedInFrame ? selectedView.ownerIndex()
+					: unit.getSimulationUnit().getPlayerIndex();
+			final CUnitRace selectedRace = unitTypeOf(unit).getRace();
+			if ((selectedOwner == this.ui.war3MapViewer.getLocalPlayerIndex())
+					|| (((selectedRace == CUnitRace.CRITTERS) || (selectedRace == CUnitRace.OTHER))
+							&& (selectedOwner == (this.ui.war3MapViewer.getGameData().getMaxPlayers() - 1)))) {
 				if (unit.soundset != null) {
 					UnitSound ackSoundToPlay = unit.soundset.what;
 					int soundIndex;
@@ -1296,8 +1322,9 @@ final class MeleeUIInput {
 						final List<RenderWidget> selectedWidgets = new ArrayList<>();
 						boolean foundGoal = false;
 						for (final RenderUnit unit : this.ui.dragSelectPreviewUnits) {
-							if ((unit.getSimulationUnit().getPlayerIndex() == this.ui.war3MapViewer
-									.getLocalPlayerIndex()) && !unit.getSimulationUnit().isBuilding()) {
+							final UnitFrameView view = this.ui.unitView;
+							if (view.unit(unit) && (view.ownerIndex() == this.ui.war3MapViewer.getLocalPlayerIndex())
+									&& !view.isBuilding()) {
 								foundGoal = true;
 								selectedWidgets.add(unit);
 							}
@@ -1513,7 +1540,7 @@ final class MeleeUIInput {
 		}
 		if (widget instanceof CUnit) {
 			final CUnit unit = (CUnit) widget;
-			if (isControlledByLocalPlayer(unit)) {
+			if (isControlledByLocalPlayer((RenderUnit) picked)) {
 				return PointKind.OWN_UNIT;
 			}
 			for (final CAbility ability : unit.getAbilities()) {
@@ -1521,20 +1548,15 @@ final class MeleeUIInput {
 					return PointKind.RESOURCE;
 				}
 			}
-			return unit.isUnitAlly(this.ui.localPlayer) ? PointKind.OTHER : PointKind.ENEMY;
+			return (this.ui.unitView.unit((RenderUnit) picked) && this.ui.unitView.isAllyOfLocal()) ? PointKind.OTHER
+					: PointKind.ENEMY;
 		}
 		return PointKind.OTHER;
 	}
 
-	private boolean isControlledByLocalPlayer(final CUnit unit) {
-		return (unit.getPlayerIndex() == this.ui.war3MapViewer.getLocalPlayerIndex())
-				|| this.ui.war3MapViewer.simulation.getPlayer(this.ui.war3MapViewer.getLocalPlayerIndex())
-						.hasAlliance(unit.getPlayerIndex(), CAllianceType.SHARED_CONTROL);
-	}
-
 	public boolean hasOrderableSelection() {
 		final RenderUnit selected = this.ui.getSelectedUnit();
-		return (selected != null) && isControlledByLocalPlayer(selected.getSimulationUnit());
+		return (selected != null) && isControlledByLocalPlayer(selected);
 	}
 
 	public void screenToWorld(final int screenX, final int screenY, final float[] out) {
@@ -1695,6 +1717,8 @@ final class MeleeUIInput {
 		private final RenderUnit sourceUnit;
 		private int index;
 		private boolean disposed = false;
+		/** Simulation thread: what it sent to the interface (see {@link MeleeUI#unitStateChanged}). */
+		private final OncePerStep sent = new OncePerStep(MeleeUI.UNIT_STATE_KINDS);
 
 		public MultiSelectUnitStateListener(final RenderUnit sourceUnit, final int index) {
 			this.sourceUnit = sourceUnit;
@@ -1708,29 +1732,30 @@ final class MeleeUIInput {
 
 		@Override
 		public void lifeChanged() {
-			if (this.disposed) {
+			MeleeUIInput.this.ui.unitStateChanged(this.sent, MeleeUI.UNIT_LIFE, this::showLife);
+		}
+
+		private void showLife() {
+			final UnitFrameView view = MeleeUIInput.this.ui.unitView;
+			if (this.disposed || !view.unit(this.sourceUnit)) {
 				return;
 			}
-			if (this.sourceUnit.getSimulationUnit().isDead()) {
+			if (view.isDead()) {
 				removeSourceUnitFromSelection();
 			}
 			else {
-				MeleeUIInput.this.ui.selectedUnitFrames[this.index]
-						.setLifeRatioRemaining(this.sourceUnit.getSimulationUnit().getLife()
-								/ this.sourceUnit.getSimulationUnit().getMaximumLife());
+				MeleeUIInput.this.ui.selectedUnitFrames[this.index].setLifeRatioRemaining(view.lifeRatio());
 			}
 		}
 
 		@Override
 		public void hideStateChanged() {
-			if (this.disposed) {
-				return;
-			}
-			if (this.sourceUnit.getSimulationUnit().isHidden()
-					|| !this.sourceUnit.getSimulationUnit().isVisible(MeleeUIInput.this.ui.war3MapViewer.simulation,
-							MeleeUIInput.this.ui.war3MapViewer.getLocalPlayerIndex())) {
-				removeSourceUnitFromSelection();
-			}
+			MeleeUIInput.this.ui.unitStateChanged(this.sent, MeleeUI.UNIT_HIDDEN, () -> {
+				final UnitFrameView view = MeleeUIInput.this.ui.unitView;
+				if (!this.disposed && view.unit(this.sourceUnit) && view.isHiddenFromLocal()) {
+					removeSourceUnitFromSelection();
+				}
+			});
 		}
 
 		private void removeSourceUnitFromSelection() {
@@ -1746,12 +1771,12 @@ final class MeleeUIInput {
 
 		@Override
 		public void manaChanged() {
-			if (this.disposed) {
-				return;
-			}
-			MeleeUIInput.this.ui.selectedUnitFrames[this.index]
-					.setManaRatioRemaining(this.sourceUnit.getSimulationUnit().getMana()
-							/ this.sourceUnit.getSimulationUnit().getMaximumMana());
+			MeleeUIInput.this.ui.unitStateChanged(this.sent, MeleeUI.UNIT_MANA, () -> {
+				final UnitFrameView view = MeleeUIInput.this.ui.unitView;
+				if (!this.disposed && view.unit(this.sourceUnit)) {
+					MeleeUIInput.this.ui.selectedUnitFrames[this.index].setManaRatioRemaining(view.manaRatio());
+				}
+			});
 		}
 
 		@Override
