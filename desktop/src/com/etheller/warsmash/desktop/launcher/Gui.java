@@ -632,8 +632,12 @@ final class Gui {
 	}
 
 	private BitmapFont sized(final float size) {
+		return sized(size, null);
+	}
+
+	private BitmapFont sized(final float size, final String text) {
 		final int pixels = Math.max(6, Math.round(size * this.b.scale));
-		final BitmapFont font = this.art.font(pixels, this.bold);
+		final BitmapFont font = this.art.font(pixels, this.bold, text);
 		font.getData().setScale(1f / this.b.scale);
 		return font;
 	}
@@ -668,7 +672,8 @@ final class Gui {
 
 	/** The width of a text in design pixels. */
 	float width(final String text, final float size) {
-		this.layout.setText(sized(size), GlueText.plain(text));
+		final String plain = GlueText.plain(text);
+		this.layout.setText(sized(size, plain), plain);
 		return this.layout.width;
 	}
 
@@ -681,8 +686,8 @@ final class Gui {
 		if ((value == null) || value.isEmpty()) {
 			return false;
 		}
-		final BitmapFont font = sized(size);
 		final String plain = GlueText.plain(value);
+		final BitmapFont font = sized(size, plain);
 		this.layout.setText(font, plain);
 		final boolean cut = this.layout.width > (w + 0.5f);
 		final float top = y + ((h - font.getCapHeight()) / 2) - (font.getAscent() * 0.15f);
@@ -753,9 +758,9 @@ final class Gui {
 		if ((value == null) || value.isEmpty()) {
 			return;
 		}
-		final BitmapFont font = sized(size);
-		pushClip(x - size, y, w + (2 * size), h);
 		final String plain = GlueText.plain(value);
+		final BitmapFont font = sized(size, plain);
+		pushClip(x - size, y, w + (2 * size), h);
 		font.setColor(0, 0, 0, 0.9f);
 		final float shadow = Math.max(1 / this.b.scale, size * 0.06f);
 		font.draw(this.batch, plain, x + shadow, y + shadow, w, align, true);

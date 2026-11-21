@@ -15,7 +15,7 @@ import com.etheller.interpreter.ast.value.JassType;
  */
 public final class UserJassFunction {
 	private final EnumSet<JassQualifier> qualifiers;
-	private final List<JassStatement> statements;
+	private List<JassStatement> statements;
 	private final List<JassParameter> parameters;
 	private final JassType returnType;
 
@@ -33,6 +33,11 @@ public final class UserJassFunction {
 
 	public List<JassStatement> getStatements() {
 		return this.statements;
+	}
+
+	/** The statements are only read to make the instructions, which run in their place; the tree is not kept. */
+	public void releaseStatements() {
+		this.statements = null;
 	}
 
 	public List<JassParameter> getParameters() {

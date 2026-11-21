@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -205,6 +206,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private final StringBuilder saveFilter = new StringBuilder();
 	private Map<String, CCampaignProgress.Snapshot> profileProgress;
 	private boolean launching;
+	private boolean checkingMap;
+	private File cascCheckedFolder;
+	private boolean cascUnsupported;
 	LanPages lan;
 	private WarsmashGdxMenuScreen menuScreen;
 	private LaunchRequest launched;
@@ -2022,8 +2026,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 						0xFFFFFFFF, Align.left);
 			}
 			else {
-				g.dropdown("type" + index, types, this.lobby.slotTypes[index], cx, y, widths[0], menuH, size, editable,
-						null, choice -> this.lobby.slotTypes[index] = choice);
+				g.dropdown("type" + index, types, this.lobby.slotTypes[index], cx, y, widths[0], menuH, size,
+						CustomGame.typeEditable(details, index), null, choice -> this.lobby.slotTypes[index] = choice);
 			}
 			cx += widths[0] + gap;
 			g.dropdown("race" + index, races, this.lobby.slotRaces[index], cx, y, widths[1], menuH, size, editable,
@@ -3387,8 +3391,13 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final List<DataContentCheck.Problem> content = this.dataContent;
 		if (content != null) {
 			final List<String> lacking = new ArrayList<>();
-			for (final DataContentCheck.Problem problem : content) {
-				lacking.add(s(problem.message));
+			if (casc && unsupportedCasc(folder)) {
+				lacking.add(s(DataContentCheck.Problem.UNSUPPORTED_VERSION.message));
+			}
+			else {
+				for (final DataContentCheck.Problem problem : content) {
+					lacking.add(s(problem.message));
+				}
 			}
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_content"),
 					lacking.isEmpty() ? s("options_content_complete") : "\u2717 " + String.join(" \u00b7 ", lacking)));
@@ -3627,6 +3636,10 @@ public final class LauncherScreen implements Screen, InputProcessor {
 							+ readability.firstNames();
 			return;
 		}
+		if ((kind == DataFolderCheck.Kind.CASC) && DataFolderCheck.isUnsupportedCasc(folder)) {
+			this.dataStatus = s("data_content_old_version") + " (" + DataFolderCheck.describe(kind, folder) + ")";
+			return;
+		}
 		try {
 			// The engine's own folders of warsmash.ini are added to these when the file is read.
 			// The player's own settings (graphics, content folder) outlive a change of game data.
@@ -3705,7 +3718,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final Thread thread = new Thread(() -> {
 			String problem = null;
 			try (DataPackage dataPackage = DataPackage.open(zip)) {
-				if ((dataPackage.graphicsSet != null) && (current != null)) {
+				if (dataPackage.addsToClassic() && (current != null)) {
 					into[0] = current;
 				}
 				job.update(0, dataPackage.totalBytes, 0, dataPackage.fileCount());
@@ -3759,6 +3772,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			return this.strings.get("data_folder_import_no_game_data", name);
 		case NO_CLASSIC:
 			return this.strings.get("data_folder_import_no_classic", name, failure.file);
+		case NO_CLASSIC_LANGUAGE:
+			return this.strings.get("data_folder_import_no_classic_language", name,
+					GameLanguage.displayName(failure.file));
 		case CANCELLED:
 			return s("data_folder_import_cancelled");
 		case IO:
@@ -4171,9 +4187,19 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			break;
 		case UPDATE: {
 			final UpdateCheck.Release latest = this.updateRelease;
+			if (latest.isUnknown()) {
+				question(s("update_title"), s("update_unknown"), new String[] { s("update_github"), s("update_continue") },
+						choice -> {
+							UpdateCheck.dismissUnknown();
+							if (choice == 0) {
+								Gdx.net.openURI(latest.pageUrl);
+							}
+						}, 1);
+				break;
+			}
 			question(s("update_title"),
 					s("update_offer_desktop").replace("%1$s", latest.tag).replace("%2$s", GameReplays.engineVersion()),
-					new String[] { s("update_open_page"), s("update_later"), s("update_skip") }, choice -> {
+					new String[] { s("update_github"), s("update_later"), s("update_skip") }, choice -> {
 						if (choice == 0) {
 							Gdx.net.openURI(latest.pageUrl);
 						}
@@ -4437,8 +4463,56 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		return LaunchRequest.load(entry, this.campaigns == null ? null : this.campaigns.catalog);
 	}
 
-	/** Starts a game in this window; the launcher comes back when it ends, on the page given. */
+	/** The rows are built every frame; the folder's build file is read once per folder. */
+	private boolean unsupportedCasc(final File folder) {
+		if (!Objects.equals(folder, this.cascCheckedFolder)) {
+			this.cascUnsupported = DataFolderCheck.isUnsupportedCasc(folder);
+			this.cascCheckedFolder = folder;
+		}
+		return this.cascUnsupported;
+	}
+
+	/**
+	 * Starts a game in this window; the launcher comes back when it ends, on the page given. A map the engine cannot
+	 * play is refused here, before the engine is started.
+	 */
 	void launchGame(final LaunchRequest request, final Page returnPage) {
+		final LaunchGuard.Blocked blocked = LaunchGuard.check(request);
+		if (blocked != null) {
+			this.lan.blocked(blocked);
+			return;
+		}
+		if (this.launching || this.checkingMap) {
+			return;
+		}
+		if ((request.mapFile == null) || request.mapChecked || (this.catalog == null)) {
+			beginLaunch(request, returnPage);
+			return;
+		}
+		this.checkingMap = true;
+		this.catalog.mapIssue(request.mapFile, issue -> {
+			this.checkingMap = false;
+			if (issue == null) {
+				// the catalog was closed during the check: the lobby must not wait for a game that never starts
+				if (request.lan) {
+					this.lan.model.launchFailed();
+				}
+			}
+			else if (issue == MapIssue.NONE) {
+				beginLaunch(request, returnPage);
+			}
+			else if (request.lan) {
+				this.lan.model.launchRefused(issue);
+			}
+			else {
+				this.messageTitle = s("game_not_started");
+				this.messageLine = s(issue.message);
+				this.dialog = Dialog.MESSAGE;
+			}
+		});
+	}
+
+	private void beginLaunch(final LaunchRequest request, final Page returnPage) {
 		final LaunchGuard.Blocked blocked = LaunchGuard.check(request);
 		if (blocked != null) {
 			this.lan.blocked(blocked);
@@ -4487,6 +4561,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				failed.result = "error";
 				failed.map = request.mapFile;
 				failed.reason = menu.mapLoadFailureReason();
+				failed.issue = menu.mapLoadFailureIssue();
 				Gdx.app.postRunnable(() -> gameEnded(failed));
 			}
 		});
@@ -4565,7 +4640,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		}
 		else if (returned.failed()) {
 			this.messageTitle = s("game_not_started");
-			this.messageLine = returned.failureText();
+			this.messageLine = returned.issue != MapIssue.NONE ? s(returned.issue.message) : returned.failureText();
 			this.dialog = Dialog.MESSAGE;
 		}
 	}

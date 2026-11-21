@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.Log;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Camera;
 import com.etheller.warsmash.viewer5.ModelViewer;
@@ -489,6 +490,10 @@ public class GeometryEmitterFuncs {
 
 		if (emitterType == EMITTER_PARTICLE2) {
 			final ParticleEmitter2Object emitterObject2 = ((ParticleEmitter2) emitter).emitterObject;
+			// The HD models draw their team glow as particles of the TeamGlow replaceable texture.
+			if (((ParticleEmitter2) emitter).instance.teamGlowHidden && (emitterObject2.replaceableId == 2)) {
+				return 0;
+			}
 			if (emitterObject2.headOrTail.isIncludesHead() && emitterObject2.headOrTail.isIncludesTail()) {
 				alive *= 2;
 			}
@@ -598,6 +603,7 @@ public class GeometryEmitterFuncs {
 				shader.setVertexAttribute("a_leftRightTop", 3, GL20.GL_UNSIGNED_BYTE, false, BYTES_PER_OBJECT,
 						byteBase + BYTE_OFFSET_LEFT_RIGHT_TOP);
 
+				PerfStats.draw();
 				instancedArrays.glDrawArraysInstancedANGLE(GL20.GL_TRIANGLES, 0, 6, alive);
 				base += alive;
 			}

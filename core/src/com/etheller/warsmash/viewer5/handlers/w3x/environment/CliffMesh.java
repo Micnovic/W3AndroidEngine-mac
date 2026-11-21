@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.RenderMathUtils;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxGeoset;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxModel;
@@ -127,6 +128,7 @@ public class CliffMesh {
 		this.gl.glVertexAttribDivisor(offsetAttributeLocation, 1);
 
 		this.gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+		PerfStats.draw();
 		this.gl.glDrawElementsInstanced(GL20.GL_TRIANGLES, this.indices, GL30.GL_UNSIGNED_SHORT, 0, jobCount / 4);
 
 		this.gl.glVertexAttribDivisor(offsetAttributeLocation, 0); // ToDo use vao

@@ -6,7 +6,6 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityAttack;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityGenericDoNothing;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityMove;
@@ -35,7 +34,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.upgrade.C
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff.ABBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff.ABTimedInstantTransformationBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff.ABTimedTransformationBuff;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABLocalStoreKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.handler.TransformationHandler.OnTransformationActions;
 
 public class GetInstantTransformationBuffVisitor implements CAbilityVisitor<ABBuff> {

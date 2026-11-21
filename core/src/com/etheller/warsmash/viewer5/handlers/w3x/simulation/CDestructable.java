@@ -10,6 +10,7 @@ import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderWidget.UnitAnimationListenerImpl;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CDestructableBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
@@ -25,6 +26,7 @@ public class CDestructable extends CWidget {
 	private final CDestructableType destType;
 	private final RemovablePathingMapInstance pathingInstance;
 	private final RemovablePathingMapInstance pathingInstanceDeath;
+	@SavedTransient
 	private UnitAnimationListenerImpl unitAnimationListener;
 	private boolean removedFromGame;
 	private boolean invulnerable;

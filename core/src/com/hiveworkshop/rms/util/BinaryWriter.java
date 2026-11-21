@@ -116,6 +116,12 @@ public class BinaryWriter {
 		}
 	}
 
+	public void writeUInt16Array(final short[] values) {
+		for (final short value : values) {
+			this.buffer.putShort(value);
+		}
+	}
+
 	public void writeUInt32Array(final long[] values) {
 		for (final long value : values) {
 			writeUInt32(value);

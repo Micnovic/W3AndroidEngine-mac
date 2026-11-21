@@ -9,7 +9,6 @@ import static com.etheller.warsmash.launcher.SkinArt.MISSION_FOLDER;
 import static com.etheller.warsmash.launcher.SkinArt.REFORGED_SKIN;
 import static com.etheller.warsmash.launcher.SkinArt.SCENES;
 import static com.etheller.warsmash.launcher.SkinArt.STRINGS;
-import static com.etheller.warsmash.launcher.SkinArt.STRING_FILES;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -21,7 +20,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -33,7 +31,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
@@ -695,7 +692,9 @@ final class SkinCache {
 			}
 			try {
 				return new Typeface.CustomFallbackBuilder(new FontFamily.Builder(new Font.Builder(main).build()).build())
-						.addCustomFallback(new FontFamily.Builder(new Font.Builder(global).build()).build()).build();
+						.addCustomFallback(new FontFamily.Builder(new Font.Builder(global).build()).build())
+						// A custom list has no system fonts behind it unless named; they bring the signs the data lacks.
+						.setSystemFallback("sans-serif").build();
 			}
 			catch (final IOException | RuntimeException e) {
 				Log.w(TAG, "Unable to add " + global, e);

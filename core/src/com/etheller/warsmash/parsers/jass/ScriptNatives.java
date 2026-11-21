@@ -65,7 +65,8 @@ final class ScriptNatives extends CommonNatives {
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("AbilityId2String",
 				(arguments, globalScope, triggerScope) -> {
-					return new StringJassValue("");
+					// Gives a null string, not an empty one, for every id.
+					return JassType.STRING.getNullValue();
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetObjectName",
 				(arguments, globalScope, triggerScope) -> {

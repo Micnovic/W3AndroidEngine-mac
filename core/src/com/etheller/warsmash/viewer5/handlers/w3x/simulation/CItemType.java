@@ -3,6 +3,8 @@ package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 import java.util.List;
 
 import com.etheller.warsmash.util.War3ID;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTypeJass;
 
 public class CItemType {
@@ -34,6 +36,8 @@ public class CItemType {
 	private final List<CUnitTypeRequirement> requirements;
 	private int stockInitial = 1;
 	private int stackMax;
+	private CEquipmentType equipmentType = CEquipmentType.NONE;
+	private CItemTag itemTag = CItemTag.UNDEFINED;
 
 	public CItemType(final War3ID typeId, final List<War3ID> abilityList, final War3ID cooldownGroup, final boolean ignoreCooldown,
 			final int numberOfCharges, final boolean activelyUsed, final boolean perishable,
@@ -138,6 +142,23 @@ public class CItemType {
 
 	public void setStackMax(final int stackMax) {
 		this.stackMax = stackMax;
+	}
+
+	/** Where a unit can wear an item of this type (the 3.0 equipment column); NONE for a plain item. */
+	public CEquipmentType getEquipmentType() {
+		return this.equipmentType;
+	}
+
+	public void setEquipmentType(final CEquipmentType equipmentType) {
+		this.equipmentType = equipmentType;
+	}
+
+	public CItemTag getItemTag() {
+		return this.itemTag;
+	}
+
+	public void setItemTag(final CItemTag itemTag) {
+		this.itemTag = itemTag;
 	}
 
 	public int getMaxLife() {

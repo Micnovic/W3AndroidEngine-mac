@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import com.badlogic.gdx.Gdx;
@@ -13,6 +14,8 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.RenderMathUtils;
 import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.RenderScaler;
@@ -20,6 +23,7 @@ import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.gl.WebGL;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
+import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxShadowCaster;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.GameOptions;
@@ -42,22 +46,31 @@ public class DynamicShadowManager {
 	private static final float DEFAULT_LIGHT_Y = -0.45f;
 	/** A shadow is never longer than this many times the height of what casts it, however low the light is. */
 	private static final float MAX_SHADOW_LENGTH = 3.5f;
-	/** At night the shadows of the moonlight are this many times as long as the light direction makes them by day. */
-	private static final float NIGHT_LENGTH = Float.parseFloat(System.getProperty("warsmash.shadowNightLength", "1.7"));
+	/** Reforged keeps the same shadow length at every hour of the day; above 1 lengthens the moonlight shadows. */
+	private static final float NIGHT_LENGTH = Float.parseFloat(System.getProperty("warsmash.shadowNightLength", "1.0"));
 	private static final float DAY_STRENGTH = 0.6f;
 	private static final float NIGHT_STRENGTH = 0.5f;
-	/** The ground slope is taken between points this far from the unit, and is never counted steeper than this. */
-	private static final float SLOPE_SPAN = 32f;
-	private static final float MIN_GROUND_NORMAL_Z = 0.5f;
-	/** The most that are drawn in a frame, the first in the scene order; every one costs a draw of its whole model. */
+	/** The most units and buildings that are drawn in a frame, the first in the scene order; each costs a draw. */
 	private static final int MAX_CASTERS = 160;
+	/** The most trees and other scenery drawn in a frame, after the units, so that they never take their place. */
+	private static final int MAX_SCENERY = 96;
+	/** Scenery lower than this is too small to throw a shadow that is seen. */
+	private static final float SCENERY_MIN_HEIGHT = 96f;
 	/** How high a shadow caster is taken to be when seeing whether its shadow is in view. */
 	private static final float CULL_HEIGHT = 192f;
 	private static final float CULL_EDGE = 1.15f;
-	/** The mask is drawn at this part of the world's size and smoothed when it is laid over the ground. */
-	private static final float MASK_SCALE = 0.5f;
+	/** The mask is drawn at the size of the view, so that the edges of a shadow stay sharp. */
+	private static final float MASK_SCALE = 1f;
+	/** How far, in mask pixels, the four taps of the composite lie from a pixel's centre: each is a bilinear mix of four. */
+	private static final float EDGE_SOFTNESS = 0.5f;
 	/** A unit this far above the ground is in the air: its shadow lies straight below it. */
 	private static final float AIRBORNE_HEIGHT = 48f;
+	/** How far along the light, as the height of a tall shadow caster, and how far to the sides the ground is tried. */
+	private static final float FLAT_REACH = 160f;
+	private static final float FLAT_SIDE = 48f;
+	private static final float FLAT_TOLERANCE = 1.5f;
+	/** Pairs of the part of the reach and of the side distance, in units of FLAT_SIDE, of the places that are tried. */
+	private static final float[] FLAT_PROBES = { 0.5f, 0f, 1f, 0f, 0f, 1f, 0f, -1f, 0.5f, 1f, 0.5f, -1f };
 
 	private static final String COMPOSITE_VERTEX = "    attribute vec2 a_position;\r\n" + //
 			"    varying vec2 v_uv;\r\n" + //
@@ -71,21 +84,14 @@ public class DynamicShadowManager {
 			"    uniform float u_strength;\r\n" + //
 			"    varying vec2 v_uv;\r\n" + //
 			"    void main() {\r\n" + //
-			"      float m = texture2D(u_mask, v_uv).r * 0.25;\r\n" + //
-			"      m += (texture2D(u_mask, v_uv + vec2(u_texel.x, 0.0)).r\r\n" + //
-			"          + texture2D(u_mask, v_uv - vec2(u_texel.x, 0.0)).r\r\n" + //
-			"          + texture2D(u_mask, v_uv + vec2(0.0, u_texel.y)).r\r\n" + //
-			"          + texture2D(u_mask, v_uv - vec2(0.0, u_texel.y)).r) * 0.125;\r\n" + //
-			"      m += (texture2D(u_mask, v_uv + u_texel).r + texture2D(u_mask, v_uv - u_texel).r\r\n" + //
+			"      float m = texture2D(u_mask, v_uv + u_texel).r + texture2D(u_mask, v_uv - u_texel).r\r\n" + //
 			"          + texture2D(u_mask, v_uv + vec2(u_texel.x, -u_texel.y)).r\r\n" + //
-			"          + texture2D(u_mask, v_uv + vec2(-u_texel.x, u_texel.y)).r) * 0.0625;\r\n" + //
-			"      gl_FragColor = vec4(0.0, 0.0, 0.0, m * u_strength);\r\n" + //
+			"          + texture2D(u_mask, v_uv + vec2(-u_texel.x, u_texel.y)).r;\r\n" + //
+			"      gl_FragColor = vec4(0.0, 0.0, 0.0, m * 0.25 * u_strength);\r\n" + //
 			"    }";
 
 	private final Vector3 sunDirection = new Vector3(DEFAULT_LIGHT_X, DEFAULT_LIGHT_Y, 1f).nor();
 	private final Vector3 shadowLight = new Vector3();
-	private final Vector3 groundNormal = new Vector3();
-	private final Vector3 groundPoint = new Vector3();
 	private final Vector3 straightDown = new Vector3(0f, 0f, 1f);
 	private final Vector3 viewHeap = new Vector3();
 	private final Vector3 viewHeap2 = new Vector3();
@@ -93,7 +99,12 @@ public class DynamicShadowManager {
 	private float strength = DAY_STRENGTH;
 	private final MdxShadowCaster caster = new MdxShadowCaster();
 	private final List<MdxComplexInstance> casters = new ArrayList<>();
+	private final List<MdxComplexInstance> sceneryCasters = new ArrayList<>();
+	private final List<MdxComplexInstance> selected = new ArrayList<>();
+	private static final Comparator<MdxComplexInstance> BY_MODEL = (a, b) -> Integer
+			.compare(System.identityHashCode(a.model), System.identityHashCode(b.model));
 	private boolean modelShadows;
+	private boolean sceneShadows;
 	private int maskFramebuffer;
 	private int maskTexture;
 	private int maskWidth;
@@ -171,6 +182,27 @@ public class DynamicShadowManager {
 	}
 
 	/**
+	 * Whether buildings, trees and other scenery cast shadows in the shape of their models as well, in place of the
+	 * shadow images that are laid under them.
+	 */
+	public boolean isSceneShadows() {
+		return this.modelShadows && this.sceneShadows;
+	}
+
+	public void setSceneShadows(final boolean sceneShadows) {
+		this.sceneShadows = sceneShadows;
+	}
+
+	/** Whether scenery of this model, at this scale, is tall enough to cast a model shadow while scene shadows are on. */
+	public boolean castsSceneShadow(final MdxModel model, final float scale) {
+		if (!isSceneShadows()) {
+			return false;
+		}
+		final BoundingBox box = model.bounds.getBoundingBox();
+		return (box == null) || ((box.max.z * scale) >= SCENERY_MIN_HEIGHT);
+	}
+
+	/**
 	 * Draws the shapes of the units in view, flattened along the light, into a mask of the world's size. This is done
 	 * before the world itself, so that the world's render target is not left and come back to in the middle of the
 	 * frame, which a tile based GPU pays for. {@link #compositeUnitShadows} lays the mask over the ground.
@@ -179,18 +211,24 @@ public class DynamicShadowManager {
 	 */
 	public boolean renderUnitShadowMask(final WebGL webGL, final Scene scene, final Terrain terrain) {
 		this.casters.clear();
+		this.sceneryCasters.clear();
 		if (!this.modelShadows || !scene.show || !GameOptions.get().isUnitShadows()) {
 			return false;
 		}
 		final List<ModelInstance> instances = scene.instances;
 		for (int i = 0, n = instances.size(); i < n; i++) {
 			final ModelInstance instance = instances.get(i);
-			if (instance.rendered && (instance instanceof MdxComplexInstance)
-					&& ((MdxComplexInstance) instance).groundShadow) {
-				this.casters.add((MdxComplexInstance) instance);
+			if (instance.rendered && (instance instanceof MdxComplexInstance)) {
+				final MdxComplexInstance mdx = (MdxComplexInstance) instance;
+				if (mdx.groundShadow) {
+					this.casters.add(mdx);
+				}
+				else if (mdx.sceneryShadow) {
+					this.sceneryCasters.add(mdx);
+				}
 			}
 		}
-		if (this.casters.isEmpty()) {
+		if (this.casters.isEmpty() && this.sceneryCasters.isEmpty()) {
 			return false;
 		}
 		final GL30 gl = Gdx.gl30;
@@ -211,48 +249,76 @@ public class DynamicShadowManager {
 		MdxShadowCaster.prepareState(gl);
 		final Matrix4 viewProjection = scene.camera.viewProjectionMatrix;
 		prepareShadowLight();
-		int drawn = 0;
-		for (int i = 0, n = this.casters.size(); (i < n) && (drawn < MAX_CASTERS); i++) {
-			final MdxComplexInstance instance = this.casters.get(i);
-			final float x = instance.worldLocation.x;
-			final float y = instance.worldLocation.y;
-			final float groundZ = terrain.getGroundHeight(x, y);
-			if (!shadowInView(viewProjection, x, y, groundZ)) {
-				continue;
-			}
-			this.groundPoint.set(x, y, groundZ);
-			if ((instance.worldLocation.z - groundZ) > AIRBORNE_HEIGHT) {
-				this.caster.draw(webGL, instance, viewProjection, this.straightDown, this.straightDown,
-						this.groundPoint);
-			}
-			else {
-				groundNormal(terrain, x, y);
-				this.caster.draw(webGL, instance, viewProjection, this.shadowLight, this.groundNormal,
-						this.groundPoint);
-			}
-			drawn++;
-		}
+		terrain.bindShadowHeights(this.caster, MdxShadowCaster.heightUnit());
+		this.caster.beginFrame();
+		drawCasters(webGL, this.casters, MAX_CASTERS, viewProjection, terrain, false);
+		drawCasters(webGL, this.sceneryCasters, MAX_SCENERY, viewProjection, terrain, true);
+		gl.glActiveTexture(GL20.GL_TEXTURE0);
 		gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, RenderScaler.currentTarget());
 		gl.glEnable(GL20.GL_SCISSOR_TEST);
 		return true;
 	}
 
-	private void groundNormal(final Terrain terrain, final float x, final float y) {
-		final float dx = terrain.getGroundHeight(x - SLOPE_SPAN, y) - terrain.getGroundHeight(x + SLOPE_SPAN, y);
-		final float dy = terrain.getGroundHeight(x, y - SLOPE_SPAN) - terrain.getGroundHeight(x, y + SLOPE_SPAN);
-		final float horizontal = (float) Math.sqrt((dx * dx) + (dy * dy));
-		final float limit = (2f * SLOPE_SPAN * (float) Math.sqrt(1f - (MIN_GROUND_NORMAL_Z * MIN_GROUND_NORMAL_Z)))
-				/ MIN_GROUND_NORMAL_Z;
-		final float scale = horizontal > limit ? limit / horizontal : 1f;
-		this.groundNormal.set(dx * scale, dy * scale, 2f * SLOPE_SPAN).nor();
+	private void drawCasters(final WebGL webGL, final List<MdxComplexInstance> list, final int limit,
+			final Matrix4 viewProjection, final Terrain terrain, final boolean scenery) {
+		this.selected.clear();
+		for (int i = 0, n = list.size(); (i < n) && (this.selected.size() < limit); i++) {
+			final MdxComplexInstance instance = list.get(i);
+			final float x = instance.worldLocation.x;
+			final float y = instance.worldLocation.y;
+			if (shadowInView(viewProjection, x, y, terrain.getGroundHeight(x, y))) {
+				this.selected.add(instance);
+			}
+		}
+		// The mask is a union, so the order does not matter: casters of one model are drawn together, which keeps
+		// its geometry bound.
+		this.selected.sort(BY_MODEL);
+		for (int i = 0, n = this.selected.size(); i < n; i++) {
+			final MdxComplexInstance instance = this.selected.get(i);
+			final float groundZ = terrain.getGroundHeight(instance.worldLocation.x, instance.worldLocation.y);
+			// What is in the air has its shadow straight below it, wherever the light is.
+			final Vector3 light = (instance.worldLocation.z - groundZ) > AIRBORNE_HEIGHT ? this.straightDown
+					: this.shadowLight;
+			this.caster.draw(webGL, instance, viewProjection, light, groundZ,
+					levelUnder(terrain, instance.worldLocation.x, instance.worldLocation.y, groundZ, light), scenery);
+		}
+	}
+
+	/**
+	 * Whether the ground the shadow of something here falls on, from its foot along the light to the tip of a long
+	 * shadow and a little to the sides, is level, in which case the shadow needs no search along the light.
+	 */
+	private boolean levelUnder(final Terrain terrain, final float x, final float y, final float groundZ,
+			final Vector3 light) {
+		final float dx = -(light.x / light.z) * FLAT_REACH;
+		final float dy = -(light.y / light.z) * FLAT_REACH;
+		final float length = (float) Math.sqrt((dx * dx) + (dy * dy));
+		final float sideX = length > 0.001f ? (-dy / length) * FLAT_SIDE : FLAT_SIDE;
+		final float sideY = length > 0.001f ? (dx / length) * FLAT_SIDE : 0f;
+		for (int i = 0; i < FLAT_PROBES.length; i += 2) {
+			final float along = FLAT_PROBES[i];
+			final float side = FLAT_PROBES[i + 1];
+			final float height = terrain.getGroundHeight(x + (dx * along) + (sideX * side),
+					y + (dy * along) + (sideY * side));
+			if (Math.abs(height - groundZ) > FLAT_TOLERANCE) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private boolean createMask(final GL30 gl, final int width, final int height) {
+		// One channel is all the mask holds; a driver that cannot draw to it gets four.
+		return createMask(gl, width, height, GL30.GL_R8, GL30.GL_RED)
+				|| createMask(gl, width, height, GL20.GL_RGBA, GL20.GL_RGBA);
+	}
+
+	private boolean createMask(final GL30 gl, final int width, final int height, final int internalFormat,
+			final int format) {
 		disposeMask();
 		this.maskTexture = gl.glGenTexture();
 		gl.glBindTexture(GL20.GL_TEXTURE_2D, this.maskTexture);
-		gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, width, height, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE,
-				null);
+		gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, GL20.GL_UNSIGNED_BYTE, null);
 		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, GL20.GL_LINEAR);
 		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_LINEAR);
 		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_WRAP_S, GL20.GL_CLAMP_TO_EDGE);
@@ -272,13 +338,9 @@ public class DynamicShadowManager {
 		return true;
 	}
 
-	/** Lays the mask of {@link #renderUnitShadowMask} over what is drawn so far, the ground. */
-	public void compositeUnitShadows(final WebGL webGL) {
-		if ((this.maskFramebuffer == 0) || this.casters.isEmpty()) {
-			return;
-		}
-		final GL30 gl = Gdx.gl30;
+	private void prepareComposite(final WebGL webGL) {
 		if (this.compositeShader == null) {
+			final GL30 gl = Gdx.gl30;
 			this.compositeShader = webGL.createShaderProgram(COMPOSITE_VERTEX, COMPOSITE_FRAGMENT);
 			this.quadBuffer = gl.glGenBuffer();
 			final FloatBuffer quad = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -286,11 +348,31 @@ public class DynamicShadowManager {
 			gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.quadBuffer);
 			gl.glBufferData(GL20.GL_ARRAY_BUFFER, 32, quad, GL20.GL_STATIC_DRAW);
 		}
+	}
+
+	/**
+	 * Compiles the programs of the unit shadows while the loading screen is still up, so that the first frame that has
+	 * something to shade does not.
+	 */
+	public void prepare(final WebGL webGL) {
+		if (this.modelShadows && GameOptions.get().isUnitShadows()) {
+			this.caster.prepare(webGL);
+			prepareComposite(webGL);
+		}
+	}
+
+	/** Lays the mask of {@link #renderUnitShadowMask} over what is drawn so far, the ground. */
+	public void compositeUnitShadows(final WebGL webGL) {
+		if ((this.maskFramebuffer == 0) || (this.casters.isEmpty() && this.sceneryCasters.isEmpty())) {
+			return;
+		}
+		final GL30 gl = Gdx.gl30;
+		prepareComposite(webGL);
 		webGL.useShaderProgram(this.compositeShader);
 		gl.glActiveTexture(GL20.GL_TEXTURE0);
 		gl.glBindTexture(GL20.GL_TEXTURE_2D, this.maskTexture);
 		this.compositeShader.setUniformi("u_mask", 0);
-		this.compositeShader.setUniformf("u_texel", 1.5f / this.maskWidth, 1.5f / this.maskHeight);
+		this.compositeShader.setUniformf("u_texel", EDGE_SOFTNESS / this.maskWidth, EDGE_SOFTNESS / this.maskHeight);
 		this.compositeShader.setUniformf("u_strength", this.strength);
 		gl.glDisable(GL20.GL_DEPTH_TEST);
 		gl.glDepthMask(false);
@@ -299,6 +381,7 @@ public class DynamicShadowManager {
 		gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
 		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.quadBuffer);
 		this.compositeShader.setVertexAttribute("a_position", 2, GL20.GL_FLOAT, false, 0, 0);
+		PerfStats.draw();
 		gl.glDrawArrays(GL20.GL_TRIANGLE_STRIP, 0, 4);
 		gl.glEnable(GL20.GL_DEPTH_TEST);
 		gl.glDepthMask(true);

@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import com.hiveworkshop.ReteraCASCUtils;
 import com.hiveworkshop.blizzard.casc.Key;
 import com.hiveworkshop.blizzard.casc.nio.MalformedCASCStructureException;
 

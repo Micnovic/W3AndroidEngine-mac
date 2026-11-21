@@ -165,6 +165,24 @@ class DataContentCheckTest {
 	}
 
 	@Test
+	void meleeOnlyDataNeedsNoCampaignMaps() throws IOException {
+		final List<String> files = Arrays.asList("ui/WorldEditGameStrings.txt", "units/UnitData.slk",
+				"Scripts/common.j", "Scripts/Blizzard.j", "UI/CampaignInfo.txt", "Maps/Melee/(2)Lost Temple.w3m");
+		for (final String file : files) {
+			final File target = new File(this.temp, file);
+			target.getParentFile().mkdirs();
+			Files.write(target.toPath(), file.equals("UI/CampaignInfo.txt") ? LIST.getBytes(StandardCharsets.UTF_8)
+					: new byte[] { 1 });
+		}
+		final File marker = new File(this.temp, DataPackage.MARKER);
+		Files.write(marker.toPath(), "tool=x\nprofile=full-classic\nentries=7\n".getBytes(StandardCharsets.UTF_8));
+		assertEquals(Arrays.asList(Problem.NO_CAMPAIGN_MAPS),
+				DataContentCheck.check(DataFolderCheck.Kind.FOLDER, this.temp));
+		Files.write(marker.toPath(), "tool=x\nprofile=melee-only\nentries=7\n".getBytes(StandardCharsets.UTF_8));
+		assertEquals(Collections.emptyList(), DataContentCheck.check(DataFolderCheck.Kind.FOLDER, this.temp));
+	}
+
+	@Test
 	void anInstalledGameIsNotOpened() {
 		assertEquals(Collections.emptyList(), DataContentCheck.check(DataFolderCheck.Kind.CASC, this.temp));
 	}

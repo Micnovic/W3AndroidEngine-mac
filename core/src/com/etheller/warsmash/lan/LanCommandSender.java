@@ -112,16 +112,26 @@ public final class LanCommandSender implements CPlayerUnitOrderListener {
 
 	@Override
 	public void chatMessage(final int recipient, final int recipientPlayerIndex, final String message) {
+		// The host refuses a longer line, and counts it against the player as an invalid command.
+		final String line = clip(message, LanProtocol.MAX_CHAT);
 		if (this.watcher) {
 			// A watcher has no slot to put a command under: its line goes to the host as chat, which routes it.
 			if (this.client != null) {
 				this.client.chat(recipient == 0 && this.referee ? LanProtocol.CHAT_ALL : LanProtocol.CHAT_OBSERVERS,
-						message);
+						line);
 			}
 			return;
 		}
-		this.encoder.chatMessage(recipient, recipientPlayerIndex, message);
+		this.encoder.chatMessage(recipient, recipientPlayerIndex, line);
 		send();
+	}
+
+	static String clip(final String text, final int maxChars) {
+		if ((text == null) || (text.length() <= maxChars)) {
+			return text;
+		}
+		final int end = Character.isHighSurrogate(text.charAt(maxChars - 1)) ? maxChars - 1 : maxChars;
+		return text.substring(0, end);
 	}
 
 	@Override

@@ -329,12 +329,16 @@ public class DataTable implements ObjectData {
 				eIndexCutoff = ((nIndex != -1) && (nIndex < eIndexCutoff)) ? nIndex : eIndexCutoff;
 				final int fieldIdEndIndex = kInput != input ? input.length() : eIndexCutoff - 1;
 				final int fieldId = (subXIndex == -1) || (subXIndex > fieldIdEndIndex) ? 1
-						: Integer.parseInt(input.substring(subXIndex + 1, fieldIdEndIndex));
-				String fieldValue = kInput.substring(eIndex + 1);
+						: parseInt(input, subXIndex + 1, fieldIdEndIndex);
 				if (dataNames[fieldId - 1] != null) {
-					if ((fieldValue.length() > 1) && fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
-						fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
+					int valueStart = eIndex + 1;
+					int valueEnd = kInput.length();
+					if (((valueEnd - valueStart) > 1) && (kInput.charAt(valueStart) == '"')
+							&& (kInput.charAt(valueEnd - 1) == '"')) {
+						valueStart++;
+						valueEnd--;
 					}
+					final String fieldValue = kInput.substring(valueStart, valueEnd);
 					final int indexOfComma = fieldValue.indexOf(",");
 					if (indexOfComma != -1) {
 						final String[] splitLine = fieldValue.split(",");
@@ -356,50 +360,114 @@ public class DataTable implements ObjectData {
 	 * Map optimizers write SLK rows in either direction, so a row may end with its key cell; every cell then has to be
 	 * placed by its own coordinates.
 	 */
-	private static boolean hasRowsStartingAfterTheKey(final String text) {
+	static boolean hasRowsStartingAfterTheKey(final String text) {
 		final int[] position = { 1, 1 };
 		int row = 1;
 		boolean rowStartedOffKey = false;
-		final BufferedReader reader = new BufferedReader(new StringReader(text));
-		try {
-			String record;
-			while ((record = reader.readLine()) != null) {
-				if (record.startsWith("E")) {
-					break;
+		final int length = text.length();
+		int start = 0;
+		// the lines as BufferedReader.readLine splits them, without making them
+		while (start < length) {
+			int end = start;
+			char c = 0;
+			while ((end < length) && ((c = text.charAt(end)) != '\n') && (c != '\r')) {
+				end++;
+			}
+			if ((end > start) && (text.charAt(start) == 'E')) {
+				break;
+			}
+			if (((end - start) >= 2) && ((text.charAt(start) == 'C') || (text.charAt(start) == 'F'))
+					&& (text.charAt(start + 1) == ';') && slkPosition(text, start, end, position)) {
+				if (position[1] != row) {
+					row = position[1];
+					rowStartedOffKey = (row > 1) && (position[0] != 1);
 				}
-				if ((record.startsWith("C;") || record.startsWith("F;")) && slkPosition(record, position)) {
-					if (position[1] != row) {
-						row = position[1];
-						rowStartedOffKey = (row > 1) && (position[0] != 1);
-					}
-					else if (rowStartedOffKey && (position[0] == 1)) {
-						return true;
-					}
+				else if (rowStartedOffKey && (position[0] == 1)) {
+					return true;
 				}
 			}
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
+			start = end + 1;
+			if ((c == '\r') && (start < length) && (text.charAt(start) == '\n')) {
+				start++;
+			}
 		}
 		return false;
 	}
 
 	/** Moves position (x, y) by the record's X and Y fields; returns whether the record holds a value. */
-	private static boolean slkPosition(final String record, final int[] position) {
-		final int valueIndex = record.indexOf(";K");
-		final String[] fields = (valueIndex == -1 ? record : record.substring(0, valueIndex)).split(";");
-		for (int i = 1; i < fields.length; i++) {
-			final String field = fields[i];
-			if ((field.length() > 1) && ((field.charAt(0) == 'X') || (field.charAt(0) == 'Y'))) {
-				try {
-					position[field.charAt(0) == 'X' ? 0 : 1] = Integer.parseInt(field.substring(1));
-				}
-				catch (final NumberFormatException e) {
-					// not a coordinate
+	static boolean slkPosition(final String record, final int[] position) {
+		return slkPosition(record, 0, record.length(), position);
+	}
+
+	/**
+	 * {@link #slkPosition(String, int[])} for the record text.substring(start, end): the fields are read in place, as
+	 * every record of a table is looked at for this.
+	 */
+	private static boolean slkPosition(final String text, final int start, final int end, final int[] position) {
+		final int valueIndex = indexOfValue(text, start, end);
+		final int fieldsEnd = valueIndex == -1 ? end : valueIndex;
+		// the first field, the record type, is not a coordinate
+		int fieldStart = indexOf(text, ';', start, fieldsEnd);
+		while (fieldStart != -1) {
+			fieldStart++;
+			int fieldEnd = indexOf(text, ';', fieldStart, fieldsEnd);
+			if (fieldEnd == -1) {
+				fieldEnd = fieldsEnd;
+			}
+			if ((fieldEnd - fieldStart) > 1) {
+				final char name = text.charAt(fieldStart);
+				if ((name == 'X') || (name == 'Y')) {
+					try {
+						position[name == 'X' ? 0 : 1] = parseInt(text, fieldStart + 1, fieldEnd);
+					}
+					catch (final NumberFormatException e) {
+						// not a coordinate
+					}
 				}
 			}
+			fieldStart = fieldEnd == fieldsEnd ? -1 : fieldEnd;
 		}
-		return record.startsWith("C;") && (valueIndex != -1);
+		return (valueIndex != -1) && ((end - start) >= 2) && (text.charAt(start) == 'C')
+				&& (text.charAt(start + 1) == ';');
+	}
+
+	/** The first c in text from from to end, or -1. */
+	private static int indexOf(final String text, final char c, final int from, final int end) {
+		for (int i = from; i < end; i++) {
+			if (text.charAt(i) == c) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** The first ";K" that ends by end, or -1. */
+	private static int indexOfValue(final String text, final int from, final int end) {
+		for (int i = from; i < (end - 1); i++) {
+			if ((text.charAt(i) == ';') && (text.charAt(i + 1) == 'K')) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** Integer.parseInt(text.substring(start, end)), without the substring for plain numbers. */
+	private static int parseInt(final String text, final int start, final int end) {
+		if (((end - start) > 0) && ((end - start) <= 9)) {
+			int value = 0;
+			int k = start;
+			for (; k < end; k++) {
+				final char c = text.charAt(k);
+				if ((c < '0') || (c > '9')) {
+					break;
+				}
+				value = (value * 10) + (c - '0');
+			}
+			if (k == end) {
+				return value;
+			}
+		}
+		return Integer.parseInt(text.substring(start, end));
 	}
 
 	private void readSLKCells(final String text) throws IOException {
@@ -467,18 +535,25 @@ public class DataTable implements ObjectData {
 		return value;
 	}
 
-	private static int slkColumn(final String record) {
-		final int valueIndex = record.indexOf(";K");
-		final String[] fields = (valueIndex == -1 ? record : record.substring(0, valueIndex)).split(";");
-		for (final String field : fields) {
-			if (field.startsWith("X")) {
+	static int slkColumn(final String record) {
+		final int length = record.length();
+		final int valueIndex = indexOfValue(record, 0, length);
+		final int fieldsEnd = valueIndex == -1 ? length : valueIndex;
+		int fieldStart = 0;
+		while (fieldStart < fieldsEnd) {
+			int fieldEnd = indexOf(record, ';', fieldStart, fieldsEnd);
+			if (fieldEnd == -1) {
+				fieldEnd = fieldsEnd;
+			}
+			if ((fieldEnd > fieldStart) && (record.charAt(fieldStart) == 'X')) {
 				try {
-					return Integer.parseInt(field.substring(1));
+					return parseInt(record, fieldStart + 1, fieldEnd);
 				}
 				catch (final NumberFormatException e) {
 					return -1;
 				}
 			}
+			fieldStart = fieldEnd + 1;
 		}
 		return -1;
 	}

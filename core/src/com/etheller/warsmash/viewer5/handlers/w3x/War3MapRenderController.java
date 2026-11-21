@@ -8,6 +8,7 @@ import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
+import com.etheller.warsmash.viewer5.SoundLoops;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.SecondaryTag;
@@ -56,6 +57,9 @@ public class War3MapRenderController implements SimulationRenderController {
 	/** The game draws the text it makes for a unit this far below a script tag put at the same point. */
 	private static final float UNIT_TEXT_TAG_DROP = 19f;
 	private final War3MapViewer viewer;
+	private static final int CASTER_LOOPS_PRUNE_FROM = 64;
+	private final CasterSoundLoops<War3ID> casterLoops = new CasterSoundLoops<>();
+	private int casterLoopsPruneAt = CASTER_LOOPS_PRUNE_FROM;
 	private final Map<String, UnitSound> keyToCombatSound = new HashMap<>();
 
 	public War3MapRenderController(final War3MapViewer viewer) {
@@ -144,10 +148,9 @@ public class War3MapRenderController implements SimulationRenderController {
 		final float height = this.viewer.terrain.getGroundHeight(targetX, targetY)
 				+ target.getFlyHeight() + target.getImpactZ();
 
-		final MdxModel model = this.viewer.loadModelMdx(missileArt);
-		final MdxComplexInstance modelInstance = (MdxComplexInstance) model.addInstance();
+		final MdxModel model = this.viewer.loadWaitingModelMdx(missileArt);
+		final MdxComplexInstance modelInstance = (MdxComplexInstance) model.addWaitingInstance();
 		modelInstance.setTeamColor(source.getPlayerIndex());
-		SequenceUtils.randomBirthSequence(modelInstance);
 		modelInstance.setLocation(targetX, targetY, height);
 		modelInstance.setScene(this.viewer.worldScene);
 		this.viewer.projectiles
@@ -317,6 +320,29 @@ public class War3MapRenderController implements SimulationRenderController {
 		this.viewer.units.remove(renderUnit);
 		this.viewer.worldScene.removeInstance(renderUnit.instance);
 		renderUnit.onRemove(this.viewer);
+		stopCasterLoops(this.casterLoops.takeAll(unit));
+	}
+
+	private void addCasterLoop(final CUnit caster, final War3ID alias, final String sound, final long id) {
+		this.casterLoops.add(caster, alias, sound, id);
+		if (this.casterLoops.size() > this.casterLoopsPruneAt) {
+			this.casterLoops.prune(SoundLoops::isLive);
+			this.casterLoopsPruneAt = Math.max(CASTER_LOOPS_PRUNE_FROM, this.casterLoops.size() * 2);
+		}
+	}
+
+	/** Ends every looped sound still started for a caster or buff, as when the map ends. */
+	public void releaseSounds() {
+		stopCasterLoops(this.casterLoops.takeEvery());
+	}
+
+	private void stopCasterLoops(final List<CasterSoundLoops.Loop> loops) {
+		for (final CasterSoundLoops.Loop loop : loops) {
+			final UnitSound sound = this.viewer.uiSounds.getSound(loop.sound);
+			if (sound != null) {
+				sound.stop(loop.id);
+			}
+		}
 	}
 
 	@Override
@@ -435,19 +461,18 @@ public class War3MapRenderController implements SimulationRenderController {
 						CEffectType.SPECIAL, 0);
 				modelPath = effectAttachmentUI.getModelPath();
 			}
-			final MdxModel spawnedEffectModel = this.viewer.loadModelMdx(modelPath);
+			final MdxModel spawnedEffectModel = this.viewer.loadWaitingModelMdx(modelPath);
 			if (spawnedEffectModel != null) {
-				modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+				modelInstance = (MdxComplexInstance) spawnedEffectModel.addWaitingInstance();
 			}
 		}
 		if ((modelInstance == null) && (renderUnit.specialArtModel != null)) {
-			modelInstance = (MdxComplexInstance) renderUnit.specialArtModel.addInstance();
+			modelInstance = (MdxComplexInstance) renderUnit.specialArtModel.addWaitingInstance();
 		}
 		if (modelInstance != null) {
 			modelInstance.setTeamColor(source.getPlayerIndex());
 			modelInstance.setLocation(renderUnit.location);
 			modelInstance.setScene(this.viewer.worldScene);
-			SequenceUtils.randomBirthSequence(modelInstance);
 			this.viewer.projectiles.add(new RenderAttackInstant(modelInstance,
 					this.viewer,
 					(float) Math.toRadians(renderUnit.getSimulationUnit().getFacing())));
@@ -458,7 +483,11 @@ public class War3MapRenderController implements SimulationRenderController {
 	public void spawnGainLevelEffect(final CUnit source) {
 		final AbilityUI heroUI = this.viewer.abilityDataUI.getUI(War3MapViewer.ABILITY_HERO_RAWCODE);
 		final RenderUnit renderUnit = this.viewer.unitToRenderPeer.get(source);
-		final String heroLevelUpArt = heroUI.getCasterArt(0).getModelPath();
+		final EffectAttachmentUI heroLevelUpEffect = heroUI == null ? null : heroUI.getCasterArt(0);
+		if (renderUnit == null || heroLevelUpEffect == null) {
+			return;
+		}
+		final String heroLevelUpArt = heroLevelUpEffect.getModelPath();
 		// TODO use addSpellEffectTarget
 		this.viewer.spawnFxOnOrigin(renderUnit, heroLevelUpArt);
 	}
@@ -474,10 +503,12 @@ public class War3MapRenderController implements SimulationRenderController {
 			final AbilityUI reviveUI = this.viewer.abilityDataUI
 					.getUI(War3MapViewer.ABILITY_REVIVE_RAWCODE);
 			final CPlayer player = this.viewer.simulation.getPlayer(source.getPlayerIndex());
-			final String heroReviveArt = reviveUI.getTargetArt(player.getRace().ordinal())
-					.getModelPath();
-			// TODO use addSpellEffectTarget, maybe?
-			this.viewer.spawnFxOnOrigin(renderUnit, heroReviveArt);
+			final EffectAttachmentUI heroReviveEffect = reviveUI == null ? null
+					: reviveUI.getTargetArt(player.getRace().ordinal());
+			if (heroReviveEffect != null) {
+				// TODO use addSpellEffectTarget, maybe?
+				this.viewer.spawnFxOnOrigin(renderUnit, heroReviveEffect.getModelPath());
+			}
 		}
 
 		// A script can revive a hero before the renderer saw it die, while it still has its shadow.
@@ -538,14 +569,18 @@ public class War3MapRenderController implements SimulationRenderController {
 	public SimulationRenderComponentModel createSpellEffectOverDestructable(final CUnit source,
 			final CDestructable target, final War3ID alias, final float artAttachmentHeight) {
 		final AbilityUI abilityUI = this.viewer.abilityDataUI.getUI(alias);
-		final String effectPath = abilityUI.getTargetArt(0).getModelPath();
+		final EffectAttachmentUI targetEffect = abilityUI == null ? null : abilityUI.getTargetArt(0);
+		if (targetEffect == null) {
+			return null;
+		}
+		final String effectPath = targetEffect.getModelPath();
 		// TODO use addSpellEffectTarget maybe?
 		final RenderDestructable renderDestructable = this.viewer.destructableToRenderPeer
 				.get(target);
-		final MdxModel spawnedEffectModel = this.viewer.loadModelMdx(effectPath);
+		final MdxModel spawnedEffectModel = this.viewer.loadWaitingModelMdx(effectPath);
 		if (spawnedEffectModel != null) {
 			final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel
-					.addInstance();
+					.addWaitingInstance();
 			modelInstance.setTeamColor(this.viewer.simulation
 					.getPlayer(source.getPlayerIndex()).getColor());
 			final float startingHeight = renderDestructable.getZ() + artAttachmentHeight;
@@ -797,18 +832,32 @@ public class War3MapRenderController implements SimulationRenderController {
 						&& !this.viewer.isSoundHeardAt(caster.getX(), caster.getY()))) {
 			return SimulationRenderComponent.DO_NOTHING;
 		}
-		final long soundId = this.viewer.uiSounds.getSound(abilityUi.getEffectSound())
-				.playFollowing(this.viewer.worldScene.audioContext, renderPeer.getX(), renderPeer.getY(),
-						renderPeer.getZ(), null, renderPeer.location);
+		final UnitSound effectSound = this.viewer.uiSounds.getSound(abilityUi.getEffectSound());
+		if (effectSound == null) {
+			return SimulationRenderComponent.DO_NOTHING;
+		}
+		final long soundId = effectSound.playFollowing(this.viewer.worldScene.audioContext, renderPeer.getX(),
+				renderPeer.getY(), renderPeer.getZ(), null, renderPeer.location);
 		if (soundId == -1) {
 			return SimulationRenderComponent.DO_NOTHING;
 		}
+		if (!effectSound.isLooping()) {
+			return new SimulationRenderComponent() {
+				@Override
+				public void remove() {
+					effectSound.stop(soundId);
+				}
+			};
+		}
+		// Stopping the ability's sound must find this loop too.
+		final String effectName = abilityUi.getEffectSound();
+		addCasterLoop(caster, alias, effectName, soundId);
 		return new SimulationRenderComponent() {
 			@Override
 			public void remove() {
-				War3MapRenderController.this.viewer.uiSounds.getSound(abilityUi.getEffectSoundLooped())
-						.stop(soundId);
-				;
+				if (War3MapRenderController.this.casterLoops.remove(caster, alias, soundId)) {
+					effectSound.stop(soundId);
+				}
 			}
 		};
 	}
@@ -843,21 +892,30 @@ public class War3MapRenderController implements SimulationRenderController {
 		if (soundId == -1) {
 			return SimulationRenderComponent.DO_NOTHING;
 		}
+		addCasterLoop(caster, alias, loopedSound, soundId);
 		return new SimulationRenderComponent() {
 			@Override
 			public void remove() {
-				War3MapRenderController.this.viewer.uiSounds.getSound(loopedSound).stop(soundId);
+				// An id the caster's removal or a stop already ended may name another voice by now.
+				if (War3MapRenderController.this.casterLoops.remove(caster, alias, soundId)) {
+					loopSound.stop(soundId);
+				}
 			}
 		};
 	}
 
 	@Override
 	public void stopAbilitySoundEffect(final CUnit caster, final War3ID alias) {
+		stopCasterLoops(this.casterLoops.take(caster, alias));
+		// A loop started some other way (a looping effect sound, a script's place sound) has no owner to find; when no
+		// caster follows this ability's looped sound, ending all of it cannot cut another caster's loop.
 		final AbilityUI abilityUi = this.viewer.abilityDataUI.getUI(alias);
-		if (abilityUi.getEffectSoundLooped() != null) {
-			// TODO below this probably stops all instances of the sound, which is silly
-			// and busted. Would be better to keep a notion of sound instance
-			this.viewer.uiSounds.getSound(abilityUi.getEffectSoundLooped()).stop();
+		final String looped = abilityUi == null ? null : abilityUi.getEffectSoundLooped();
+		if ((looped != null) && !looped.isEmpty() && !this.casterLoops.hasSound(looped)) {
+			final UnitSound sound = this.viewer.uiSounds.getSound(looped);
+			if (sound != null) {
+				sound.stop();
+			}
 		}
 	}
 
@@ -865,13 +923,20 @@ public class War3MapRenderController implements SimulationRenderController {
 	public SimulationRenderComponent spawnAbilitySoundEffect(final float x, float y,
 			final War3ID alias, final boolean looping) {
 		final AbilityUI abilityUi = this.viewer.abilityDataUI.getUI(alias);
+		if (abilityUi == null) {
+			return SimulationRenderComponent.DO_NOTHING;
+		}
 		final String soundName = looping ? abilityUi.getEffectSoundLooped()
 				: abilityUi.getEffectSound();
-		if ((abilityUi == null) || (soundName == null)
+		if ((soundName == null)
 				|| (!isLoopingSound(soundName) && !this.viewer.isSoundHeardAt(x, y))) {
 			return SimulationRenderComponent.DO_NOTHING;
 		}
-		final long soundId = this.viewer.uiSounds.getSound(soundName).play(
+		final UnitSound sound = this.viewer.uiSounds.getSound(soundName);
+		if (sound == null) {
+			return SimulationRenderComponent.DO_NOTHING;
+		}
+		final long soundId = sound.play(
 				this.viewer.worldScene.audioContext, x, y,
 				this.viewer.terrain.getGroundHeight(x, y));
 		if (soundId == -1) {
@@ -880,8 +945,7 @@ public class War3MapRenderController implements SimulationRenderController {
 		return new SimulationRenderComponent() {
 			@Override
 			public void remove() {
-				War3MapRenderController.this.viewer.uiSounds.getSound(soundName).stop(soundId);
-				;
+				sound.stop(soundId);
 			}
 		};
 	}

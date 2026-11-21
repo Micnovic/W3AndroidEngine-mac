@@ -109,7 +109,7 @@ final class CUnitDeath {
 					final int goldBountyAwardedDice = self.unitType.getGoldBountyAwardedDice();
 					final int goldBountyAwardedSides = self.unitType.getGoldBountyAwardedSides();
 					for (int i = 0; i < goldBountyAwardedDice; i++) {
-						final int singleRoll = goldBountyAwardedSides == 0 ? 0
+						final int singleRoll = goldBountyAwardedSides <= 0 ? 0
 								: simulation.getSeededRandom().nextInt(goldBountyAwardedSides);
 						goldBountyAwarded += singleRoll + 1;
 					}
@@ -122,7 +122,9 @@ final class CUnitDeath {
 					final int lumberBountyAwardedDice = self.unitType.getLumberBountyAwardedDice();
 					final int lumberBountyAwardedSides = self.unitType.getLumberBountyAwardedSides();
 					for (int i = 0; i < lumberBountyAwardedDice; i++) {
-						lumberBountyAwarded += simulation.getSeededRandom().nextInt(lumberBountyAwardedSides) + 1;
+						final int singleRoll = lumberBountyAwardedSides <= 0 ? 0
+								: simulation.getSeededRandom().nextInt(lumberBountyAwardedSides);
+						lumberBountyAwarded += singleRoll + 1;
 					}
 					if (lumberBountyAwarded > 0) {
 						sourcePlayer.addLumber(lumberBountyAwarded);

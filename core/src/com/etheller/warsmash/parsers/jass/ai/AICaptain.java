@@ -1,10 +1,16 @@
 package com.etheller.warsmash.parsers.jass.ai;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Predicate;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 
 /**
@@ -13,6 +19,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
  */
 public class AICaptain {
 	private final List<CUnit> members = new ArrayList<>();
+	@SavedTransient
+	private Set<CUnit> memberSet;
 	private final List<CUnit> previousMembers = new ArrayList<>();
 	private final Map<CUnit, Integer> orderedGeneration = new HashMap<>();
 	private boolean full = true;
@@ -27,17 +35,73 @@ public class AICaptain {
 	private int generation;
 
 	public List<CUnit> getMembers() {
-		return this.members;
+		return Collections.unmodifiableList(this.members);
+	}
+
+	public boolean isMember(final Object unit) {
+		if (this.memberSet == null) {
+			this.memberSet = new HashSet<>(this.members);
+		}
+		return this.memberSet.contains(unit);
+	}
+
+	public void addMember(final CUnit unit) {
+		this.members.add(unit);
+		if (this.memberSet != null) {
+			this.memberSet.add(unit);
+		}
+	}
+
+	public boolean removeMember(final CUnit unit) {
+		final boolean removed = this.members.remove(unit);
+		if (removed) {
+			this.memberSet = null;
+		}
+		return removed;
+	}
+
+	public void removeMembersIf(final Predicate<CUnit> filter) {
+		if (this.members.removeIf(filter)) {
+			this.memberSet = null;
+		}
+	}
+
+	/** Iterates the members in order; remove() on it keeps the membership lookup in step. */
+	public Iterator<CUnit> memberIterator() {
+		final Iterator<CUnit> inner = this.members.iterator();
+		return new Iterator<CUnit>() {
+			@Override
+			public boolean hasNext() {
+				return inner.hasNext();
+			}
+
+			@Override
+			public CUnit next() {
+				return inner.next();
+			}
+
+			@Override
+			public void remove() {
+				inner.remove();
+				AICaptain.this.memberSet = null;
+			}
+		};
 	}
 
 	public List<CUnit> getPreviousMembers() {
 		return this.previousMembers;
 	}
 
+	/** Units removed from the game cannot be taken into an assault again. */
+	public void forgetRemovedPreviousMembers() {
+		this.previousMembers.removeIf(CUnit::isRemovedFromGame);
+	}
+
 	public void beginAssault() {
 		this.previousMembers.clear();
 		this.previousMembers.addAll(this.members);
 		this.members.clear();
+		this.memberSet = null;
 		this.full = true;
 	}
 
@@ -128,7 +192,7 @@ public class AICaptain {
 	}
 
 	public void forgetOrders() {
-		this.orderedGeneration.keySet().retainAll(this.members);
+		this.orderedGeneration.keySet().removeIf((unit) -> !isMember(unit));
 	}
 
 	public float getCenterX() {

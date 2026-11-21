@@ -72,8 +72,16 @@ public final class CPlayerSelection {
 			}
 		}
 		for (final CUnit unit : selected) {
-			if (!selectable(unit) || this.units.contains(unit)
-					|| (this.units.size() >= WarsmashConstants.MAX_SELECTION_SIZE)) {
+			if (!selectable(unit)) {
+				continue;
+			}
+			if (this.units.contains(unit)) {
+				// A click on a unit that is already selected selects it again: maps tell a double click by two
+				// selection events (hero pickers).
+				events.fire(unit, true);
+				continue;
+			}
+			if (this.units.size() >= WarsmashConstants.MAX_SELECTION_SIZE) {
 				continue;
 			}
 			this.units.add(unit);

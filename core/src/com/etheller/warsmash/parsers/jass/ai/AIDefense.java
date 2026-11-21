@@ -86,7 +86,7 @@ final class AIDefense {
 			if (ai.unitsSeen && takeReplacement(ai, unit)) {
 				continue;
 			}
-			if (!ai.unitsSeen || !ai.gatheringStopped || ai.attackCaptain.getMembers().contains(unit)) {
+			if (!ai.unitsSeen || !ai.gatheringStopped || ai.attackCaptain.isMember(unit)) {
 				continue;
 			}
 			if (isTimedLife(unit)) {
@@ -97,7 +97,7 @@ final class AIDefense {
 					continue;
 				}
 				if (ai.attackCaptain.hasGoal()) {
-					ai.attackCaptain.getMembers().add(unit);
+					ai.attackCaptain.addMember(unit);
 					continue;
 				}
 			}
@@ -141,8 +141,8 @@ final class AIDefense {
 	}
 
 	private static boolean isInProduction(final AIController ai, final War3ID typeId) {
-		return AIProduction.countUnits(ai, ai.playerIndex, typeId, false, -1) > AIProduction.countUnits(ai,
-				ai.playerIndex, typeId, true, -1);
+		return AIProduction.getUnitCount(ai, typeId.getValue(), false) > AIProduction.getUnitCount(ai,
+				typeId.getValue(), true);
 	}
 
 	private static boolean takeReplacement(final AIController ai, final CUnit unit) {
@@ -166,8 +166,8 @@ final class AIDefense {
 		for (final Map.Entry<CUnit, float[]> entry : ai.guardPositions.entrySet()) {
 			final CUnit unit = entry.getKey();
 			final float[] position = entry.getValue();
-			if (unit.isDead() || unit.isHidden() || unit.isGuardPositionRemoved() || ai.attackCaptain.getMembers().contains(unit)
-					|| ai.defenseCaptain.getMembers().contains(unit)
+			if (unit.isDead() || unit.isHidden() || unit.isGuardPositionRemoved() || ai.attackCaptain.isMember(unit)
+					|| ai.defenseCaptain.isMember(unit)
 					|| (unit.getCurrentBehavior() instanceof CBehaviorAttack)
 					|| (distance(unit.getX(), unit.getY(), position[0], position[1]) < GUARD_RETURN_DISTANCE)) {
 				continue;
@@ -182,7 +182,7 @@ final class AIDefense {
 	 */
 	private static void joinDefense(final AIController ai, final CUnit unit) {
 		leavePost(ai, unit);
-		ai.defenseCaptain.getMembers().add(unit);
+		ai.defenseCaptain.addMember(unit);
 		final float x = ai.defenseCaptain.getHomeX();
 		final float y = ai.defenseCaptain.getHomeY();
 		ai.guardPositions.put(unit, new float[] { x, y });
@@ -201,12 +201,12 @@ final class AIDefense {
 				got++;
 			}
 		}
-		for (final CUnit unit : AIUnits.inClaimOrder(ai.simulation)) {
+		for (final CUnit unit : AIUnits.inClaimOrder(ai)) {
 			if (got >= qty) {
 				break;
 			}
 			if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !unit.isConstructing()
-					&& !members.contains(unit) && !ai.attackCaptain.getMembers().contains(unit)) {
+					&& !ai.defenseCaptain.isMember(unit) && !ai.attackCaptain.isMember(unit)) {
 				joinDefense(ai, unit);
 				got++;
 			}
@@ -251,7 +251,7 @@ final class AIDefense {
 		ai.threat = findThreat(ai);
 		final boolean attackIdle = !ai.attackCaptain.hasGoal() && !ai.attackCaptain.isRetreating();
 		final List<CUnit> defenders = ai.defenseCaptain.getMembers();
-		defenders.removeIf((unit) -> !ai.isArmyUnit(unit));
+		ai.defenseCaptain.removeMembersIf((unit) -> !ai.isArmyUnit(unit));
 		if (ai.threat != null) {
 			// Measured: the defenders attack-move halfway from their home to the threat, so they take on what comes
 			// within reach there and leave idle creeps further out alone. Ones still on their way to the defense
@@ -304,7 +304,7 @@ final class AIDefense {
 					|| (hero.getCurrentBehavior() instanceof CBehaviorGetItem) || !hasFreeSlot(hero)) {
 				continue;
 			}
-			final boolean marching = ai.attackCaptain.getMembers().contains(hero) && ai.attackCaptain.hasGoal();
+			final boolean marching = ai.attackCaptain.isMember(hero) && ai.attackCaptain.hasGoal();
 			final float[] place = ai.guardPositions.get(hero);
 			final float x = marching || (place == null) ? hero.getX() : place[0];
 			final float y = marching || (place == null) ? hero.getY() : place[1];

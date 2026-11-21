@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ import com.etheller.warsmash.util.GameDataConstants;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CPlayerStateListener.CPlayerStateNotifier;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ai.AIDifficulty;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.CBasePlayer;
@@ -157,6 +160,89 @@ public class CReplayTest {
 		return player;
 	}
 
+	/** A checksum made in the two steps after each multiple of the interval, of the gold of the first step's game. */
+	private static ChecksumSteps spread() {
+		return new ChecksumSteps() {
+			private int start = -1;
+			private int value;
+			private int lastTick = -1;
+			private boolean finished;
+			private int got;
+
+			@Override
+			public boolean afterStep(final CSimulation game) {
+				final int tick = game.getGameTurnTick();
+				if (tick == this.lastTick) {
+					return this.finished;
+				}
+				this.lastTick = tick;
+				this.finished = false;
+				if ((tick % INTERVAL) == 0) {
+					this.start = tick;
+					this.got = GOLD_CHECKSUM.applyAsInt(game);
+				}
+				else if ((this.start >= 0) && (tick == (this.start + 2))) {
+					this.value = (this.got * 31) + GOLD_CHECKSUM.applyAsInt(game);
+					this.finished = true;
+				}
+				return this.finished;
+			}
+
+			@Override
+			public int startTick() {
+				return this.start;
+			}
+
+			@Override
+			public int value() {
+				return this.value;
+			}
+		};
+	}
+
+	@Test
+	void aChecksumSpreadOverStepsIsNamedByItsLastStepAndMatchesOnPlayback() throws IOException {
+		final CSimulation recorded = gameWithPlayers(300);
+		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		final CReplayWriter writer = new CReplayWriter(bytes, header());
+		final CReplayRecorder recorder = new CReplayRecorder(recorded, writer, spread());
+		while (recorded.getGameTurnTick() < 75) {
+			step(recorded);
+			recorder.afterStep();
+		}
+		recorder.finish();
+		final CReplay replay = CReplay.read(new ByteArrayInputStream(bytes.toByteArray()));
+		assertEquals(Arrays.asList(22, 42, 62), tickOf(replay));
+		assertFalse(replay.getHeader().isWholeChecksums());
+
+		final CSimulation played = gameWithPlayers(300);
+		final CReplayPlayer player = new CReplayPlayer(replay, played, spread());
+		while (player.canStep()) {
+			player.beforeStep();
+			step(played);
+			player.afterStep();
+		}
+		assertEquals(-1, player.getDesyncTick(), player.report());
+		assertEquals(3, player.getChecksumsCompared());
+	}
+
+	@Test
+	void aReplayOfFormat7HasItsChecksumsMadeAllAtOnce() throws IOException {
+		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		new CReplayWriter(bytes, header()).close();
+		final byte[] file = bytes.toByteArray();
+		file[7] = 7;
+		assertTrue(CReplay.readHeader(new ByteArrayInputStream(file)).isWholeChecksums());
+	}
+
+	private static List<Integer> tickOf(final CReplay replay) {
+		final List<Integer> ticks = new ArrayList<>();
+		for (final CReplay.Checksum checksum : replay.getChecksums()) {
+			ticks.add(checksum.getTick());
+		}
+		return ticks;
+	}
+
 	@Test
 	void theHeaderKeepsWhichSlotsPlayedWithAKeyboardAndMouse() throws IOException {
 		final CReplayHeader marked = header().withKeyboardAndMouseSlots((1 << 2) | (1 << 5));
@@ -212,6 +298,18 @@ public class CReplayTest {
 		assertEquals(40, player.getDesyncTick());
 		assertEquals(2, player.getDesyncCount());
 		assertTrue(player.report().startsWith("result=DESYNC"));
+	}
+
+	@Test
+	public void aDamagedLengthRunsOutOfDataInsteadOfMemory() throws IOException {
+		final byte[] ten = new byte[10];
+		assertThrows(EOFException.class,
+				() -> CReplay.readBytes(new DataInputStream(new ByteArrayInputStream(ten)), Integer.MAX_VALUE));
+		assertThrows(CReplayException.class,
+				() -> CReplay.readBytes(new DataInputStream(new ByteArrayInputStream(ten)), -5));
+		final byte[] big = new byte[200000];
+		big[199999] = 7;
+		assertArrayEquals(big, CReplay.readBytes(new DataInputStream(new ByteArrayInputStream(big)), big.length));
 	}
 
 	@Test
@@ -460,12 +558,41 @@ public class CReplayTest {
 			}
 		}
 		assertTrue(at > 0);
-		final byte[] old = new byte[now.length - lineBytes.length];
-		System.arraycopy(now, 0, old, 0, at);
-		System.arraycopy(now, at + lineBytes.length, old, at, now.length - at - lineBytes.length);
+		// The campaign game mark of format 7 sits right before the line.
+		final byte[] old = new byte[now.length - lineBytes.length - 1];
+		System.arraycopy(now, 0, old, 0, at - 1);
+		System.arraycopy(now, at + lineBytes.length, old, at - 1, now.length - at - lineBytes.length);
 		old[7] = 5;
 		assertEquals("test", CReplay.read(new ByteArrayInputStream(old)).getHeader().getEngineVersion());
 		assertEquals("test", CReplay.read(new ByteArrayInputStream(now)).getHeader().getEngineVersion());
+	}
+
+	@Test
+	public void theCampaignMarkIsKeptAndAnOlderFileIsToldByItsFolder() throws IOException {
+		final CReplayHeader plain = header();
+		assertFalse(plain.isCampaignGame());
+		final CReplayHeader campaign = new CReplayHeader("test", "abc1234", false, "Downloads/Custom.w3x", 0, 1, 0, 1L,
+				1337, 0, 1.0f, CMapDifficulty.NORMAL, INTERVAL, java.util.Collections.emptyList(), null, 0, true);
+		final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		new CReplayWriter(bytes, campaign).close();
+		final byte[] now = bytes.toByteArray();
+		assertTrue(CReplay.readHeader(new ByteArrayInputStream(now)).isCampaignGame());
+		final ByteArrayOutputStream line = new ByteArrayOutputStream();
+		new DataOutputStream(line).writeUTF(ProjectInfo.AUTHORSHIP);
+		// A format 6 file has no mark: the byte before the authorship line goes.
+		final byte[] lineBytes = line.toByteArray();
+		int at = -1;
+		for (int i = 8; (i + lineBytes.length <= now.length) && (at < 0); i++) {
+			if (Arrays.equals(Arrays.copyOfRange(now, i, i + lineBytes.length), lineBytes)) {
+				at = i;
+			}
+		}
+		assertTrue(at > 0);
+		final byte[] old = new byte[now.length - 1];
+		System.arraycopy(now, 0, old, 0, at - 1);
+		System.arraycopy(now, at, old, at - 1, now.length - at);
+		old[7] = 6;
+		assertFalse(CReplay.readHeader(new ByteArrayInputStream(old)).isCampaignGame());
 	}
 
 	@Test

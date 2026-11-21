@@ -466,6 +466,14 @@ public class War3MapW3i {
 		return this.fogDensity;
 	}
 
+	public float[] getFogHeightRange() {
+		return this.fogHeightRange;
+	}
+
+	public boolean isFogDrawOverSky() {
+		return this.fogDrawOverSky != 0;
+	}
+
 	public float[] getFogLinearRange() {
 		return this.fogLinearRange;
 	}

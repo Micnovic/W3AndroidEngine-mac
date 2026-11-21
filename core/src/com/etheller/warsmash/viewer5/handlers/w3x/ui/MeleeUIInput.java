@@ -22,7 +22,6 @@ import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.UnitSound;
-import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderItem;
@@ -186,6 +185,7 @@ final class MeleeUIInput {
 	}
 
 	public void selectUnit(RenderUnit unit) {
+		flushScriptSelection();
 		this.ui.subMenuOrderIdStack.clear();
 		if ((unit != null) && unit.getSimulationUnit().isDead()) {
 			unit = null;
@@ -242,6 +242,7 @@ final class MeleeUIInput {
 	}
 
 	public boolean keyDown(final int keycode) {
+		flushScriptSelection();
 		if (WarsmashConstants.ENABLE_DEBUG) {
 			if (keycode == Input.Keys.Z) {
 				this.ui.war3MapViewer.debugDepth++;
@@ -565,6 +566,7 @@ final class MeleeUIInput {
 	}
 
 	public boolean touchDown(final int screenX, final int screenY, final float worldScreenY, final int button) {
+		flushScriptSelection();
 		if (this.ui.scoreScreen.isVisible()) {
 			// The score screen ends the game, also a game ended in a cinematic that took the player's control away;
 			// nothing under it takes clicks.
@@ -1046,6 +1048,7 @@ final class MeleeUIInput {
 	}
 
 	void selectWidgets(final List<RenderWidget> selectedUnits) {
+		flushScriptSelection();
 		if ((selectedUnits.size() == 1) && (selectedUnits.get(0) instanceof RenderItem)) {
 			final RenderItem selectedItem = (RenderItem) selectedUnits.get(0);
 			selectItem(selectedItem);
@@ -1056,6 +1059,10 @@ final class MeleeUIInput {
 			selectDestructable(selectedItem);
 			return;
 		}
+		selectUnits(sortedUnits(selectedUnits));
+	}
+
+	private static List<RenderUnit> sortedUnits(final List<RenderWidget> selectedUnits) {
 		final List<RenderUnit> units = new ArrayList<>();
 		Collections.sort(selectedUnits, new Comparator<RenderWidget>() {
 			@Override
@@ -1082,7 +1089,7 @@ final class MeleeUIInput {
 				units.add((RenderUnit) widget);
 			}
 		}
-		selectUnits(units);
+		return units;
 	}
 
 	private void selectItem(final RenderItem selectedItem) {
@@ -1138,13 +1145,24 @@ final class MeleeUIInput {
 		return handleIds;
 	}
 
-	void selectUnits(List<RenderUnit> selectedUnits) {
+	void selectUnits(final List<RenderUnit> units) {
+		flushScriptSelection();
+		final List<RenderUnit> prevSelectedUnits = this.ui.selectedUnits;
+		final List<RenderUnit> selectedUnits = applySelection(units);
+		presentSelection(prevSelectedUnits, selectedUnits);
+	}
+
+	private List<RenderUnit> applySelection(List<RenderUnit> selectedUnits) {
 		if (selectedUnits.size() > WarsmashConstants.MAX_SELECTION_SIZE) {
 			selectedUnits = new ArrayList<>(selectedUnits.subList(0, WarsmashConstants.MAX_SELECTION_SIZE));
 		}
 		final List<RenderUnit> prevSelectedUnits = this.ui.selectedUnits;
 		this.ui.selectedUnits = selectedUnits;
 		fireSelectionEvents(prevSelectedUnits, selectedUnits);
+		return selectedUnits;
+	}
+
+	private void presentSelection(final List<RenderUnit> prevSelectedUnits, final List<RenderUnit> selectedUnits) {
 		if (!selectedUnits.isEmpty()) {
 			final RenderUnit unit = selectedUnits.get(0);
 			boolean selectionChanged = (unit != this.ui.selectedUnit)
@@ -1225,6 +1243,7 @@ final class MeleeUIInput {
 	}
 
 	public boolean touchUp(final int screenX, final int screenY, final float worldScreenY, final int button) {
+		flushScriptSelection();
 		if (button == Input.Buttons.FORWARD) {
 			return false;
 		}
@@ -1316,6 +1335,8 @@ final class MeleeUIInput {
 								if (shiftDown) {
 									unitList.addAll(this.ui.selectedUnits);
 								}
+								final boolean reclick = !shiftDown && (this.ui.mouseOverUnit instanceof RenderUnit)
+										&& this.ui.selectedUnits.contains(this.ui.mouseOverUnit);
 								if ((this.ui.mouseOverUnit instanceof RenderUnit) && controlDown) {
 									processSelectNearbyUnits(unitList, shiftDown, (RenderUnit) this.ui.mouseOverUnit);
 								}
@@ -1324,6 +1345,11 @@ final class MeleeUIInput {
 								}
 								this.ui.war3MapViewer.doSelectUnit(unitList);
 								selectWidgets(unitList);
+								if (reclick && this.ui.selectedUnits.contains(this.ui.mouseOverUnit)) {
+									// The selection did not change, but the click still selects the unit again.
+									this.ui.unitOrderListener.selectUnits(new int[0], new int[] {
+											((RenderUnit) this.ui.mouseOverUnit).getSimulationUnit().getHandleId() });
+								}
 								this.lastUnitClickTime = currentMillis;
 								this.lastClickUnit = this.ui.mouseOverUnit;
 							}
@@ -1803,6 +1829,11 @@ final class MeleeUIInput {
 		selectUnitFromScript(unit, select);
 	}
 
+	// A script selecting several units in a row changes the selection (and fires its events) per call, but the
+	// portrait, command card and selection circles are rebuilt once, from flushScriptSelection.
+	private List<RenderUnit> scriptSelectionBefore;
+	private List<RenderWidget> scriptSelectionWidgets;
+
 	private void selectUnitFromScript(final CUnit unit, final boolean select) {
 		final RenderUnit renderUnit = this.ui.war3MapViewer.getRenderPeer(unit);
 		if (renderUnit == null) {
@@ -1817,13 +1848,35 @@ final class MeleeUIInput {
 		else {
 			widgets.remove(renderUnit);
 		}
-		selectWidgets(widgets);
+		changeSelectionFromScript(widgets);
+	}
+
+	private void changeSelectionFromScript(final List<RenderWidget> widgets) {
+		if ((widgets.size() == 1) && !(widgets.get(0) instanceof RenderUnit)) {
+			selectWidgets(widgets);
+			this.ui.war3MapViewer.doSelectUnit(widgets);
+			return;
+		}
+		if (this.scriptSelectionBefore == null) {
+			this.scriptSelectionBefore = new ArrayList<>(this.ui.selectedUnits);
+		}
+		applySelection(sortedUnits(widgets));
+		this.scriptSelectionWidgets = widgets;
+	}
+
+	void flushScriptSelection() {
+		if (this.scriptSelectionBefore == null) {
+			return;
+		}
+		final List<RenderUnit> before = this.scriptSelectionBefore;
+		final List<RenderWidget> widgets = this.scriptSelectionWidgets;
+		this.scriptSelectionBefore = null;
+		this.scriptSelectionWidgets = null;
+		presentSelection(before, this.ui.selectedUnits);
 		this.ui.war3MapViewer.doSelectUnit(widgets);
 	}
 
 	public void scriptClearSelection() {
-		final List<RenderWidget> none = new ArrayList<>();
-		selectWidgets(none);
-		this.ui.war3MapViewer.doSelectUnit(none);
+		changeSelectionFromScript(new ArrayList<>());
 	}
 }

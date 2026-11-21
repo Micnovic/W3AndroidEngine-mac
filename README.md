@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Platform: Windows and Android" src="https://img.shields.io/badge/platform-Windows%20%7C%20Android%208.0%2B-3DDC84?logo=android&logoColor=white">
-  <img alt="Version 0.4.42" src="https://img.shields.io/badge/version-0.4.42-blue">
+  <img alt="Version 0.4.242" src="https://img.shields.io/badge/version-0.4.242-blue">
   <img alt="Licence: AGPL-3.0" src="https://img.shields.io/badge/licence-AGPL--3.0-orange">
   <img alt="Engine: Warsmash" src="https://img.shields.io/badge/engine-Warsmash-8a2be2">
   <img alt="Languages: Java 17, JASS2, GLSL" src="https://img.shields.io/badge/code-Java%2017%20%7C%20JASS2%20%7C%20GLSL-lightgrey">
@@ -90,9 +90,10 @@ Legend: **Working** — used in the regular test runs or played on real devices 
 | Game | Campaigns: cinematics, missions, victory and defeat, carry-over to the next mission | Working | Every Reign of Chaos and The Frozen Throne mission can be completed; tweaking required |
 | Game | Forsaken Kingdom campaigns | Planned | Listed as coming soon; needs Reforged 3.0 data |
 | Game | Custom games against computer players | Working | Score screen at the end; full melee AI (expanding, buying items, attack waves) is planned |
+| Game | Popular custom maps (DotA, Pudge Wars, Bleach, Naruto arenas) | Working | Fixed-settings lobbies let the host close slots or add computer players; some heavy maps are still slow on phones |
 | Game | Save and load, also from the main menu | Working | |
 | Game | Cinematics: campaign intro, opening and ending movies | Working | Windows x64 and Android |
-| Graphics | Classic, HD and Reforged graphics sets | Working | Custom games use the chosen set; campaigns follow the campaign version |
+| Graphics | Classic, HD and Reforged graphics sets | Working | Custom games use the chosen set; campaigns follow the campaign version; model-shaped shadows in HD |
 | Controls | Full touch control; S Pen | Working | |
 | Rules | Unit behaviour, combat, spells, abilities and timings | In progress | Measured against the original and calibrated step by step |
 | Simulation | Determinism and replays | In progress | |
@@ -245,7 +246,7 @@ docs/images/            images used in this file
 
 ## Status and roadmap
 
-Current version: **v0.4.42**
+Current version: **v0.4.242**
 
 - **Custom games:** work end-to-end.
 - **Campaigns:** Reign of Chaos and The Frozen Throne can be completed to the end. Tweaking required.

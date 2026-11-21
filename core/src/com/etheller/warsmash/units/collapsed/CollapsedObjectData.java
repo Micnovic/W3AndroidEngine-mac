@@ -11,7 +11,6 @@ import com.etheller.warsmash.units.custom.ObjectDataChangeEntry;
 import com.etheller.warsmash.units.custom.War3ObjectDataChangeset;
 import com.etheller.warsmash.units.manager.MutableObjectData.WorldEditorDataType;
 import com.etheller.warsmash.util.DataErrors;
-import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WorldEditStrings;
 

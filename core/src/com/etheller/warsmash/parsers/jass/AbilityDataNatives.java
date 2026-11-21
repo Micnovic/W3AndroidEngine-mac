@@ -45,6 +45,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitorJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.AbilityBuilderAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABAction;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.event.ABTimeOfDayEvent;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.jass.ABActionJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.AbilityBuilderConfiguration;
@@ -322,7 +323,7 @@ final class AbilityDataNatives extends CommonNatives {
 						if (data.equals("-") || data.isEmpty()) {
 							return JassType.REAL.getNullValue();
 						}
-						return RealJassValue.of(Float.parseFloat(data));
+						return RealJassValue.of(ABDataText.parseFloat(data));
 					}
 					return JassType.REAL.getNullValue();
 				});
@@ -337,7 +338,7 @@ final class AbilityDataNatives extends CommonNatives {
 						if (data.equals("-") || data.isEmpty()) {
 							return JassType.INTEGER.getNullValue();
 						}
-						return IntegerJassValue.of(Integer.parseInt(data));
+						return IntegerJassValue.of(ABDataText.parseInt(data));
 					}
 					return JassType.INTEGER.getNullValue();
 				});
@@ -367,7 +368,7 @@ final class AbilityDataNatives extends CommonNatives {
 						if (data.equals("-") || data.isEmpty()) {
 							return JassType.BOOLEAN.getNullValue();
 						}
-						return BooleanJassValue.of(Integer.parseInt(data) == 1);
+						return BooleanJassValue.of(ABDataText.parseInt(data) == 1);
 					}
 					return JassType.BOOLEAN.getNullValue();
 				});

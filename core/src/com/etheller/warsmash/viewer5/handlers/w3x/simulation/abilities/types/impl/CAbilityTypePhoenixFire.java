@@ -27,7 +27,7 @@ public class CAbilityTypePhoenixFire extends CAbilityType<CAbilityTypePhoenixFir
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypePhoenixFireLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypePhoenixFireLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityPhoenixFire heroAbility = ((CAbilityPhoenixFire) existingAbility);
 
 		heroAbility.setInitialDamage(levelData.getInitialDamage());

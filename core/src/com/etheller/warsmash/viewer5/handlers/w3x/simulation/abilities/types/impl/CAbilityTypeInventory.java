@@ -28,7 +28,7 @@ public class CAbilityTypeInventory extends CAbilityType<CAbilityTypeInventoryLev
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
 
-		final CAbilityTypeInventoryLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeInventoryLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CLevelingAbility heroAbility = (existingAbility);
 
 		// TODO ignores fields

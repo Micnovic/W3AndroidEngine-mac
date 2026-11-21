@@ -19,6 +19,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.utils.IntSet;
 import com.etheller.warsmash.util.Log;
 
 public class FolderDataSource implements DataSource {
@@ -31,6 +32,8 @@ public class FolderDataSource implements DataSource {
 	 * match the case of the files on case sensitive file systems.
 	 */
 	private volatile Map<String, String> lowerCaseToStoredPath;
+	/** The hash codes of the keys of {@link #lowerCaseToStoredPath}, which answer most misses without a key. */
+	private volatile IntSet keyHashes;
 
 	public FolderDataSource(final Path folderPath) {
 		this.folderPath = folderPath;
@@ -46,6 +49,7 @@ public class FolderDataSource implements DataSource {
 				INDEXES.put(this.folderPath, index);
 			}
 		}
+		this.keyHashes = index.keyHashes;
 		this.lowerCaseToStoredPath = index.lowerCaseToStoredPath;
 		this.listfile = index.listfile;
 	}
@@ -62,6 +66,7 @@ public class FolderDataSource implements DataSource {
 	private static final class FolderIndex {
 		private final Set<String> listfile = new HashSet<>();
 		private final Map<String, String> lowerCaseToStoredPath = new HashMap<>();
+		private final IntSet keyHashes = new IntSet();
 		private final Map<Path, FileTime> folderTimes = new HashMap<>();
 		/**
 		 * False when a folder changed so shortly before the listing that a file added right after it would leave the
@@ -87,8 +92,9 @@ public class FolderDataSource implements DataSource {
 						if (attrs.isRegularFile()) {
 							final String relativePath = folderPath.relativize(file).toString();
 							FolderIndex.this.listfile.add(relativePath);
-							FolderIndex.this.lowerCaseToStoredPath.put(relativePath.toLowerCase(Locale.US),
-									relativePath);
+							final String key = relativePath.toLowerCase(Locale.US);
+							FolderIndex.this.lowerCaseToStoredPath.put(key, relativePath);
+							FolderIndex.this.keyHashes.add(key.hashCode());
 						}
 						return FileVisitResult.CONTINUE;
 					}
@@ -137,7 +143,17 @@ public class FolderDataSource implements DataSource {
 		if (storedPath == null) {
 			return null;
 		}
-		return new FileInputStream(this.folderPath.resolve(storedPath).toFile());
+		return new IndependentStream.FromFile(this.folderPath.resolve(storedPath).toFile());
+	}
+
+	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		final String storedPath = findStoredPath(filepath);
+		if (storedPath == null) {
+			return null;
+		}
+		final File file = this.folderPath.resolve(storedPath).toFile();
+		return () -> new IndependentStream.FromFile(file);
 	}
 
 	@Override
@@ -152,6 +168,10 @@ public class FolderDataSource implements DataSource {
 	@Override
 	public File getDirectory(String filepath) throws IOException {
 		filepath = fixFilepath(filepath);
+		// Paths come from map and data content: ".." or an absolute path must not leave the data folder.
+		if (!this.folderPath.resolve(filepath).normalize().startsWith(this.folderPath.normalize())) {
+			return null;
+		}
 		File file = new File(this.folderPath.toString() + File.separatorChar + filepath);
 		if(!file.exists() || !file.isDirectory()) {
 			return null;
@@ -181,7 +201,36 @@ public class FolderDataSource implements DataSource {
 	}
 
 	private String findStoredPath(final String filepath) {
+		final int hash = asciiKeyHash(filepath);
+		if ((hash != NOT_ASCII) && !this.keyHashes.contains(hash)) {
+			return null;
+		}
 		return this.lowerCaseToStoredPath.get(lookupKey(filepath));
+	}
+
+	private static final int NOT_ASCII = 0;
+
+	/**
+	 * The hash code of lookupKey(filepath) without making the key, or NOT_ASCII for a path that is not plain ASCII
+	 * (or whose key happens to hash to it), which is looked up the long way.
+	 */
+	private static int asciiKeyHash(final String filepath) {
+		int hash = 0;
+		final int length = filepath.length();
+		for (int i = 0; i < length; i++) {
+			char c = filepath.charAt(i);
+			if (c >= 128) {
+				return NOT_ASCII;
+			}
+			if ((c == '\\') || (c == '/') || (c == ':')) {
+				c = File.separatorChar;
+			}
+			else if ((c >= 'A') && (c <= 'Z')) {
+				c += 'a' - 'A';
+			}
+			hash = (31 * hash) + c;
+		}
+		return hash;
 	}
 
 	// The same key as fixFilepath(filepath).toLowerCase(Locale.US), built in one pass for ASCII paths: every file

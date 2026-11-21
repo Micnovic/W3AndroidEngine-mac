@@ -183,9 +183,9 @@ final class MapViewerEffects {
 	}
 
 	static void spawnFxOnOrigin(final War3MapViewer viewer, final RenderUnit renderUnit, final String heroLevelUpArt) {
-		final MdxModel heroLevelUpModel = loadModelMdx(viewer, heroLevelUpArt);
+		final MdxModel heroLevelUpModel = loadWaitingModelMdx(viewer, heroLevelUpArt);
 		if (heroLevelUpModel != null) {
-			final MdxComplexInstance modelInstance = (MdxComplexInstance) heroLevelUpModel.addInstance();
+			final MdxComplexInstance modelInstance = (MdxComplexInstance) heroLevelUpModel.addWaitingInstance();
 			modelInstance.setTeamColor(renderUnit.playerIndex);
 
 			final MdxModel model = (MdxModel) renderUnit.instance.model;
@@ -205,7 +205,6 @@ final class MapViewerEffects {
 			}
 
 			modelInstance.setScene(viewer.worldScene);
-			SequenceUtils.randomBirthSequence(modelInstance);
 			viewer.projectiles.add(new RenderAttackInstant(modelInstance, viewer,
 					(float) Math.toRadians(renderUnit.getSimulationUnit().getFacing())));
 		}
@@ -391,14 +390,15 @@ final class MapViewerEffects {
 					Log.error(nullPointerException);
 				}
 			}
-			final MdxModel spawnedEffectModel = loadModelMdx(viewer, modelName);
+			final MdxModel spawnedEffectModel = loadWaitingModelMdx(viewer, modelName);
 			if (spawnedEffectModel != null) {
-				final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+				final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addWaitingInstance();
 				float yaw = 0;
 				if (renderUnit != null) {
 					modelInstance.setTeamColor(renderUnit.playerIndex);
 					{
 						final MdxModel model = (MdxModel) renderUnit.instance.model;
+						model.finishPending();
 						int index = -1;
 						int bestFitAttachmentNameLength = Integer.MAX_VALUE;
 						for (int i = 0; i < model.attachments.size(); i++) {
@@ -459,12 +459,14 @@ final class MapViewerEffects {
 					Log.error(nullPointerException);
 				}
 			}
-			final MdxModel spawnedEffectModel = loadModelMdx(viewer, modelName);
+			final MdxModel spawnedEffectModel = loadWaitingModelMdx(viewer, modelName);
 			if (spawnedEffectModel != null) {
-				final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+				final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addWaitingInstance();
 				if (renderDest != null) {
 					{
 						final MdxModel model = (MdxModel) renderDest.instance.model;
+						// its attachment points are in the built model
+						model.finishPending();
 						int index = -1;
 						int bestFitAttachmentNameLength = Integer.MAX_VALUE;
 						for (int i = 0; i < model.attachments.size(); i++) {
@@ -506,9 +508,9 @@ final class MapViewerEffects {
 	}
 
 	static RenderSpellEffect addSpecialEffect(final War3MapViewer viewer, final String modelName, final float x, final float y, final float yaw) {
-		final MdxModel spawnedEffectModel = loadModelMdx(viewer, modelName);
+		final MdxModel spawnedEffectModel = loadWaitingModelMdx(viewer, modelName);
 		if (spawnedEffectModel != null) {
-			final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+			final MdxComplexInstance modelInstance = (MdxComplexInstance) spawnedEffectModel.addWaitingInstance();
 			{
 				modelInstance.setLocation(x, y,
 						Math.max(viewer.getWalkableRenderHeight(x, y), viewer.terrain.getGroundHeight(x, y)));
@@ -531,6 +533,20 @@ final class MapViewerEffects {
 			name = name.substring(0, name.length() - 4);
 		}
 		return name.isEmpty() || "_".equals(name);
+	}
+
+	/**
+	 * The model of an effect, which may be read in the background while the game goes on: only an instance made with
+	 * {@link MdxModel#addWaitingInstance()} may be made of it before it is built.
+	 */
+	static MdxModel loadWaitingModelMdx(final War3MapViewer viewer, final String path) {
+		final boolean before = viewer.setDeferModelLoadsInGame(true);
+		try {
+			return loadModelMdx(viewer, path);
+		}
+		finally {
+			viewer.setDeferModelLoadsInGame(before);
+		}
 	}
 
 	static MdxModel loadModelMdx(final War3MapViewer viewer, final String path) {

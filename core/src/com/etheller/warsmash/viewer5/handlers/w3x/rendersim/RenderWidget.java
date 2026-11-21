@@ -1,7 +1,9 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 
 import com.badlogic.gdx.math.Quaternion;
@@ -64,13 +66,15 @@ public interface RenderWidget {
 		private float currentSpeedRatio;
 		private boolean currentlyAllowingRarityVariations;
 		private int currentSequenceIndex = -1;
+		/** The duration asked for the current animation while the model was not built yet, 0 for none. */
+		private float waitingDuration;
 		private final Queue<QueuedAnimation> animationQueue = new LinkedList<>();
 		private int lastWalkFrame = -1;
 		private final float animationWalkSpeed;
 		private final float animationRunSpeed;
-		private final MdxNode turretBone;
+		private MdxNode turretBone;
 		private LockTarget turretFacingLock;
-		private final MdxNode headBone;
+		private MdxNode headBone;
 		private LockTarget headFacingLock;
 		private Runnable activityObserver;
 
@@ -81,6 +85,51 @@ public interface RenderWidget {
 			this.animationRunSpeed = animationRunSpeed;
 			this.turretBone = this.instance.inefficientlyGetNodeByNameSearch("bone_turret");
 			this.headBone = this.instance.inefficientlyGetNodeByNameSearch("bone_head");
+			if (isWaiting()) {
+				instance.modelLoadedObserver = this::modelLoaded;
+			}
+		}
+
+		/**
+		 * While the model's file is still being read, the instance has no sequences: what the game asks for is kept
+		 * and played when the model is built.
+		 */
+		private boolean isWaiting() {
+			return this.instance.isWaiting();
+		}
+
+		private void keepWhileWaiting(final PrimaryTag animationName, final EnumSet<SecondaryTag> secondaryAnimationTags,
+				final int sequenceIndex, final float speedRatio, final float duration,
+				final boolean allowRarityVariations) {
+			this.currentAnimation = animationName;
+			this.currentAnimationSecondaryTags = secondaryAnimationTags;
+			this.currentSequenceIndex = sequenceIndex;
+			this.currentSpeedRatio = speedRatio;
+			this.waitingDuration = duration;
+			this.currentlyAllowingRarityVariations = allowRarityVariations;
+		}
+
+		private void modelLoaded() {
+			this.turretBone = this.instance.inefficientlyGetNodeByNameSearch("bone_turret");
+			this.headBone = this.instance.inefficientlyGetNodeByNameSearch("bone_head");
+			final List<QueuedAnimation> queued = new ArrayList<>(this.animationQueue);
+			final float duration = this.waitingDuration;
+			this.waitingDuration = 0;
+			if (this.currentSequenceIndex != -1) {
+				playAnimation(true, this.currentSequenceIndex, this.currentSpeedRatio,
+						this.currentlyAllowingRarityVariations);
+			}
+			else if (this.currentAnimation != null) {
+				if (duration > 0) {
+					playAnimationWithDuration(true, this.currentAnimation, this.currentAnimationSecondaryTags, duration,
+							this.currentlyAllowingRarityVariations);
+				}
+				else {
+					playAnimation(true, this.currentAnimation, this.currentAnimationSecondaryTags,
+							this.currentSpeedRatio, this.currentlyAllowingRarityVariations);
+				}
+			}
+			this.animationQueue.addAll(queued);
 		}
 
 		@Override
@@ -175,6 +224,10 @@ public interface RenderWidget {
 				final boolean allowRarityVariations) {
 			wake();
 			this.animationQueue.clear();
+			if (isWaiting()) {
+				keepWhileWaiting(null, SequenceUtils.EMPTY, sequenceIndex, speedRatio, 0, allowRarityVariations);
+				return;
+			}
 			if (force || this.instance.sequenceEnded) {
 				this.currentSpeedRatio = speedRatio;
 				this.instance.setAnimationSpeed(speedRatio);
@@ -203,6 +256,10 @@ public interface RenderWidget {
 				final boolean allowRarityVariations) {
 			wake();
 			this.animationQueue.clear();
+			if (isWaiting()) {
+				keepWhileWaiting(animationName, secondaryAnimationTags, -1, speedRatio, 0, allowRarityVariations);
+				return;
+			}
 			if (force || (animationName != this.currentAnimation)
 					|| !secondaryAnimationTags.equals(this.currentAnimationSecondaryTags)
 					|| this.instance.sequenceEnded) {
@@ -232,7 +289,12 @@ public interface RenderWidget {
 		public void playAnimationWithDuration(final boolean force, final PrimaryTag animationName,
 				final EnumSet<SecondaryTag> secondaryAnimationTags, final float duration,
 				final boolean allowRarityVariations) {
+			wake();
 			this.animationQueue.clear();
+			if (isWaiting()) {
+				keepWhileWaiting(animationName, secondaryAnimationTags, -1, 1.0f, duration, allowRarityVariations);
+				return;
+			}
 			if (force || (animationName != this.currentAnimation)
 					|| !secondaryAnimationTags.equals(this.currentAnimationSecondaryTags)) {
 				this.recycleSet.clear();

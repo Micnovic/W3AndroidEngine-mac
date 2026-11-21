@@ -365,6 +365,36 @@ public final class LanData {
 		/** The host's profile portrait as it names it; not part of the announcement itself (see GamePortrait), empty until learnt. */
 		public String portrait = "";
 
+		public GameInfo copy() {
+			final GameInfo g = new GameInfo();
+			g.gameId = this.gameId;
+			g.protocolVersion = this.protocolVersion;
+			g.engineVersion = this.engineVersion;
+			g.buildCommit = this.buildCommit;
+			g.hostName = this.hostName;
+			g.gameName = this.gameName;
+			g.mapName = this.mapName;
+			g.mapTitle = this.mapTitle;
+			g.mapSize = this.mapSize;
+			g.mapWidth = this.mapWidth;
+			g.mapHeight = this.mapHeight;
+			g.mapCrc32 = this.mapCrc32;
+			g.observers = this.observers;
+			g.lockTeams = this.lockTeams;
+			g.teamsTogether = this.teamsTogether;
+			g.fullSharedControl = this.fullSharedControl;
+			g.randomRaces = this.randomRaces;
+			g.players = this.players;
+			g.maxPlayers = this.maxPlayers;
+			g.state = this.state;
+			g.hostId = this.hostId;
+			g.tcpPort = this.tcpPort;
+			g.speed = this.speed;
+			g.portrait = this.portrait;
+			g.mapSha256 = this.mapSha256.clone();
+			return g;
+		}
+
 		public void write(final ByteWriter w) throws LanProtocolException {
 			w.i64(this.gameId).u16(this.protocolVersion).string(this.engineVersion, 32).string(this.buildCommit, 48)
 					.string(this.hostName, LanProtocol.MAX_PLAYER_NAME).string(this.gameName, LanProtocol.MAX_GAME_NAME)

@@ -17,7 +17,6 @@ import com.etheller.warsmash.parsers.jass.Jass2.CommonEnvironment;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.Bounds;
 import com.etheller.warsmash.viewer5.handlers.w3x.TextTag;
-import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
@@ -26,7 +25,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.TextTagConfigType;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Text tags, messages, interface and cinematic state, preloading and game end.

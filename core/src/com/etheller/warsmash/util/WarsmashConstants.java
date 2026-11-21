@@ -95,17 +95,18 @@ public class WarsmashConstants {
 	 * Reign of Chaos data. A negative version means an older map that does not name one. Other maps keep the rule
 	 * by file name for now.
 	 */
-	public static int mapGameVersion(final String mapFileName, final long gameDataVersion) {
-		return mapGameVersion(mapFileName, gameDataVersion, GAME_VERSION);
+	public static int mapGameVersion(final String mapFileName, final long gameDataVersion,
+			final boolean campaignGame) {
+		return mapGameVersion(mapFileName, gameDataVersion, campaignGame, GAME_VERSION);
 	}
 
-	public static int mapGameVersion(final String mapFileName, final long gameDataVersion, final int gameVersion) {
+	public static int mapGameVersion(final String mapFileName, final long gameDataVersion,
+			final boolean campaignGame, final int gameVersion) {
 		final String name = mapFileName == null ? "" : mapFileName.toLowerCase(Locale.ROOT).replace('\\', '/');
-		if ((gameDataVersion >= 0) && name.contains("campaign/")) {
+		if ((gameDataVersion >= 0) && campaignGame) {
 			return (int) Math.min(gameDataVersion, gameVersion);
 		}
-		final boolean reignOfChaosCampaign = name.contains("campaign/")
-				&& (name.endsWith(".w3m") || name.contains("/roc/"));
+		final boolean reignOfChaosCampaign = campaignGame && (name.endsWith(".w3m") || name.contains("/roc/"));
 		return reignOfChaosCampaign ? 0 : gameVersion;
 	}
 

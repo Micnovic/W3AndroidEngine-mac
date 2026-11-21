@@ -19,6 +19,7 @@ import com.etheller.warsmash.lan.LanGameStart;
 import com.etheller.warsmash.lan.LanSession;
 import com.etheller.warsmash.lan.LanSessions;
 import com.etheller.warsmash.launcher.LaunchRequest;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.LauncherLog;
 import com.etheller.warsmash.launcher.LauncherSlot;
 
@@ -26,6 +27,7 @@ import net.warsmash.lan.LanGameSetup;
 import net.warsmash.lan.RejoinKey;
 import net.warsmash.lan.RejoinStore;
 import net.warsmash.lan.client.LanClient;
+import net.warsmash.lan.client.MapDownload;
 import net.warsmash.lan.host.LanHost;
 import net.warsmash.lan.maps.LanMapIndex;
 import net.warsmash.lan.protocol.LanData;
@@ -93,6 +95,14 @@ public final class LanLauncherModel {
 
 		/** Starts the engine on the LAN game; the guard has already let it pass. */
 		void launch(LaunchRequest request);
+
+		/**
+		 * Tells why the engine cannot play the map file ({@link MapIssue#NONE} when it can) through {@code done}, on
+		 * the thread of {@link #ui}; null when the check could not be made (the game data was closed meanwhile).
+		 */
+		default void mapIssue(final File map, final java.util.function.Consumer<MapIssue> done) {
+			done.accept(MapIssue.NONE);
+		}
 
 		/** Whether a map of that name is among this device's maps (a game on another map says "map from host"). */
 		boolean hasMapNamed(String name);
@@ -167,6 +177,8 @@ public final class LanLauncherModel {
 		public boolean teamsTogether;
 		public boolean fullSharedControl;
 		public boolean randomRaces;
+		/** Why the engine cannot play the map; the lobby is then not made. */
+		public MapIssue issue = MapIssue.NONE;
 	}
 
 	private static final Pattern ADDRESS = Pattern
@@ -175,6 +187,8 @@ public final class LanLauncherModel {
 	private static final long LIST_REFRESH_MS = 500;
 	private static final long PROBE_MS = 3000;
 	private static final long HOST_TIP_MS = 10000;
+	/** Hashing the maps of the device for games in the list: a few at a time, however many games are announced. */
+	private static final int MAX_MAP_CHECKS = 2;
 
 	private final Env env;
 	private final LanAttention attention = new LanAttention();
@@ -205,6 +219,11 @@ public final class LanLauncherModel {
 	private long mapDone;
 	private int mapTotal;
 	private String mapFailedText;
+	private String mapFailedTitle;
+	private String mapFailureTitle;
+	/** What the engine cannot play of the received map; null while that is being found out. */
+	private MapIssue mapIssue;
+	private int mapIssueCheck;
 	private int rejoinPercent;
 	private long lastProbe;
 	private final java.util.Set<Long> seenGames = new java.util.HashSet<>();
@@ -323,7 +342,19 @@ public final class LanLauncherModel {
 	public String takeMapFailure() {
 		final String t = this.mapFailedText;
 		this.mapFailedText = null;
+		this.mapFailureTitle = this.mapFailedTitle;
+		this.mapFailedTitle = null;
 		return t;
+	}
+
+	/** The title of the dialog for the failure last taken. */
+	public String mapFailureTitle() {
+		return this.mapFailureTitle == null ? LanText.mapFailedTitle() : this.mapFailureTitle;
+	}
+
+	/** Why the engine cannot play the lobby's map, once it is there and has been looked at. */
+	public MapIssue mapIssue() {
+		return this.mapIssue == null ? MapIssue.NONE : this.mapIssue;
 	}
 
 	/** Seconds left of the countdown, rounded up; 0 outside it. */
@@ -353,7 +384,8 @@ public final class LanLauncherModel {
 
 	/** Ready can be pressed: this player plays, has the map, and is in a lobby. */
 	public boolean canReady() {
-		return (this.mode == Mode.LOBBY) && (this.lobby != null) && (this.lobby.mine != null) && mapReady();
+		return (this.mode == Mode.LOBBY) && (this.lobby != null) && (this.lobby.mine != null) && mapReady()
+				&& (this.mapIssue == MapIssue.NONE);
 	}
 
 	// ------------------------------------------------------------ page changes
@@ -527,7 +559,7 @@ public final class LanLauncherModel {
 		if (known != null) {
 			return known;
 		}
-		if (this.mapChecking.add(key)) {
+		if ((this.mapChecking.size() < MAX_MAP_CHECKS) && this.mapChecking.add(key)) {
 			final LanData.MapInfo wanted = new LanData.MapInfo();
 			wanted.name = info.mapName;
 			wanted.size = info.mapSize;
@@ -536,17 +568,19 @@ public final class LanLauncherModel {
 			final Thread t = new Thread(new Runnable() {
 				@Override
 				public void run() {
-					boolean found;
+					Boolean found;
 					try {
 						found = LanLauncherModel.this.env.mapIndex().find(wanted) != null;
 					}
 					catch (final IOException | RuntimeException e) {
-						found = LanLauncherModel.this.env.hasMapNamed(wanted.name);
+						found = null;
 					}
-					final boolean result = found;
+					final Boolean checked = found;
 					LanLauncherModel.this.env.ui().execute(new Runnable() {
 						@Override
 						public void run() {
+							final boolean result = checked != null ? checked
+									: LanLauncherModel.this.env.hasMapNamed(wanted.name);
 							LanLauncherModel.this.mapChecks.put(key, result);
 							LanLauncherModel.this.mapChecking.remove(key);
 							LanLauncherModel.this.lastRefresh = 0;
@@ -706,6 +740,9 @@ public final class LanLauncherModel {
 		if (inSession()) {
 			return "Leave the lobby first.";
 		}
+		if (settings.issue != MapIssue.NONE) {
+			return LanText.mapIssue(settings.issue);
+		}
 		if (!networkAvailable()) {
 			return LanText.noWifi();
 		}
@@ -864,6 +901,9 @@ public final class LanLauncherModel {
 	 * in the map's slots).
 	 */
 	public String changeMap(final CreateSettings map) {
+		if (map.issue != MapIssue.NONE) {
+			return LanText.mapIssue(map.issue);
+		}
 		final LanSession s = this.session;
 		if (!this.hosting || (s == null) || (s.host() == null) || (this.mode != Mode.LOBBY) || (map.map == null)) {
 			return LanText.mapChangeFailed();
@@ -933,6 +973,13 @@ public final class LanLauncherModel {
 	/** The game started from the lobby could not be started by the engine. */
 	public void launchFailed() {
 		this.error = "The game could not be started.";
+		this.launched = false;
+		leave();
+	}
+
+	/** The launcher found the map of the game started from the lobby unplayable. */
+	public void launchRefused(final MapIssue issue) {
+		this.error = LanText.mapIssue(issue);
 		this.launched = false;
 		leave();
 	}
@@ -1188,6 +1235,10 @@ public final class LanLauncherModel {
 		public void onMapState(final int state, final LanData.MapInfo map, final File file, final int failure) {
 			final int old = LanLauncherModel.this.mapState;
 			LanLauncherModel.this.mapState = state;
+			if (state != LanClient.MAP_READY) {
+				LanLauncherModel.this.mapIssue = null;
+				LanLauncherModel.this.mapIssueCheck++;
+			}
 			if (state == LanClient.MAP_DOWNLOADING) {
 				if (old != LanClient.MAP_DOWNLOADING) {
 					addSystem(LanText.downloading());
@@ -1198,9 +1249,8 @@ public final class LanLauncherModel {
 					addSystem(LanText.mapReceived());
 					LanLauncherModel.this.attention.onEvent(LanAttention.Event.MAP_DOWNLOADED);
 				}
-				// A game joined while running waited for its map (the answer to a rejoin comes before it is found).
-				if ((LanLauncherModel.this.mode == Mode.REJOIN) && (LanLauncherModel.this.setup != null)) {
-					LanLauncherModel.this.startGame(LanLauncherModel.this.setup);
+				if (old != LanClient.MAP_READY) {
+					checkMapIssue(file);
 				}
 			}
 			else if (state == LanClient.MAP_FAILED) {
@@ -1218,6 +1268,51 @@ public final class LanLauncherModel {
 		}
 	}
 
+	/**
+	 * Looks at the received map before anyone can ready up on it: a map the engine cannot play keeps this player out of
+	 * the start, so no game begins that this device cannot join.
+	 */
+	private void checkMapIssue(final File file) {
+		final int check = ++this.mapIssueCheck;
+		if (file == null) {
+			// startGame fails on the missing file when the game starts
+			this.mapIssue = MapIssue.NONE;
+			return;
+		}
+		this.mapIssue = null;
+		this.env.mapIssue(file, issue -> {
+			if ((check != this.mapIssueCheck) || (this.session == null)) {
+				return;
+			}
+			if (issue == null) {
+				// Without an answer the map stays unchecked, so this player cannot ready up on it.
+				final String text = LanText.mapFailed(MapDownload.FAIL_IO);
+				addSystem(text);
+				this.mapFailedText = text;
+				this.mapFailedTitle = LanText.mapFailedTitle();
+				this.attention.onEvent(LanAttention.Event.MAP_FAILED);
+				if ((this.setup != null) && !this.launched
+						&& ((this.mode == Mode.LOADING) || (this.mode == Mode.REJOIN))) {
+					launchFailed();
+				}
+				rebuildLobby();
+				return;
+			}
+			this.mapIssue = issue;
+			if (issue != MapIssue.NONE) {
+				addSystem(LanText.mapIssue(issue));
+				this.mapFailedText = LanText.mapIssue(issue);
+				this.mapFailedTitle = LanText.mapIssueTitle();
+				this.attention.onEvent(LanAttention.Event.MAP_FAILED);
+			}
+			// A game started or joined while running waited for this answer and for the map.
+			if ((this.setup != null) && !this.launched && ((this.mode == Mode.LOADING) || (this.mode == Mode.REJOIN))) {
+				startGame(this.setup);
+			}
+			rebuildLobby();
+		});
+	}
+
 	/** The host started the game: the engine takes over with the LAN request. */
 	private void startGame(final LanGameSetup start) {
 		final LanClient client = client();
@@ -1229,8 +1324,17 @@ public final class LanLauncherModel {
 			}
 			return;
 		}
+		if (this.mapIssue == null) {
+			return;
+		}
+		if (this.mapIssue != MapIssue.NONE) {
+			launchRefused(this.mapIssue);
+			return;
+		}
 		this.launched = true;
-		this.env.launch(LaunchRequest.lan(this.session, file.getAbsolutePath(), slotsOf(start)));
+		final LaunchRequest request = LaunchRequest.lan(this.session, file.getAbsolutePath(), slotsOf(start));
+		request.mapChecked = true;
+		this.env.launch(request);
 	}
 
 	/** The lobby's slots in the form the loading screen's preview takes. */

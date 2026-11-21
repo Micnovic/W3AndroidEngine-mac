@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABLocalStoreKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.DataFieldLetter;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
@@ -21,7 +22,7 @@ public class ABCallbackGetParentAbilityDataAsFloat extends ABFloatCallback {
 		
 		String data = levelData.get(parentLevel-1).getData().get(dataField.getIndex());
 		
-		return Float.parseFloat(data);
+		return ABDataText.parseFloat(data);
 	}
 
 }

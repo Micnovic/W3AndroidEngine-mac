@@ -17,6 +17,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitTypeRequirement;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.ScriptFieldOverlay;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityCategory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractGenericSingleIconNoSmartActiveAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
@@ -50,7 +51,8 @@ public abstract class CAbilitySpellBase extends AbstractGenericSingleIconNoSmart
 	}
 
 	@Override
-	public final void populate(final GameObject worldEditorAbility, final int level) {
+	public final void populate(final GameObject abilityData, final int level) {
+		final GameObject worldEditorAbility = ScriptFieldOverlay.of(this, abilityData);
 		this.manaCost = worldEditorAbility.getFieldAsInteger(AbilityFields.MANA_COST + level, 0);
 		this.castRange = worldEditorAbility.getFieldAsFloat(AbilityFields.CAST_RANGE + level, 0);
 		this.cooldown = worldEditorAbility.getFieldAsFloat(AbilityFields.COOLDOWN + level, 0);

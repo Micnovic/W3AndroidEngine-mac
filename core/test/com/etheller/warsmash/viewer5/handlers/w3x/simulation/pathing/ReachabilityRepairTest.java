@@ -116,7 +116,7 @@ class ReachabilityRepairTest {
 		for (int seed = 0; seed < 40; seed++) {
 			final Random random = new Random(seed);
 			final PathingGrid grid = grid(random, 0.02 + (random.nextDouble() * 0.12));
-			final SharedGraph graph = new SharedGraph(grid);
+			final SharedGraph graph = new SharedGraph();
 			final float collision = COLLISIONS[random.nextInt(COLLISIONS.length)];
 			final boolean corners = random.nextInt(4) == 0;
 			final Reachability kept = new Reachability(grid, MovementType.FOOT, collision, corners);
@@ -165,7 +165,7 @@ class ReachabilityRepairTest {
 		wpm.getSize()[1] = SIZE;
 		wpm.setPathing(new short[SIZE * SIZE]);
 		final PathingGrid grid = new PathingGrid(wpm, new float[] { 0, 0 });
-		final SharedGraph graph = new SharedGraph(grid);
+		final SharedGraph graph = new SharedGraph();
 		final Reachability reach = new Reachability(grid, MovementType.FOOT, 16f, false);
 		final int before = reach.part(graph, grid, 3, 3);
 		final int[] pixels = new int[16];

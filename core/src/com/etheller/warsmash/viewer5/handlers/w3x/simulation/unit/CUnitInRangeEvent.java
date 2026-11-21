@@ -46,9 +46,9 @@ public final class CUnitInRangeEvent extends RemovableTriggerEvent {
 	public void update(final CSimulation game) {
 		if (this.center.isDead() || this.center.isRemovedFromGame()) {
 			this.inRange.clear();
+			this.swap.clear();
 			return;
 		}
-		this.swap.clear();
 		game.getWorldCollision().enumUnitsInRange(this.center.getX(), this.center.getY(), this.range, (unit) -> {
 			if ((unit != this.center) && !unit.isDead()) {
 				this.swap.add(unit);
@@ -67,6 +67,8 @@ public final class CUnitInRangeEvent extends RemovableTriggerEvent {
 		}
 		final Set<CUnit> previous = this.inRange;
 		this.inRange = this.swap;
+		// Emptied now rather than at the next update, so a unit removed meanwhile is not kept by it.
+		previous.clear();
 		this.swap = previous;
 	}
 }

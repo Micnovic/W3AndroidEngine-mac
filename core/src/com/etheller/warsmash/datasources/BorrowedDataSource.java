@@ -41,6 +41,11 @@ public final class BorrowedDataSource implements DataSource {
 	}
 
 	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		return this.data.opener(filepath);
+	}
+
+	@Override
 	public boolean has(final String filepath) {
 		return this.data.has(filepath);
 	}
@@ -58,6 +63,11 @@ public final class BorrowedDataSource implements DataSource {
 	@Override
 	public Collection<String> getListfile(final Predicate<String> accept) {
 		return this.data.getListfile(accept);
+	}
+
+	@Override
+	public Collection<String> getListfileByExtension(final String extension) {
+		return this.data.getListfileByExtension(extension);
 	}
 
 	@Override

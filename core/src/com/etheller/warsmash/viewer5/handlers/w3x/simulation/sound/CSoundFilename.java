@@ -4,11 +4,21 @@ import com.badlogic.gdx.audio.Sound;
 import com.etheller.warsmash.viewer5.AudioBufferSource;
 import com.etheller.warsmash.viewer5.AudioContext;
 import com.etheller.warsmash.viewer5.AudioPanner;
+import com.etheller.warsmash.viewer5.SoundLoops;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 
 public class CSoundFilename extends AbstractCSound {
-	private final Sound sound;
+	/** What shares the sound of a file among the handles made from it. */
+	public interface Owner {
+		/** Follows a killed handle so that it is asked to give its sound back once it has played out. */
+		void watchKilled(CSoundFilename handle);
+
+		void releaseSound(Sound sound);
+	}
+
+	private Sound sound;
 	private final boolean looping;
 	private final boolean stopWhenOutOfRange;
 	private final int fadeInRate;
@@ -17,7 +27,18 @@ public class CSoundFilename extends AbstractCSound {
 	private final CSoundParameters parameters = new CSoundParameters();
 	private final String eaxSetting;
 	private long lastSoundId = -1;
+	@SavedTransient
+	private Owner owner;
+	private int stackedVoices;
 	private String fileName;
+	// The sound is being made in the background (see awaitSound): a start waits for it, and a handle killed and done
+	// meanwhile gives it back as it comes.
+	@SavedTransient
+	private boolean soundPending;
+	@SavedTransient
+	private boolean playOnBind;
+	@SavedTransient
+	private boolean releaseOnBind;
 
 	/**
 	 * @param fileDuration the length of the file in seconds (0 when it is missing); the sound may be null when this
@@ -34,6 +55,75 @@ public class CSoundFilename extends AbstractCSound {
 		this.fadeInRate = fadeInRate;
 		this.fadeOutRate = fadeOutRate;
 		this.eaxSetting = eaxSetting;
+	}
+
+	/** Makes this handle one of the holders of its sound, which it gives back when it is killed and done. */
+	public void setOwner(final Owner owner) {
+		this.owner = owner;
+	}
+
+	/** Makes this handle wait for its sound to be given with {@link #bindSound}. */
+	public void awaitSound() {
+		this.soundPending = true;
+	}
+
+	/**
+	 * Gives the handle the sound it awaited (null when it could not be made); a start that came before is played now
+	 * when it still sounds.
+	 */
+	public void bindSound(final Sound bound, final int gameTurnTick) {
+		this.soundPending = false;
+		if (this.releaseOnBind) {
+			this.releaseOnBind = false;
+			this.playOnBind = false;
+			if ((bound != null) && (this.owner != null)) {
+				this.owner.releaseSound(bound);
+			}
+			return;
+		}
+		this.sound = bound;
+		if (this.playOnBind) {
+			this.playOnBind = false;
+			if ((bound != null) && isPlaying(gameTurnTick)) {
+				play();
+			}
+		}
+	}
+
+	@Override
+	public void killWhenDone() {
+		super.killWhenDone();
+		if (this.owner != null) {
+			this.owner.watchKilled(this);
+		}
+	}
+
+	/**
+	 * Gives the sound back when the handle can never play again.
+	 *
+	 * @return whether the handle holds no sound any more
+	 */
+	public boolean releaseIfDone(final int gameTurnTick) {
+		if (this.soundPending) {
+			if (!isKilled(gameTurnTick)) {
+				return false;
+			}
+			this.releaseOnBind = true;
+			return true;
+		}
+		if (this.sound == null) {
+			return true;
+		}
+		if (this.stackedVoices > 0 || !isKilled(gameTurnTick)) {
+			return false;
+		}
+		// The file may still sound for a moment after the handle is done; its owner keeps the sound until then.
+		final Sound released = this.sound;
+		this.sound = null;
+		if (this.owner != null) {
+			this.owner.releaseSound(released);
+		}
+		return true;
 	}
 
 	@Override
@@ -98,7 +188,7 @@ public class CSoundFilename extends AbstractCSound {
 
 	@Override
 	public void attachToUnit(final RenderUnit unit) {
-		this.parameters.attachedUnit = unit;
+		this.parameters.attachedLocation = unit == null ? null : unit.location;
 	}
 
 	@Override
@@ -128,6 +218,10 @@ public class CSoundFilename extends AbstractCSound {
 
 	@Override
 	protected void play() {
+		if (this.soundPending) {
+			this.playOnBind = true;
+			return;
+		}
 		if ((this.audioContext == null) || (this.sound == null)) {
 			return;
 		}
@@ -139,8 +233,8 @@ public class CSoundFilename extends AbstractCSound {
 		final AudioBufferSource source = this.audioContext.createBufferSource();
 
 		this.parameters.updatePositionFromUnit();
-		if (this.parameters.attachedUnit != null) {
-			panner.followLocation = this.parameters.attachedUnit.location;
+		if (this.parameters.attachedLocation != null) {
+			panner.followLocation = this.parameters.attachedLocation;
 		}
 
 		// A 3D sound nobody placed plays at the listener rather than at the map origin.
@@ -173,13 +267,11 @@ public class CSoundFilename extends AbstractCSound {
 
 	@Override
 	protected void silence() {
+		this.playOnBind = false;
 		if (this.sound != null) {
-			// Without an id this would also stop other sounds created from the same file.
+			// Handles of the same file share its sound, so without an id there is nothing of this one to stop.
 			if (this.lastSoundId != -1) {
-				this.sound.stop(this.lastSoundId);
-			}
-			else {
-				this.sound.stop();
+				SoundLoops.stop(this.sound, this.lastSoundId);
 			}
 		}
 	}
@@ -192,16 +284,26 @@ public class CSoundFilename extends AbstractCSound {
 		if ((this.sound == null) || (this.audioContext == null)) {
 			return -1;
 		}
-		return Extensions.audio.play(this.sound, 0f, this.parameters.startPitch(), 0, 0, 0, false, 1, 1, true);
+		final long id = Extensions.audio.play(this.sound, 0f, this.parameters.startPitch(), 0, 0, 0, false, 1, 1,
+				true);
+		if (id != -1) {
+			this.stackedVoices++;
+		}
+		return id;
 	}
 
 	void setStackedLevel(final long id, final float gain, final float pan) {
 		final float volume = this.parameters.scaledVolume(1.0f, null) * gain;
-		this.sound.setPan(id, pan, volume);
+		if (this.sound != null) {
+			this.sound.setPan(id, pan, volume);
+		}
 	}
 
 	void stopStacked(final long id) {
-		this.sound.stop(id);
+		if (this.sound != null) {
+			this.sound.stop(id);
+			this.stackedVoices = Math.max(0, this.stackedVoices - 1);
+		}
 	}
 
 	/** The file the script created the sound from, as the script wrote it. */

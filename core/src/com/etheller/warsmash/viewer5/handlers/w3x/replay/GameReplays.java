@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.function.ToIntFunction;
 import java.util.zip.CRC32;
 
 import com.badlogic.gdx.Gdx;
@@ -20,7 +19,7 @@ import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.SimulationChecksum;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
@@ -112,14 +111,14 @@ public final class GameReplays {
 	/**
 	 * @param networkGame the old UDP network game, which has no replay; a LAN game is recorded like any other
 	 */
-	public static boolean isRecorded(final String mapFile, final boolean networkGame) {
+	public static boolean isRecorded(final boolean campaignGame, final boolean networkGame) {
 		if (networkGame) {
 			return false;
 		}
 		if (forcedRecordFile() != null) {
 			return true;
 		}
-		return !CampaignMaps.isCampaignMap(mapFile);
+		return !campaignGame;
 	}
 
 	/** The header of a game about to be loaded: the viewer has its seed, the config the game setup's slots. */
@@ -135,7 +134,7 @@ public final class GameReplays {
 		return CReplayHeader.of(engineVersion(), BuildInfo.current().getBuildId(),
 				BuildInfo.current().isOfficial(), mapFile, (int) map[0], map[1], dataChecksum(dataSource),
 				recordedAt, viewer.getGameSeed(), localPlayerIndex, viewer.getTimeScale(), config,
-				CHECKSUM_INTERVAL, CGameCache.snapshot());
+				CHECKSUM_INTERVAL, CGameCache.snapshot(), viewer.isCampaignGame());
 	}
 
 	/** The same, with the players that play with a keyboard and mouse marked (bit i: player slot i). */
@@ -148,17 +147,21 @@ public final class GameReplays {
 
 	public static ReplayRecording startRecording(final War3MapViewer viewer, final CReplayHeader header)
 			throws IOException {
-		return startRecording(viewer, header, SimulationChecksum::compute);
+		return startRecording(viewer, header, null);
 	}
 
-	/** @param checksum how the game's checksum is made, for a caller that needs the same value for itself */
+	/**
+	 * @param checksum how the game's checksum is made, for a caller that needs the same value for itself; null for a
+	 *                 checksum of its own
+	 */
 	public static ReplayRecording startRecording(final War3MapViewer viewer, final CReplayHeader header,
-			final ToIntFunction<CSimulation> checksum) throws IOException {
+			final ChecksumSteps checksum) throws IOException {
 		final String forced = forcedRecordFile();
 		final FileHandle target = forced != null ? Gdx.files.absolute(new File(forced).getAbsolutePath())
 				: lastReplay();
 		final FileHandle written = forced != null ? target : folder().child(TEMP_REPLAY + EXTENSION);
-		final ReplayRecording recording = new ReplayRecording(viewer.simulation, header, written, target, checksum);
+		final ReplayRecording recording = new ReplayRecording(viewer.simulation, header, written, target,
+				checksum != null ? checksum : SimulationChecksum.sliced(header.getChecksumInterval()));
 		viewer.setReplaySession(recording);
 		return recording;
 	}
@@ -178,6 +181,12 @@ public final class GameReplays {
 	 * options count.
 	 */
 	public static GraphicsSet playbackGraphics(final DataSource base, final DataTable ini, final String mapFile) {
+		return playbackGraphics(base, ini, mapFile, CampaignMaps.isCampaignMap(mapFile));
+	}
+
+	/** @param campaignGame whether the replay is of a campaign's game, as its header says */
+	public static GraphicsSet playbackGraphics(final DataSource base, final DataTable ini, final String mapFile,
+			final boolean campaignGame) {
 		boolean reforgedMap = false;
 		try {
 			reforgedMap = War3MapViewer
@@ -186,13 +195,13 @@ public final class GameReplays {
 		catch (final IOException | RuntimeException e) {
 			// the map check names a map that cannot be read
 		}
-		return GraphicsSettings.gameGraphics(ini, mapFile, false, reforgedMap);
+		return GraphicsSettings.gameGraphics(ini, campaignGame, false, reforgedMap);
 	}
 
 	/** Why this engine cannot play the replay on the game data as the options set the graphics, or null. */
 	public static String unplayableReason(final CReplay replay, final DataSource base, final DataTable ini) {
 		final DataSource data = GraphicsSettings.gameData(base, ini,
-				playbackGraphics(base, ini, replay.getHeader().getMapPath()));
+				playbackGraphics(base, ini, replay.getHeader().getMapPath(), replay.getHeader().isCampaignGame()));
 		return unplayableReason(replay.getHeader(), data, null);
 	}
 

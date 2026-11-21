@@ -5,6 +5,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
@@ -15,10 +16,25 @@ import com.etheller.warsmash.viewer5.StaticSceneLightInstance;
 import com.etheller.warsmash.viewer5.gl.DataTexture;
 
 public class W3xScenePortraitLightManager implements SceneLightManager, W3xSceneLightManager {
+	/**
+	 * The graphics packages' portraits are lit from the environment map as well, so they get a weaker and warmer direct
+	 * light, none of the Classic light's ambient and less of the environment map and of the specular highlights than the
+	 * world: with the Classic values the faces and the light fur and bones come out overexposed.
+	 */
+	private static final float PACKAGE_LIGHT_INTENSITY = 0.6f;
+	private static final float PACKAGE_LIGHT_RED = 1f;
+	private static final float PACKAGE_LIGHT_GREEN = 0.78f;
+	private static final float PACKAGE_LIGHT_BLUE = 0.6f;
+	private static final float PACKAGE_AMBIENT_INTENSITY = 0f;
+	private static final float PACKAGE_IBL_SCALE = 0.15f;
+	private static final float PACKAGE_SPECULAR_SCALE = 0.05f;
+	private float hdIblScale = 1f;
+	private float hdSpecularScale = 1f;
 	public final List<SceneLightInstance> lights;
 	private FloatBuffer lightDataCopyHeap;
 	private final DataTexture unitLightsTexture;
 	private int unitLightCount;
+	private Supplier<SceneLightInstance> lightOverride;
 
 	public W3xScenePortraitLightManager(GL20 gl) {
 		this.lights = new ArrayList<>();
@@ -27,8 +43,39 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 	}
 
 	public W3xScenePortraitLightManager(final ModelViewer viewer, final Vector3 lightDirection) {
+		this(viewer, lightDirection, 1, 0.3f);
+	}
+
+	public W3xScenePortraitLightManager(final ModelViewer viewer, final Vector3 lightDirection, final float intensity,
+			final float ambientIntensity) {
 		this(viewer.gl);
-		add(StaticSceneLightInstance.createDefault(lightDirection));
+		add(StaticSceneLightInstance.createDefault(lightDirection, intensity, ambientIntensity));
+	}
+
+	public static W3xScenePortraitLightManager forPackageModels(final ModelViewer viewer,
+			final Vector3 lightDirection) {
+		final W3xScenePortraitLightManager lights = new W3xScenePortraitLightManager(viewer.gl);
+		lights.add(StaticSceneLightInstance.createDefault(lightDirection,
+				new float[] { PACKAGE_LIGHT_RED, PACKAGE_LIGHT_GREEN, PACKAGE_LIGHT_BLUE }, PACKAGE_LIGHT_INTENSITY,
+				new float[] { 1, 1, 1 }, PACKAGE_AMBIENT_INTENSITY));
+		lights.hdIblScale = PACKAGE_IBL_SCALE;
+		lights.hdSpecularScale = PACKAGE_SPECULAR_SCALE;
+		return lights;
+	}
+
+	@Override
+	public float getHdIblScale() {
+		return this.hdIblScale;
+	}
+
+	@Override
+	public float getHdSpecularScale() {
+		return this.hdSpecularScale;
+	}
+
+	/** A light that replaces the ones of the portrait while it is there (SetPortraitLight); the supplier may give null. */
+	public void setLightOverride(final Supplier<SceneLightInstance> lightOverride) {
+		this.lightOverride = lightOverride;
 	}
 
 	@Override
@@ -59,10 +106,18 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 		this.unitLightCount = 0;
 		this.lightDataCopyHeap.clear();
 		int offset = 0;
-		for (final SceneLightInstance light : this.lights) {
-			light.bind(offset, this.lightDataCopyHeap);
+		final SceneLightInstance override = this.lightOverride == null ? null : this.lightOverride.get();
+		if (override != null) {
+			override.bind(offset, this.lightDataCopyHeap);
 			offset += 16;
 			this.unitLightCount++;
+		}
+		else {
+			for (final SceneLightInstance light : this.lights) {
+				light.bind(offset, this.lightDataCopyHeap);
+				offset += 16;
+				this.unitLightCount++;
+			}
 		}
 		this.lightDataCopyHeap.limit(offset);
 		this.unitLightsTexture.bindAndUpdateIfChanged(this.lightDataCopyHeap, 4, this.unitLightCount);

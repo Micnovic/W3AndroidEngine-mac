@@ -7,7 +7,6 @@ import com.etheller.warsmash.viewer5.CanvasProvider;
 import com.etheller.warsmash.viewer5.Scene;
 
 public abstract class CameraManager {
-	private static final double HORIZONTAL_ANGLE_INCREMENT = Math.PI / 60;
 	protected final float[] cameraPositionTemp = new float[3];
 	protected final float[] cameraTargetTemp = new float[3];
 	protected CanvasProvider canvas;

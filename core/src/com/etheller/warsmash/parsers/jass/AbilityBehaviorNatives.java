@@ -19,6 +19,7 @@ import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.parsers.jass.Jass2.CommonEnvironment;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityDataUI;
+import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.IconUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.OrderButtonUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -280,21 +281,21 @@ final class AbilityBehaviorNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final int rawcode = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
 					final int level = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
-					return new HandleJassValue(iconuiType,
-							war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode)).getOnIconUI(level));
+					final AbilityUI abilityUI = war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode));
+					return new HandleJassValue(iconuiType, abilityUI == null ? null : abilityUI.getOnIconUI(level));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetAbilityOffIconUI",
 				(arguments, globalScope, triggerScope) -> {
 					final int rawcode = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
 					final int level = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
-					return new HandleJassValue(iconuiType,
-							war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode)).getOffIconUI(level));
+					final AbilityUI abilityUI = war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode));
+					return new HandleJassValue(iconuiType, abilityUI == null ? null : abilityUI.getOffIconUI(level));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetAbilityLearnIconUI",
 				(arguments, globalScope, triggerScope) -> {
 					final int rawcode = arguments.get(0).visit(IntegerJassValueVisitor.getInstance());
-					return new HandleJassValue(iconuiType,
-							war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode)).getLearnIconUI());
+					final AbilityUI abilityUI = war3MapViewer.getAbilityDataUI().getUI(new War3ID(rawcode));
+					return new HandleJassValue(iconuiType, abilityUI == null ? null : abilityUI.getLearnIconUI());
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetItemIconUI",
 				(arguments, globalScope, triggerScope) -> {

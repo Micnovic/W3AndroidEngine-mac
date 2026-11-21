@@ -2,6 +2,7 @@ package com.etheller.interpreter.ast.value;
 
 import java.util.Arrays;
 
+import com.etheller.interpreter.ast.Assignable;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.util.HandleReferences;
 import com.etheller.interpreter.ast.util.JassSettings;
@@ -59,6 +60,7 @@ public class ArrayJassValue implements JassValue {
 		if ((index < 0) || (index >= JassSettings.MAX_ARRAY_SIZE)) {
 			return;
 		}
+		value = Assignable.asStored(primitiveType, value);
 		if (index >= this.data.length) {
 			final int oldLength = this.data.length;
 			int newLength = Math.max(16, oldLength);

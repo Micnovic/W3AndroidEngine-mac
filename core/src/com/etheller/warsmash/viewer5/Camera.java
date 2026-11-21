@@ -13,7 +13,6 @@ public class Camera {
 	private static final Vector3 vectorHeap = new Vector3();
 	private static final Vector3 vectorHeap2 = new Vector3();
 	private static final Vector3 vectorHeap3 = new Vector3();
-	private static final Quaternion quatHeap = new Quaternion();
 	private static final Matrix4 matHeap = new Matrix4();
 
 	public final Rectangle rect;

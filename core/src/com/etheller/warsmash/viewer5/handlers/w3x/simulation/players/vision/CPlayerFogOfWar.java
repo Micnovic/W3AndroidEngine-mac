@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CFogMaskSettings;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSightWorld;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState;
@@ -34,7 +35,8 @@ public class CPlayerFogOfWar {
 	// in sight of every unit each second.
 	private final byte[] fogOfWar;
 	private final byte[] detection;
-	private final ByteBuffer fogOfWarBuffer;
+	@SavedTransient
+	private ByteBuffer fogOfWarBuffer;
 
 	public CPlayerFogOfWar(final PathingGrid pathingGrid) {
 		this.width = (pathingGrid.getWidth() / PATHING_RATIO) + 1;
@@ -75,6 +77,10 @@ public class CPlayerFogOfWar {
 	}
 
 	public ByteBuffer getFogOfWarBuffer() {
+		// A loaded game brings the cells as a new array, which the buffer of the game before it does not wrap.
+		if ((this.fogOfWarBuffer == null) || (this.fogOfWarBuffer.array() != this.fogOfWar)) {
+			this.fogOfWarBuffer = ByteBuffer.wrap(this.fogOfWar);
+		}
 		return this.fogOfWarBuffer;
 	}
 

@@ -29,6 +29,7 @@ public class W3xShaders {
 					"    varying vec2 v_suv;\r\n" + //
 					"    varying vec3 v_normal;\r\n" + //
 					"    varying float a_positionHeight;\r\n" + //
+					"    varying float v_fogZ;\r\n" + //
 					"    varying vec3 shadeColor;\r\n" + //
 					"    const float normalDist = 0.25;\r\n" + //
 					"    void main() {\r\n" + //
@@ -74,6 +75,7 @@ public class W3xShaders {
 					"      vec3 myposition = vec3(a_position.xy, height + a_position.z);\r\n" + //
 					"      gl_Position = u_mvp * vec4(myposition.xyz, 1.0);\r\n" + //
 					"      a_positionHeight = a_position.z;\r\n" + //
+					"      v_fogZ = myposition.z;\r\n" + //
 					Shaders.lightSystem("v_normal", "myposition", "u_lightTexture", "u_lightTextureHeight",
 							"u_lightCount", true)
 					+ "\r\n" + //
@@ -91,6 +93,8 @@ public class W3xShaders {
 				"    uniform bool u_unfogged;\r\n" + //
 				"    uniform vec4 u_fogColor;\r\n" + //
 				"    uniform vec4 u_fogParams;\r\n" + //
+				"    uniform vec4 u_fogHeight;\r\n" + //
+				"    varying float v_fogZ;\r\n" + //
 				"    varying vec2 v_uv;\r\n" + //
 				"    varying vec2 v_suv;\r\n" + //
 				"    varying vec3 v_normal;\r\n" + //

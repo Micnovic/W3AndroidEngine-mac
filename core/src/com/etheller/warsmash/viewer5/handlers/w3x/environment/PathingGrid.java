@@ -10,7 +10,6 @@ import java.util.Map;
 import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.parsers.w3x.wpm.War3MapWpm;
 import com.etheller.warsmash.util.ArgbImage;
-import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWorldCollision;
@@ -230,26 +229,8 @@ public class PathingGrid {
 		final float offsetY = ((pathingTextureTga.getHeight() % 2) == 1) ? 16f : 0f;
 		final Rectangle pathingMapRectangle = new Rectangle((positionX - (width / 2)) + offsetX,
 				(positionY - (height / 2)) + offsetY, width, height);
-		if (cWorldCollision.intersectsAnythingOtherThan(pathingMapRectangle, unitToExcludeFromCollisionChecks, null,
-				MovementType.AMPHIBIOUS, true, simulation, ignoredControllerIndex)) {
-			Log.info("intersects amph unit");
-			anyPathingTypesInRegion |= PathingFlags.UNBUILDABLE | PathingFlags.UNWALKABLE | PathingFlags.UNSWIMABLE;
-		}
-		if (cWorldCollision.intersectsAnythingOtherThan(pathingMapRectangle, unitToExcludeFromCollisionChecks, null,
-				MovementType.FLOAT, true, simulation, ignoredControllerIndex)) {
-			Log.info("intersects float unit");
-			anyPathingTypesInRegion |= PathingFlags.UNSWIMABLE;
-		}
-		if (cWorldCollision.intersectsAnythingOtherThan(pathingMapRectangle, unitToExcludeFromCollisionChecks, null,
-				MovementType.FLY, true, simulation, ignoredControllerIndex)) {
-			Log.info("intersects fly unit");
-			anyPathingTypesInRegion |= PathingFlags.UNFLYABLE;
-		}
-		if (cWorldCollision.intersectsAnythingOtherThan(pathingMapRectangle, unitToExcludeFromCollisionChecks, null,
-				MovementType.FOOT, true, simulation, ignoredControllerIndex)) {
-			Log.info("intersects foot unit");
-			anyPathingTypesInRegion |= PathingFlags.UNBUILDABLE | PathingFlags.UNWALKABLE;
-		}
+		anyPathingTypesInRegion |= unitPlacementPathing(pathingMapRectangle, cWorldCollision,
+				unitToExcludeFromCollisionChecks, simulation, ignoredControllerIndex);
 		for (final CBuildingPathingType pathingType : preventPathingTypes) {
 			if (PathingFlags.isPathingFlag(anyPathingTypesInRegion, pathingType)) {
 				return false;
@@ -261,6 +242,32 @@ public class PathingGrid {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * The pathing flags that the units in the area add for a structure placed over it. Units that the player
+	 * ignoredControllerIndex controls step aside and add none.
+	 */
+	public static short unitPlacementPathing(final Rectangle area, final CWorldCollision cWorldCollision,
+			final CUnit unitToExclude, final CSimulation simulation, final int ignoredControllerIndex) {
+		short pathing = 0;
+		if (cWorldCollision.intersectsAnythingOtherThan(area, unitToExclude, null, MovementType.AMPHIBIOUS, true,
+				simulation, ignoredControllerIndex)) {
+			pathing |= PathingFlags.UNBUILDABLE | PathingFlags.UNWALKABLE | PathingFlags.UNSWIMABLE;
+		}
+		if (cWorldCollision.intersectsAnythingOtherThan(area, unitToExclude, null, MovementType.FLOAT, true,
+				simulation, ignoredControllerIndex)) {
+			pathing |= PathingFlags.UNSWIMABLE;
+		}
+		if (cWorldCollision.intersectsAnythingOtherThan(area, unitToExclude, null, MovementType.FLY, true, simulation,
+				ignoredControllerIndex)) {
+			pathing |= PathingFlags.UNFLYABLE;
+		}
+		if (cWorldCollision.intersectsAnythingOtherThan(area, unitToExclude, null, MovementType.FOOT, true, simulation,
+				ignoredControllerIndex)) {
+			pathing |= PathingFlags.UNBUILDABLE | PathingFlags.UNWALKABLE;
+		}
+		return pathing;
 	}
 
 	public RemovablePathingMapInstance blitRemovablePathingOverlayTexture(final float positionX, final float positionY,
@@ -304,15 +311,16 @@ public class PathingGrid {
 	}
 
 	public int getCellX(final float x) {
-		final float userCellSpaceX = (x - this.centerOffset[0]) / 32.0f;
-		final int cellX = (int) userCellSpaceX;
-		return cellX;
+		return floorCell((x - this.centerOffset[0]) / 32.0f);
+	}
+
+	/** Floor, so the cell column left of the map is -1 and not 0; equal to a plain cast for in-map positions. */
+	private static int floorCell(final float userCellSpace) {
+		return (userCellSpace < 0f) ? (int) Math.floor(userCellSpace) : (int) userCellSpace;
 	}
 
 	public int getCellY(final float y) {
-		final float userCellSpaceY = (y - this.centerOffset[1]) / 32.0f;
-		final int cellY = (int) userCellSpaceY;
-		return cellY;
+		return floorCell((y - this.centerOffset[1]) / 32.0f);
 	}
 
 	public float getWorldX(final int cellX) {
@@ -343,27 +351,31 @@ public class PathingGrid {
 		return cellY;
 	}
 
+	/** What a cell outside the map reads as: the map boundary stops every kind of movement and building. */
+	private static final short OUTSIDE_PATHING = PathingFlags.UNWALKABLE | PathingFlags.UNFLYABLE
+			| PathingFlags.UNBUILDABLE | PathingFlags.UNSWIMABLE;
+
 	public short getCellPathing(final int cellX, final int cellY) {
-		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if ((index < 0) || (index >= this.pathingGrid.length)) {
-			return 0;
+		if (!isCellInside(cellX, cellY)) {
+			return OUTSIDE_PATHING;
 		}
+		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
 		return (short) (this.pathingGrid[index] | this.dynamicPathingOverlay[index]);
 	}
 
 	private short getCellPermanentPathing(final int cellX, final int cellY) {
-		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if ((index < 0) || (index >= this.pathingGrid.length)) {
-			return 0;
+		if (!isCellInside(cellX, cellY)) {
+			return OUTSIDE_PATHING;
 		}
+		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
 		return (this.pathingGrid[index]);
 	}
 
 	public void setCellPathing(final int cellX, final int cellY, final short pathingValue) {
-		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if ((index < 0) || (index >= this.pathingGrid.length)) {
+		if (!isCellInside(cellX, cellY)) {
 			return;
 		}
+		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
 		this.pathingGrid[index] = pathingValue;
 	}
 
@@ -611,10 +623,10 @@ public class PathingGrid {
 	}
 
 	public boolean isCellBlockVision(final int cellX, final int cellY) {
-		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
-		if ((index < 0) || (index >= this.pathingGrid.length)) {
-			return false;
+		if (!isCellInside(cellX, cellY)) {
+			return true;
 		}
+		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
 		return PathingFlags.isPathingFlag(this.dynamicPathingOverlay[index], PathingFlags.BLOCKVISION);
 	}
 

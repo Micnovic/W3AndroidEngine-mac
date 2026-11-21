@@ -32,7 +32,8 @@ public class MdlxLayer extends MdlxAnimatedObject {
 		private static final FilterMode[] VALUES = values();
 
 		public static FilterMode fromId(final int id) {
-			return VALUES[id];
+			// custom map models carry unknown modes; they draw as no blending rather than fail to load
+			return ((id >= 0) && (id < VALUES.length)) ? VALUES[id] : VALUES[0];
 		}
 
 		public static int nameToId(final String name) {
@@ -108,17 +109,19 @@ public class MdlxLayer extends MdlxAnimatedObject {
 		this.coordId = reader.readInt32();
 		this.alpha = reader.readFloat32();
 
-		if (version > 800) {
+		// A file can state a newer version than the layers in it are written in: the size of a layer tells.
+		final int end = position + (int) size;
+		if ((version > 800) && ((end - reader.position()) >= 4)) {
 			this.emissiveGain = reader.readFloat32();
 
-			if (version > 900) {
+			if ((version > 900) && ((end - reader.position()) >= 20)) {
 				reader.readFloat32Array(this.fresnelColor);
 				this.fresnelOpacity = reader.readFloat32();
 				this.fresnelTeamColor = reader.readFloat32();
 			}
 		}
 
-		if (version >= 1100) {
+		if ((version >= 1100) && ((end - reader.position()) >= 8)) {
 			this.shaderTypeId = reader.readUInt32();
 			final long textureCount = reader.readUInt32();
 			for (int i = 0; i < textureCount; i++) {
@@ -126,8 +129,8 @@ public class MdlxLayer extends MdlxAnimatedObject {
 				texture.textureId = reader.readInt32();
 				texture.slot = reader.readUInt32();
 				final int tagPosition = reader.position();
-				final War3ID tag = new War3ID(reader.readTag());
-				if (AnimationMap.KMTF.getWar3id().equals(tag)) {
+				final War3ID tag = (end - tagPosition) >= 4 ? new War3ID(reader.readTag()) : null;
+				if ((tag != null) && AnimationMap.KMTF.getWar3id().equals(tag)) {
 					texture.flipbook = AnimationMap.KMTF.getImplementation().createTimeline();
 					texture.flipbook.readMdx(reader, tag);
 				}

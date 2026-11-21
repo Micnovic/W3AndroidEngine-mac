@@ -50,8 +50,7 @@ public final class RenderFogGhost {
 		final MdxComplexInstance seen = source.instance;
 		this.instance = (MdxComplexInstance) ((MdxModel) seen.model).addInstance();
 		this.instance.setTransformation(seen.localLocation, seen.localRotation, seen.localScale);
-		System.arraycopy(seen.replaceableTextures, 0, this.instance.replaceableTextures, 0,
-				seen.replaceableTextures.length);
+		this.instance.copyReplaceableTexturesFrom(seen);
 		System.arraycopy(seen.vertexColor, 0, this.baseColor, 0, this.baseColor.length);
 		this.instance.setSequenceLoopMode(seen.sequenceLoopMode);
 		this.instance.setSequence(seen.sequence);

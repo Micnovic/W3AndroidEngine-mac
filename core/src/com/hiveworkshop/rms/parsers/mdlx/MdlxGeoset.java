@@ -29,7 +29,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 	public float[] normals;
 	public long[] faceTypeGroups; // unsigned int[]
 	public long[] faceGroups; // unsigned int[]
-	public int[] faces; // unsigned short[]
+	public short[] faces; // unsigned short[], read back with & 0xFFFF
 	public short[] vertexGroups; // unsigned byte[]
 	public long[] matrixGroups; // unsigned int[]
 	public long[] matrixIndices; // unsigned int[]
@@ -69,7 +69,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 		reader.readInt32(); // skip PCNT
 		this.faceGroups = reader.readUInt32Array(reader.readInt32());
 		reader.readInt32(); // skip PVTX
-		this.faces = reader.readUInt16Array(reader.readInt32());
+		this.faces = reader.readUInt16ShortArray(reader.readInt32());
 		reader.readInt32(); // skip GNDX
 		this.vertexGroups = reader.readUInt8Array(reader.readInt32());
 		reader.readInt32(); // skip MTGC
@@ -106,11 +106,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 
 			if (id == SKIN.getValue()) {
 				if (version >= 1400) {
-					final int[] wideSkin = reader.readUInt16Array(reader.readInt32());
-					this.skin = new short[wideSkin.length];
-					for (int i = 0; i < wideSkin.length; i++) {
-						this.skin[i] = (short) wideSkin[i];
-					}
+					this.skin = reader.readInt16Array(reader.readInt32());
 				}
 				else {
 					this.skin = reader.readUInt8Array(reader.readInt32());
@@ -248,7 +244,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 				stream.read(); // {
 				stream.read(); // Triangles
 				stream.read(); // {
-				this.faces = stream.readUInt16Array(new int[count]);
+				this.faces = stream.readUInt16Array(new short[count]);
 				this.faceGroups = new long[] { count };
 				stream.read(); // }
 				stream.read(); // }
@@ -387,11 +383,11 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 		stream.startBlock(MdlUtils.TOKEN_FACES, 1, this.faces.length);
 		stream.startBlock(MdlUtils.TOKEN_TRIANGLES);
 		final StringBuilder facesBuffer = new StringBuilder();
-		for (final int faceValue : this.faces) {
+		for (final short faceValue : this.faces) {
 			if (facesBuffer.length() > 0) {
 				facesBuffer.append(", ");
 			}
-			facesBuffer.append(faceValue);
+			facesBuffer.append(faceValue & 0xFFFF);
 		}
 		stream.writeLine("{ " + facesBuffer.toString() + " },");
 		stream.endBlock();
@@ -471,7 +467,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 		return this.faceGroups;
 	}
 
-	public int[] getFaces() {
+	public short[] getFaces() {
 		return this.faces;
 	}
 
@@ -543,7 +539,7 @@ public class MdlxGeoset implements MdlxBlock, MdlxChunk {
 		this.faceGroups = faceGroups;
 	}
 
-	public void setFaces(final int[] faces) {
+	public void setFaces(final short[] faces) {
 		this.faces = faces;
 	}
 

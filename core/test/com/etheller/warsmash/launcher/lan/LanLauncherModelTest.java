@@ -28,6 +28,7 @@ import com.etheller.warsmash.lan.LanSession;
 import com.etheller.warsmash.lan.LanSessions;
 import com.etheller.warsmash.launcher.LaunchGuard;
 import com.etheller.warsmash.launcher.LaunchRequest;
+import com.etheller.warsmash.launcher.MapIssue;
 
 import net.warsmash.lan.LanGameSetup;
 import net.warsmash.lan.RejoinKey;
@@ -49,6 +50,8 @@ class LanLauncherModelTest {
 	private final Queue<Runnable> posted = new ConcurrentLinkedQueue<>();
 	private final List<LaunchRequest> launched = new CopyOnWriteArrayList<>();
 	private LanSession guest;
+	private volatile MapIssue mapIssueAnswer = MapIssue.NONE;
+	private volatile boolean askedAboutNoMap;
 	private LanLauncherModel model;
 
 	private final LanNetwork network = new DefaultLanNetwork() {
@@ -139,6 +142,15 @@ class LanLauncherModelTest {
 		}
 
 		@Override
+		public void mapIssue(final File map, final java.util.function.Consumer<MapIssue> done) {
+			final MapIssue answer = LanLauncherModelTest.this.mapIssueAnswer;
+			if (map == null) {
+				LanLauncherModelTest.this.askedAboutNoMap = true;
+			}
+			LanLauncherModelTest.this.posted.add(() -> done.accept(answer));
+		}
+
+		@Override
 		public boolean hasMapNamed(final String name) {
 			return true;
 		}
@@ -166,7 +178,7 @@ class LanLauncherModelTest {
 	}
 
 	private void until(final String what, final BooleanSupplier condition) throws Exception {
-		final long end = System.currentTimeMillis() + 8000;
+		final long end = System.currentTimeMillis() + 30000;
 		while (System.currentTimeMillis() < end) {
 			Runnable r;
 			while ((r = this.posted.poll()) != null) {
@@ -345,6 +357,80 @@ class LanLauncherModelTest {
 
 		final LanLauncherModel.CreateSettings none = new LanLauncherModel.CreateSettings();
 		assertEquals(LanText.mapChangeFailed(), this.model.changeMap(none));
+	}
+
+	@Test
+	void aLobbyIsNotMadeOnAMapTheEngineCannotPlay() throws Exception {
+		this.model = new LanLauncherModel(this.env);
+		final LanLauncherModel.CreateSettings lua = settings();
+		lua.issue = MapIssue.LUA;
+		assertEquals("This map uses a Lua script, which is not supported yet.", this.model.create(lua));
+		assertFalse(this.model.inSession());
+		assertNull(LanSessions.current());
+
+		assertNull(this.model.create(settings()));
+		until("the lobby", () -> this.model.lobby() != null);
+		final LanLauncherModel.CreateSettings sealed = settings();
+		sealed.issue = MapIssue.PROTECTED;
+		assertEquals(LanText.mapIssue(MapIssue.PROTECTED), this.model.changeMap(sealed));
+		assertEquals(LanLauncherModel.Mode.LOBBY, this.model.mode());
+	}
+
+	@Test
+	void aPlayerCannotReadyOnAMapTheEngineCannotPlay() throws Exception {
+		this.mapIssueAnswer = MapIssue.LUA;
+		this.model = new LanLauncherModel(this.env);
+		assertNull(this.model.create(settings()));
+		until("the map's issue", () -> this.model.mapIssue() == MapIssue.LUA);
+		assertTrue(this.model.mapReady());
+		assertFalse(this.model.canReady());
+		assertTrue(this.model.chat().stream()
+				.anyMatch(l -> l.system && l.text.equals(LanText.mapIssue(MapIssue.LUA))));
+		assertEquals(LanText.mapIssue(MapIssue.LUA), this.model.takeMapFailure());
+		assertEquals(LanText.mapIssueTitle(), this.model.mapFailureTitle());
+		assertNull(this.model.takeMapFailure());
+		this.model.setReady(true);
+		assertEquals(0, this.model.lobby().readyHumans);
+		assertTrue(this.launched.isEmpty());
+	}
+
+	@Test
+	void aReadyMapWithoutAFileIsNotAskedAbout() throws Exception {
+		this.model = new LanLauncherModel(this.env);
+		assertNull(this.model.create(settings()));
+		until("the lobby", () -> this.model.lobby() != null);
+		final java.lang.reflect.Field field = LanLauncherModel.class.getDeclaredField("listener");
+		field.setAccessible(true);
+		final LanClient.Listener listener = (LanClient.Listener) field.get(this.model);
+		listener.onMapState(LanClient.MAP_DOWNLOADING, null, null, 0);
+		this.askedAboutNoMap = false;
+		listener.onMapState(LanClient.MAP_READY, null, null, 0);
+		until("the posted answers", () -> this.posted.isEmpty());
+		assertFalse(this.askedAboutNoMap);
+		assertEquals(MapIssue.NONE, this.model.mapIssue());
+	}
+
+	@Test
+	void aMapCheckThatGetsNoAnswerKeepsThePlayerFromReadyingWithAMessage() throws Exception {
+		this.mapIssueAnswer = null;
+		this.model = new LanLauncherModel(this.env);
+		assertNull(this.model.create(settings()));
+		final String text = LanText.mapFailed(net.warsmash.lan.client.MapDownload.FAIL_IO);
+		until("the refusal", () -> this.model.chat().stream().anyMatch(l -> l.system && l.text.equals(text)));
+		assertFalse(this.model.canReady());
+		assertEquals(text, this.model.takeMapFailure());
+		assertEquals(LanText.mapFailedTitle(), this.model.mapFailureTitle());
+	}
+
+	@Test
+	void aMapTheLauncherRefusesLeavesTheLobbyWithItsReason() throws Exception {
+		this.model = new LanLauncherModel(this.env);
+		assertNull(this.model.create(settings()));
+		until("the lobby", () -> this.model.lobby() != null);
+		this.model.launchRefused(MapIssue.LUA);
+		assertFalse(this.model.inSession());
+		assertNull(LanSessions.current());
+		assertEquals(LanText.mapIssue(MapIssue.LUA), this.model.takeError());
 	}
 
 	@Test

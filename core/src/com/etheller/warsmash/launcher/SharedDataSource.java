@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.function.Predicate;
 
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.IndependentStream;
 
 /**
  * Game data opened once and read from two threads, the window's (the launcher and the games it starts) and the
@@ -41,6 +42,19 @@ public final class SharedDataSource implements DataSource {
 	}
 
 	@Override
+	public synchronized IndependentStream.Opener opener(final String filepath) {
+		final IndependentStream.Opener opener = this.data.opener(filepath);
+		if (opener == null) {
+			return null;
+		}
+		return () -> {
+			synchronized (this) {
+				return opener.open();
+			}
+		};
+	}
+
+	@Override
 	public synchronized boolean has(final String filepath) {
 		return this.data.has(filepath);
 	}
@@ -58,6 +72,11 @@ public final class SharedDataSource implements DataSource {
 	@Override
 	public synchronized Collection<String> getListfile(final Predicate<String> accept) {
 		return this.data.getListfile(accept);
+	}
+
+	@Override
+	public synchronized Collection<String> getListfileByExtension(final String extension) {
+		return this.data.getListfileByExtension(extension);
 	}
 
 	@Override

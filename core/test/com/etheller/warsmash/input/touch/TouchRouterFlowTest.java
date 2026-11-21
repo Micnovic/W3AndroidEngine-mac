@@ -254,6 +254,32 @@ class TouchRouterFlowTest {
 	}
 
 	@Test
+	void doubleTapOnAnOwnUnitStaysTwoLeftClicksWithAnOrderableSelection() {
+		start(ControlScheme.TOUCH, TouchStyle.DOUBLE_TAP, PenButton.SHIFT);
+		this.screen.kind = PointKind.OWN_UNIT;
+		finger(PointerEvent.Action.DOWN, 1000);
+		finger(PointerEvent.Action.UP, 1060);
+		finger(PointerEvent.Action.DOWN, 1150);
+		finger(PointerEvent.Action.UP, 1210);
+		idle(2000);
+		assertEquals(List.of("downL", "upL", "downL", "upL"), this.screen.calls);
+	}
+
+	@Test
+	void doubleTapOnAnOwnUnitWhoseSecondTapLastsPastTheWindowStaysTwoLeftClicks() {
+		start(ControlScheme.TOUCH, TouchStyle.DOUBLE_TAP, PenButton.SHIFT);
+		this.screen.kind = PointKind.OWN_UNIT;
+		finger(PointerEvent.Action.DOWN, 1000);
+		finger(PointerEvent.Action.UP, 1060);
+		idle(1130);
+		finger(PointerEvent.Action.DOWN, 1200);
+		idle(1300);
+		finger(PointerEvent.Action.UP, 1340);
+		idle(2000);
+		assertEquals(List.of("downL", "upL", "downL", "upL"), this.screen.calls);
+	}
+
+	@Test
 	void doubleTapOnAnEnemyGivesOnlyTheRightClick() {
 		start(ControlScheme.TOUCH, TouchStyle.DOUBLE_TAP, PenButton.SHIFT);
 		this.screen.kind = PointKind.ENEMY;

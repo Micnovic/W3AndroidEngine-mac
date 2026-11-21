@@ -14,7 +14,7 @@ public final class JassStringHash {
 		if ((string == null) || string.isEmpty()) {
 			return 0;
 		}
-		final byte[] key = string.getBytes(StandardCharsets.UTF_8);
+		final byte[] key = JassStrings.toBytes(string);
 		for (int i = 0; i < key.length; i++) {
 			final byte b = key[i];
 			if ((b >= 'a') && (b <= 'z')) {

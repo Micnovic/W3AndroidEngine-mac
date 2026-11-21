@@ -59,6 +59,11 @@ public interface CSound {
 	default void attachToUnit(final RenderUnit unit) {
 	}
 
+	/** GetSoundIsLoading: files are read when the sound is created, so no sound is ever part way through loading. */
+	default boolean isLoading() {
+		return false;
+	}
+
 	boolean isPlaying(int gameTurnTick);
 
 	/** KillSoundWhenDone: once the sound is not playing any more, it is released and cannot be started again. */

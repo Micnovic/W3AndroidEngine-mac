@@ -1,7 +1,6 @@
 package net.warsmash.nio.channels.tcp;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
@@ -10,14 +9,12 @@ import java.nio.channels.SocketChannel;
 
 import net.warsmash.nio.channels.ChannelListener;
 import net.warsmash.nio.channels.KeyAttachment;
-import net.warsmash.nio.channels.WritableOutput;
 import net.warsmash.nio.channels.WritableSocketOutput;
 import net.warsmash.nio.util.ExceptionListener;
 
 import com.etheller.warsmash.util.Log;
 
 public class TCPClientKeyAttachment implements KeyAttachment, WritableSocketOutput {
-	private static final int MAX_MAP_SIZE_ROUGHLY = 256 * 1024 * 1024;
 	private TCPClientParser parser;
 	private final Selector selector;
 	private final SocketChannel channel;

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.lan;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCacheSync;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandCodec;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
 
@@ -197,8 +198,9 @@ public final class LanCommandValidator implements LanHost.CommandValidator {
 		@Override
 		public void syncData(final String prefix, final String data) {
 			notForReferee();
+			final int maxData = CGameCacheSync.isCacheSync(prefix) ? CGameCacheSync.MAX_DATA_BYTES : MAX_SYNC_BYTES;
 			if ((prefix == null) || prefix.isEmpty() || (utf8Length(prefix) > MAX_SYNC_BYTES) || (data == null)
-					|| (utf8Length(data) > MAX_SYNC_BYTES)) {
+					|| (utf8Length(data) > maxData)) {
 				this.valid = false;
 			}
 		}

@@ -19,7 +19,6 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl.LwjglCanvas;
-import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.WarsmashPreviewApplication;
 import com.etheller.warsmash.desktop.editor.mdx.listeners.YseraGUIListener;
@@ -28,7 +27,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.camera.PortraitCameraManager;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxModel;
 
 public class YseraPanel extends JPanel {
-	private static final Quaternion IDENTITY = new Quaternion();
 	private final WarsmashPreviewApplication warsmashPreviewApplication;
 	private final JFileChooser userFileChooser = new JFileChooser();
 	private final YseraGUIListener.YseraGUINotifier notifier = new YseraGUIListener.YseraGUINotifier();

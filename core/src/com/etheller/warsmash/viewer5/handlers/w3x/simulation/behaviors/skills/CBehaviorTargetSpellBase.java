@@ -1,5 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.skills;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
+import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CReleaseCheats;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -83,10 +85,15 @@ public class CBehaviorTargetSpellBase extends CAbstractRangedBehavior {
 		if ((this.castStartTick == 0) && isTurningToCast(withinFacingWindow)) {
 			return this;
 		}
-		this.unit.getUnitAnimationListener().playAnimation(false, this.ability.getCastingPrimaryTag(),
-				this.ability.getCastingSecondaryTags(), 1.0f, true);
+		if (this.doneEffect && this.channeling) {
+			// A one-shot cast animation plays once, a channel keeps its animation running until it ends.
+			this.unit.getUnitAnimationListener().playAnimation(false, this.ability.getCastingPrimaryTag(),
+					this.ability.getCastingSecondaryTags(), 1.0f, true);
+		}
 		if (this.castStartTick == 0) {
 			this.castStartTick = simulation.getGameTurnTick();
+			this.unit.getUnitAnimationListener().playAnimation(true, this.ability.getCastingPrimaryTag(),
+					this.ability.getCastingSecondaryTags(), 1.0f, true);
 			this.castPoint.start(simulation, castPointSeconds());
 			startBackswing(simulation);
 			if (!this.castEventsFired) {
@@ -214,6 +221,7 @@ public class CBehaviorTargetSpellBase extends CAbstractRangedBehavior {
 			}
 			else {
 				simulation.unitSoundEffectEvent(this.unit, this.ability.getAlias());
+				this.unit.getUnitAnimationListener().queueAnimation(PrimaryTag.STAND, SequenceUtils.EMPTY, true);
 			}
 		}
 		this.channeling = this.channeling && this.ability.doChannelTick(simulation, this.unit, this.target);

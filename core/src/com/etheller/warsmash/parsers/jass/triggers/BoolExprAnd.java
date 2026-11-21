@@ -16,7 +16,13 @@ public class BoolExprAnd extends AllocatedHandle implements TriggerBooleanExpres
 
 	@Override
 	public boolean evaluate(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		return this.operandA.evaluate(globalScope, triggerScope) && this.operandB.evaluate(globalScope, triggerScope);
+		return evaluate(this.operandA, globalScope, triggerScope) && evaluate(this.operandB, globalScope, triggerScope);
+	}
+
+	/** A null boolexpr is false inside a combination and as a trigger condition (1.29). */
+	static boolean evaluate(final TriggerBooleanExpression operand, final GlobalScope globalScope,
+			final TriggerExecutionScope triggerScope) {
+		return (operand != null) && operand.evaluate(globalScope, triggerScope);
 	}
 
 }

@@ -26,6 +26,8 @@ public final class GameResult {
 	public String loadFailure;
 	/** Why a game that did not start could not be loaded, as {@link #describeFailure} words it; null when not told. */
 	public String reason;
+	/** Which known cause kept the map from starting; {@link MapIssue#NONE} when none, or when not told. */
+	public MapIssue issue = MapIssue.NONE;
 	/** The race the player played, a random one as it was drawn; 0 when the engine did not tell. */
 	public int race;
 	public long finished;
@@ -53,6 +55,15 @@ public final class GameResult {
 		public int lumberHarvested;
 	}
 
+	private static MapIssue issueNamed(final String name) {
+		try {
+			return name == null ? MapIssue.NONE : MapIssue.valueOf(name);
+		}
+		catch (final IllegalArgumentException e) {
+			return MapIssue.NONE;
+		}
+	}
+
 	public boolean failed() {
 		return "error".equals(this.result) || (this.loadFailure != null);
 	}
@@ -70,8 +81,9 @@ public final class GameResult {
 			cause = cause.getCause();
 		}
 		final String message = cause.getMessage();
-		final String text = cause.getClass().getSimpleName()
-				+ ((message == null) || message.isEmpty() ? "" : ": " + message);
+		// A map start refused for a known cause says it in a sentence of its own.
+		final String text = (cause instanceof MapIssueException) && (message != null) ? message
+				: cause.getClass().getSimpleName() + ((message == null) || message.isEmpty() ? "" : ": " + message);
 		return text.length() > MAX_REASON ? text.substring(0, MAX_REASON - 3) + "..." : text;
 	}
 
@@ -105,6 +117,9 @@ public final class GameResult {
 		}
 		if ((this.reason != null) && !this.reason.isEmpty()) {
 			json.addChild("reason", new JsonValue(this.reason));
+		}
+		if (this.issue != MapIssue.NONE) {
+			json.addChild("issue", new JsonValue(this.issue.name()));
 		}
 		if (this.race > 0) {
 			json.addChild("race", new JsonValue(this.race));
@@ -156,6 +171,7 @@ public final class GameResult {
 		result.profile = json.getString("profile", "");
 		result.loadFailure = json.has("loadFailure") ? json.getString("loadFailure", null) : null;
 		result.reason = json.has("reason") ? json.getString("reason", null) : null;
+		result.issue = issueNamed(json.getString("issue", null));
 		result.race = json.getInt("race", 0);
 		result.finished = json.getLong("finished", 0);
 		result.mapName = json.getString("mapName", "");

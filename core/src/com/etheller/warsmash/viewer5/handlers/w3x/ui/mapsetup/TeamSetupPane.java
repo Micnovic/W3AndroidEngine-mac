@@ -27,6 +27,7 @@ public class TeamSetupPane {
 	private final List<PlayerSlotPane> playerSlots = new ArrayList<>();
 	private final List<GlueTextButtonFrame> forceLabels = new ArrayList<>();
 	private final IntMap<PlayerSlotPane> mapSlotToPlayerSlot = new IntMap<>();
+	private final java.util.Set<Integer> lockedComputerSlots = new java.util.HashSet<>();
 	private final SimpleFrame container;
 
 	public TeamSetupPane(final GameUI rootFrame, final Viewport uiViewport, final SimpleFrame container) {
@@ -36,6 +37,13 @@ public class TeamSetupPane {
 	public void setMap(final GameUI rootFrame, final Viewport uiViewport, final War3MapConfig config,
 			final int playerCount, final War3MapW3i mapInfo, final PlayerSlotPaneListener listener) {
 		clear();
+		if (mapInfo.hasFlag(War3MapW3iFlags.FIXED_PLAYER_SETTINGS_FOR_CUSTOM_FORCES)) {
+			for (int i = 0; i < WarsmashConstants.MAX_PLAYERS; i++) {
+				if (config.getPlayer(i).getController() == CMapControl.COMPUTER) {
+					this.lockedComputerSlots.add(i);
+				}
+			}
+		}
 		int usedSlots = 0;
 		if (mapInfo.hasFlag(War3MapW3iFlags.FIXED_PLAYER_SETTINGS_FOR_CUSTOM_FORCES)) {
 			UIFrame lastFrame = null;
@@ -92,7 +100,7 @@ public class TeamSetupPane {
 									new SetPoint(FramePoint.TOPLEFT, lastFrame, FramePoint.BOTTOMLEFT, 0, 0));
 						}
 						lastFrame = playerSlotPane.getPlayerSlotFrame();
-						playerSlotPane.setForPlayer(rootFrame, uiViewport, player, true);
+						playerSlotPane.setForPlayer(rootFrame, uiViewport, player, this.lockedComputerSlots.contains(i));
 						usedSlots++;
 					}
 				}
@@ -131,8 +139,7 @@ public class TeamSetupPane {
 		final PlayerSlotPane playerSlotPane = this.mapSlotToPlayerSlot.get(mapPlayerSlot);
 		if (playerSlotPane != null) {
 			final CBasePlayer player = config.getPlayer(mapPlayerSlot);
-			playerSlotPane.setForPlayer(rootFrame, uiViewport, player,
-					mapInfo.hasFlag(War3MapW3iFlags.FIXED_PLAYER_SETTINGS_FOR_CUSTOM_FORCES));
+			playerSlotPane.setForPlayer(rootFrame, uiViewport, player, this.lockedComputerSlots.contains(mapPlayerSlot));
 		}
 		else {
 			Log.warn("notifyPlayerDataUpdated: doing nothing because there was no slot: " + mapPlayerSlot);
@@ -157,6 +164,7 @@ public class TeamSetupPane {
 		}
 		this.playerSlots.clear();
 		this.mapSlotToPlayerSlot.clear();
+		this.lockedComputerSlots.clear();
 		this.forceLabels.clear();
 	}
 

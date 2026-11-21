@@ -17,7 +17,6 @@ import com.etheller.warsmash.parsers.fdf.frames.SimpleFrame;
 import com.etheller.warsmash.parsers.fdf.frames.StringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
 import com.etheller.warsmash.viewer5.handlers.mdx.ReplaceableIds;
-import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
@@ -55,8 +54,8 @@ public class MeleeAllianceDialog {
 	private final boolean campaign;
 
 	public MeleeAllianceDialog(final GameUI rootFrame, final Viewport uiViewport, final CSimulation simulation,
-			final CPlayer localPlayer, final String mapFileName, final CPlayerUnitOrderListener commandListener) {
-		this.campaign = CampaignMaps.isCampaignMap(mapFileName);
+			final CPlayer localPlayer, final boolean campaignGame, final CPlayerUnitOrderListener commandListener) {
+		this.campaign = campaignGame;
 		this.commandListener = commandListener;
 		this.rootFrame = rootFrame;
 		this.uiViewport = uiViewport;

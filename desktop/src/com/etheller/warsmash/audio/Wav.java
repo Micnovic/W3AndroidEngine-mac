@@ -25,14 +25,39 @@ import java.io.InputStream;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.StreamUtils;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.WavPcm;
 
 public class Wav {
+	/**
+	 * Opens a file, which may hold other than 16 bit PCM (8 bit, ADPCM, A-law...) that OpenAL does not play: such a file
+	 * is read whole and converted.
+	 */
+	static WavInputStream open(final FileHandle file) {
+		return open(null, file);
+	}
+
+	static WavInputStream open(final byte[] bytes, final FileHandle file) {
+		try {
+			return bytes != null ? new WavInputStream(new ByteArrayInputStream(bytes), file) : new WavInputStream(file);
+		}
+		catch (final GdxRuntimeException unsupported) {
+			try {
+				final byte[] converted = WavPcm.toPcm16(bytes != null ? bytes : file.readBytes());
+				return new WavInputStream(new ByteArrayInputStream(converted), file);
+			}
+			catch (final IOException | RuntimeException e) {
+				// Not a file the converter knows either: the first error says why.
+				throw unsupported;
+			}
+		}
+	}
+
 	static public class Music extends OpenALMusic {
 		private WavInputStream input;
 
 		public Music(final OpenALAudio audio, final FileHandle file) {
 			super(audio, file);
-			this.input = new WavInputStream(file);
+			this.input = open(file);
 			if (audio.noDevice) {
 				return;
 			}
@@ -42,7 +67,7 @@ public class Wav {
 		@Override
 		public int read(final byte[] buffer) {
 			if (this.input == null) {
-				this.input = new WavInputStream(this.file);
+				this.input = open(this.file);
 				setup(this.input.channels, this.input.sampleRate);
 			}
 			try {
@@ -70,8 +95,7 @@ public class Wav {
 			WavInputStream input = null;
 			try {
 				final byte[] prefetched = audio.takePrefetchedWav(file);
-				input = prefetched != null ? new WavInputStream(new ByteArrayInputStream(prefetched), file)
-						: new WavInputStream(file);
+				input = open(prefetched, file);
 				setup(StreamUtils.copyStreamToByteArray(input, input.dataRemaining), input.channels, input.sampleRate);
 			}
 			catch (final IOException ex) {
@@ -150,7 +174,7 @@ public class Wav {
 					throw new GdxRuntimeException("WAV files must have 16 bits per sample: " + bitsPerSample);
 				}
 
-				skipFully(fmtChunkLength - 16);
+				skipFully(fmtChunkLength - 16 + (fmtChunkLength & 1));
 
 				this.dataRemaining = seekToChunk('d', 'a', 't', 'a');
 			}
@@ -174,7 +198,8 @@ public class Wav {
 				if (found) {
 					return chunkLength;
 				}
-				skipFully(chunkLength);
+				// RIFF chunks are padded to an even length.
+				skipFully(chunkLength + (chunkLength & 1));
 			}
 		}
 

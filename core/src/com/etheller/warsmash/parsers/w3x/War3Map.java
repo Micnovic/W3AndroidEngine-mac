@@ -16,6 +16,7 @@ import com.etheller.warsmash.datasources.CompoundDataSource;
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.datasources.FolderDataSource;
 import com.etheller.warsmash.datasources.GraphicsSet;
+import com.etheller.warsmash.datasources.IndependentStream;
 import com.etheller.warsmash.datasources.LayeredDataSource;
 import com.etheller.warsmash.datasources.MpqDataSource;
 import com.etheller.warsmash.parsers.w3x.doo.War3MapDoo;
@@ -193,6 +194,11 @@ public class War3Map implements DataSource {
 	@Override
 	public File getDirectory(final String filepath) throws IOException {
 		return this.dataSource.getDirectory(filepath);
+	}
+
+	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		return this.dataSource.opener(filepath);
 	}
 
 	@Override

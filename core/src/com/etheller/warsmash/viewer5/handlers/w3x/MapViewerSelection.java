@@ -86,7 +86,7 @@ final class MapViewerSelection {
 
 	static void deselect(final War3MapViewer viewer) {
 		for (final String key : viewer.selectedSplatModelKeys) {
-			viewer.terrain.removeSplatBatchModel(key);
+			viewer.terrain.releaseSplatBatchModel(key);
 		}
 		for (final RenderWidget unit : viewer.selected) {
 			unit.unassignSelectionCircle();
@@ -220,7 +220,7 @@ final class MapViewerSelection {
 
 	static void clearUnitMouseOverHighlight(final War3MapViewer viewer) {
 		for (final String modelKey : viewer.mouseHighlightSplatModelKeys) {
-			viewer.terrain.removeSplatBatchModel(modelKey);
+			viewer.terrain.releaseSplatBatchModel(modelKey);
 		}
 		for (final RenderWidget widget : viewer.mouseHighlightWidgets) {
 			widget.unassignSelectionPreviewHighlight();

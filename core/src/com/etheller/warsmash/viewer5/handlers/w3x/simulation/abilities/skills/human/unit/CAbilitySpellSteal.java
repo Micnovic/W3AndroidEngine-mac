@@ -13,7 +13,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.autocast.
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.autocast.CAutocastAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityTargetSpellBase;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CBuffTimed;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
@@ -25,8 +24,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringE
 /**
  * Spell Steal (Spell Breaker): takes the newest positive buff from an enemy and gives it to the nearest friendly
  * unit around the target, or the newest negative buff from a friendly unit to the nearest enemy around it. Only
- * dispellable timed buffs move, and they keep their remaining time. With no one to receive it the buff is only
- * removed.
+ * dispellable timed buffs move, and they start their full duration on the receiver. With no one to receive it the
+ * buff is only removed.
  */
 public class CAbilitySpellSteal extends CAbilityTargetSpellBase implements CAutocastAbility {
 	private float areaOfEffect;
@@ -130,9 +129,6 @@ public class CAbilitySpellSteal extends CAbilityTargetSpellBase implements CAuto
 		if (buff == null) {
 			return false;
 		}
-		if ((recipient != null) && (buff instanceof CBuffTimed)) {
-			((CBuffTimed) buff).carryRemainingTime(simulation);
-		}
 		targetUnit.remove(simulation, buff);
 		if (recipient != null) {
 			recipient.add(simulation, buff);
@@ -157,6 +153,11 @@ public class CAbilitySpellSteal extends CAbilityTargetSpellBase implements CAuto
 	@Override
 	public boolean isAutoCastOn() {
 		return this.autoCastOn;
+	}
+
+	@Override
+	public boolean autocastsWhenCalledIntoFight() {
+		return false;
 	}
 
 	@Override

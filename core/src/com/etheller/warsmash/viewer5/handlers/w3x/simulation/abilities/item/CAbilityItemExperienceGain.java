@@ -4,16 +4,11 @@ import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityActivationReceiver;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 
 public class CAbilityItemExperienceGain extends AbstractCAbilityItemInstantUse {
 	private int xpToGain;

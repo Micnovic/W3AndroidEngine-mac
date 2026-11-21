@@ -53,7 +53,10 @@ public abstract class CBuffAuraBase extends AbstractCBuff {
 	public void onTick(final CSimulation game, final CUnit unit) {
 		final int gameTurnTick = game.getGameTurnTick();
 		if (gameTurnTick >= this.nextCheckTick) {
-			if (!this.auraSourceUnit.canReach(unit, this.auraSourceAbility.getAreaOfEffect())) {
+			// A dead or removed source, or one that lost the aura, no longer renews it.
+			if (this.auraSourceUnit.isDead() || this.auraSourceUnit.isRemovedFromGame()
+					|| !this.auraSourceUnit.getAbilities().contains(this.auraSourceAbility)
+					|| !this.auraSourceUnit.canReach(unit, this.auraSourceAbility.getAreaOfEffect())) {
 				unit.remove(game, this);
 			}
 			this.nextCheckTick = gameTurnTick + AURA_BUFF_DECAY_TIME_TICKS;

@@ -44,6 +44,18 @@ public class StringFrame extends AbstractRenderableFrame {
 	private final Color fontDisabledColor;
 	private final Color fontColor;
 	private boolean passwordField;
+	// What the internal frames were last laid out from: positionBounds runs for every frame of a tree each time it
+	// moves, and the same text in the same frame lays out the same lines.
+	private String layoutText;
+	private BitmapFont layoutFont;
+	private float layoutFontScale;
+	private float layoutFontLineHeight;
+	private float layoutWidth;
+	private float layoutLineSpacing;
+	private TextJustify layoutJustifyH;
+	private TextJustify layoutLineJustifyH;
+	private TextJustify layoutJustifyV;
+	private Color layoutColor;
 
 	public StringFrame(final String name, final UIFrame parent, final Color color, final TextJustify justifyH,
 			final TextJustify justifyV, final BitmapFont frameFont, final String text, final Color fontHighlightColor,
@@ -207,11 +219,32 @@ public class StringFrame extends AbstractRenderableFrame {
 	 * "|n" breaks the line; spaces next to them are kept. Text wraps at spaces when the frame has a width.
 	 */
 	private void createInternalFrames(final GlyphLayout glyphLayout) {
+		final float wrapWidth = getAssignedWidth();
+		final float fontScale = this.frameFont.getScaleX();
+		final float fontLineHeight = this.frameFont.getLineHeight();
+		final float lineSpacing = getLineSpacing();
+		if ((this.layoutText != null) && this.layoutText.equals(this.displayText) && (this.layoutFont == this.frameFont)
+				&& (this.layoutFontScale == fontScale) && (this.layoutFontLineHeight == fontLineHeight)
+				&& (this.layoutWidth == wrapWidth) && (this.layoutLineSpacing == lineSpacing)
+				&& (this.layoutJustifyH == this.justifyH) && (this.layoutLineJustifyH == this.lineJustifyH)
+				&& (this.layoutJustifyV == this.justifyV) && (this.layoutColor == this.color)) {
+			return;
+		}
+		this.layoutText = this.displayText;
+		this.layoutFont = this.frameFont;
+		this.layoutFontScale = fontScale;
+		this.layoutFontLineHeight = fontLineHeight;
+		this.layoutWidth = wrapWidth;
+		this.layoutLineSpacing = lineSpacing;
+		this.layoutJustifyH = this.justifyH;
+		this.layoutLineJustifyH = this.lineJustifyH;
+		this.layoutJustifyV = this.justifyV;
+		this.layoutColor = this.color;
 		for (final SingleStringFrame internalFrame : this.internalFrames) {
 			this.internalFramesContainer.remove(internalFrame);
 		}
 		this.internalFrames.clear();
-		final LineBuilder line = new LineBuilder(glyphLayout, getAssignedWidth());
+		final LineBuilder line = new LineBuilder(glyphLayout, wrapWidth);
 		final String text = this.displayText;
 		final int length = text.length();
 		for (int i = 0; i < length; i++) {

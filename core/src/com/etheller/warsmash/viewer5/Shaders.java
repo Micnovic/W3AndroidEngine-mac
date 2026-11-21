@@ -191,6 +191,12 @@ public class Shaders {
 				"        }\r\n"
 				+ //
 				"        fogAmount = min(fogAmount, u_fogColor.a);\r\n" + //
+				// Height fog (w3i v39+): the fog thins out with world height between u_fogHeight.y (full fog) and
+				// u_fogHeight.z (none). u_fogHeight.x is 0 for every map without a height range, which skips this.
+				"        if (u_fogHeight.x > 0.5) {\r\n" + //
+				"          fogAmount *= clamp((u_fogHeight.z - v_fogZ) / (u_fogHeight.z - u_fogHeight.y), 0.0, 1.0);\r\n"
+				+ //
+				"        }\r\n" + //
 				rgbModification + //
 				"      }\r\n";
 	}

@@ -149,6 +149,40 @@ class Etc2EncoderTest {
 		}
 	}
 
+	@Test
+	void bigImageOnSeveralThreadsMatchesItsRowsEncodedAlone() {
+		final int width = 200;
+		final int height = 160;
+		final Random random = new Random(21);
+		final byte[] rgba = new byte[width * height * 4];
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				final int i = ((y * width) + x) * 4;
+				final int smooth = (x * 3) + (y * 2);
+				rgba[i] = (byte) (smooth + random.nextInt(((x / 20) * 3) + 1));
+				rgba[i + 1] = (byte) (255 - smooth + random.nextInt(((y / 20) * 4) + 1));
+				rgba[i + 2] = (byte) (((x / 7) + (y / 5)) % 3 == 0 ? random.nextInt(256) : smooth);
+				rgba[i + 3] = (byte) (((x / 16) & 1) == 0 ? 255 : random.nextInt(256));
+			}
+		}
+		final byte[] rows = new byte[width * 4 * 4];
+		for (int kind = 0; kind < 3; kind++) {
+			final byte[] whole = kind == 0 ? Etc2Encoder.encodeRgb(rgba, width, height)
+					: kind == 1 ? Etc2Encoder.encodeRgba(rgba, width, height) : Etc2Encoder.encodeRg(rgba, width, height);
+			assertTrue(java.util.Arrays.equals(whole, kind == 0 ? Etc2Encoder.encodeRgb(rgba, width, height)
+					: kind == 1 ? Etc2Encoder.encodeRgba(rgba, width, height) : Etc2Encoder.encodeRg(rgba, width, height)));
+			// one row of blocks is too small for the helper threads, so this is the serial result
+			final int rowBytes = (width / 4) * (kind == 0 ? 8 : 16);
+			for (int row = 0; row < (height / 4); row++) {
+				System.arraycopy(rgba, row * rows.length, rows, 0, rows.length);
+				final byte[] alone = kind == 0 ? Etc2Encoder.encodeRgb(rows, width, 4)
+						: kind == 1 ? Etc2Encoder.encodeRgba(rows, width, 4) : Etc2Encoder.encodeRg(rows, width, 4);
+				assertTrue(java.util.Arrays.equals(alone, java.util.Arrays.copyOfRange(whole, row * rowBytes,
+						(row + 1) * rowBytes)), "kind " + kind + " row " + row);
+			}
+		}
+	}
+
 	private static long crc(final byte[] bytes) {
 		final java.util.zip.CRC32 crc = new java.util.zip.CRC32();
 		crc.update(bytes, 0, bytes.length);

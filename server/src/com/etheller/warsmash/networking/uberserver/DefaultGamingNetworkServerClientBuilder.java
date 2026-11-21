@@ -2,7 +2,6 @@ package com.etheller.warsmash.networking.uberserver;
 
 import java.nio.ByteBuffer;
 
-import net.warsmash.nio.channels.WritableOutput;
 import net.warsmash.nio.channels.WritableSocketOutput;
 import net.warsmash.uberserver.GamingNetworkClientToServerListener;
 import net.warsmash.uberserver.HostedGameVisibility;

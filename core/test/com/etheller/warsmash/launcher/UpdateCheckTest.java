@@ -211,4 +211,81 @@ class UpdateCheckTest {
 			System.clearProperty(UpdateCheck.FAKE_PROPERTY);
 		}
 	}
+
+	@Test
+	void theTagComesFromTheRedirectOfTheLatestPage() {
+		final UpdateCheck.Release release = UpdateCheck
+				.releaseFromLocation("https://github.com/nikoltu/W3AndroidEngine/releases/tag/v0.4.12");
+		assertNotNull(release);
+		assertEquals("v0.4.12", release.tag);
+		assertEquals("https://github.com/nikoltu/W3AndroidEngine/releases/tag/v0.4.12", release.pageUrl);
+		assertFalse(release.hasApk());
+		assertFalse(release.isUnknown());
+		assertEquals("v0.4.12-hotfix2",
+				UpdateCheck.releaseFromLocation("/nikoltu/W3AndroidEngine/releases/tag/v0.4.12-hotfix2?x=1#y").tag);
+		assertEquals("v0.4.12", UpdateCheck.releaseFromLocation("https://github.com/a/b/releases/tag/v0.4.12/").tag);
+		assertNull(UpdateCheck.releaseFromLocation(null));
+		assertNull(UpdateCheck.releaseFromLocation("https://github.com/a/b/releases"));
+		assertNull(UpdateCheck.releaseFromLocation("https://github.com/a/b/releases/tag/"));
+		assertNull(UpdateCheck.releaseFromLocation("https://github.com/a/b/releases/tag/nightly"));
+		assertNull(UpdateCheck.releaseFromLocation("https://github.com/login?return_to=/a/b/releases/latest"));
+	}
+
+	@Test
+	void onlyALimitAnswerIsARateLimit() {
+		assertTrue(UpdateCheck.isRateLimited(429, null, null));
+		assertTrue(UpdateCheck.isRateLimited(403, "0", null));
+		assertTrue(UpdateCheck.isRateLimited(403, null, "{\"message\":\"API rate limit exceeded for 1.2.3.4.\"}"));
+		assertFalse(UpdateCheck.isRateLimited(403, "12", "{\"message\":\"Forbidden\"}"));
+		assertFalse(UpdateCheck.isRateLimited(403, null, null));
+		assertFalse(UpdateCheck.isRateLimited(404, "0", "rate limit"));
+		assertFalse(UpdateCheck.isRateLimited(500, null, null));
+		assertFalse(UpdateCheck.isRateLimited(200, "0", null));
+	}
+
+	@Test
+	void aReleaseOfUnknownVersionIsOfferedOncePerSession() {
+		UpdateCheck.resetSession();
+		try {
+			final UpdateCheck.Release unknown = UpdateCheck.unknownRelease();
+			assertTrue(unknown.isUnknown());
+			assertFalse(unknown.hasApk());
+			assertEquals("https://github.com/nikoltu/W3AndroidEngine/releases", unknown.pageUrl);
+			assertTrue(UpdateCheck.offers("0.3.11", unknown, null, true));
+			assertTrue(UpdateCheck.offers("0.3.11", unknown, null, false));
+			assertTrue(UpdateCheck.offers("", unknown, "v0.3.11", true));
+			assertTrue(UpdateCheck.offers("0.3.11", 311, unknown, "", true));
+			UpdateCheck.dismissUnknown();
+			assertFalse(UpdateCheck.offers("0.3.11", unknown, null, true));
+			assertFalse(UpdateCheck.offers("0.3.11", unknown, null, false));
+			assertFalse(UpdateCheck.offers("0.3.11", 311, unknown, "", false));
+		}
+		finally {
+			UpdateCheck.resetSession();
+		}
+	}
+
+	@Test
+	void theFakeRateLimitGivesTheUnknownOrTheNamedRelease() {
+		UpdateCheck.resetSession();
+		try {
+			System.setProperty(UpdateCheck.FAKE_PROPERTY, "ratelimit");
+			assertTrue(UpdateCheck.fetchLatest(1).isUnknown());
+			System.setProperty(UpdateCheck.FAKE_PROPERTY, "ratelimit:bad");
+			assertTrue(UpdateCheck.fetchLatest(1).isUnknown());
+			System.setProperty(UpdateCheck.FAKE_PROPERTY, "ratelimit:v0.4.99");
+			final UpdateCheck.Release named = UpdateCheck.fetchLatest(1);
+			assertFalse(named.isUnknown());
+			assertEquals("v0.4.99", named.tag);
+			assertTrue(UpdateCheck.offers("0.4.12", named, null, true));
+			assertTrue(UpdateCheck.offers("0.4.12", named, null, false));
+			assertFalse(UpdateCheck.offers("0.4.99", named, null, false));
+			assertFalse(UpdateCheck.offers("0.4.99", named, null, true));
+			assertFalse(UpdateCheck.offers("0.4.12", named, "v0.4.99", true));
+		}
+		finally {
+			System.clearProperty(UpdateCheck.FAKE_PROPERTY);
+			UpdateCheck.resetSession();
+		}
+	}
 }

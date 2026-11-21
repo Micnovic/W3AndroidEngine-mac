@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.badlogic.gdx.Gdx;
@@ -13,6 +14,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Bounds;
@@ -43,12 +45,12 @@ public class MdxComplexInstance extends ModelInstance {
 	private static final Vector3 intersectionHeap = new Vector3();
 	private static final Quaternion inverseRotationHeap = new Quaternion();
 
-	public List<LightInstance> lights = new ArrayList<>();
-	public List<AttachmentInstance> attachments = new ArrayList<>();
-	public List<ParticleEmitter> particleEmitters = new ArrayList<>();
-	public List<ParticleEmitter2> particleEmitters2 = new ArrayList<>();
-	public List<RibbonEmitter> ribbonEmitters = new ArrayList<>();
-	public List<EventObjectEmitter<?, ?>> eventObjectEmitters = new ArrayList<>();
+	public List<LightInstance> lights = Collections.emptyList();
+	public List<AttachmentInstance> attachments = Collections.emptyList();
+	public List<ParticleEmitter> particleEmitters = Collections.emptyList();
+	public List<ParticleEmitter2> particleEmitters2 = Collections.emptyList();
+	public List<RibbonEmitter> ribbonEmitters = Collections.emptyList();
+	public List<EventObjectEmitter<?, ?>> eventObjectEmitters = Collections.emptyList();
 	public MdxNode[] nodes;
 	public SkeletalNode[] sortedNodes;
 	public int frame = 0;
@@ -60,9 +62,14 @@ public class MdxComplexInstance extends ModelInstance {
 	public boolean sequenceEnded = false;
 	/** Called when the sequence reaches its end, so an owner that only reacts to the end need not poll every frame. */
 	public Runnable sequenceEndObserver;
+	/** Called when the model of an instance made before its file was read is built, see {@link #isWaiting()}. */
+	public Runnable modelLoadedObserver;
+	private int teamColor = -1;
 	public float[] vertexColor = { 1, 1, 1, 1 };
 	/** Whether this model casts its shape as a shadow onto the ground below it. */
 	public boolean groundShadow;
+	/** Trees and other scenery whose shadow is drawn after those of the units, when there is room for it. */
+	public boolean sceneryShadow;
 	// Particles do not spawn when the sequence is -1, or when the sequence finished
 	// and it's not repeating
 	public boolean allowParticleSpawn = false;
@@ -75,6 +82,8 @@ public class MdxComplexInstance extends ModelInstance {
 	public float[][] geosetColors;
 	public float[] layerAlphas;
 	public int[] layerTextures;
+	/** What a layer without a texture animation shows, shared by all of them as nothing writes to it. */
+	private static final float[] UV_NOT_ANIMATED = { 0, 0, 0, 1, 1 };
 	public float[][] uvAnims;
 	public Matrix4[] worldMatrices;
 	// Filled first and copied in one call: one put per float into a direct buffer is slow on Android.
@@ -86,7 +95,11 @@ public class MdxComplexInstance extends ModelInstance {
 	private BoneAtlas packedAtlas;
 	private int packedStamp;
 	private int packedBase;
-	public Texture[] replaceableTextures = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
+	/** Nothing is replaced in most instances: they read this one array, which nothing writes to. */
+	private static final Texture[] NO_REPLACEABLE_TEXTURES = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
+	public Texture[] replaceableTextures = NO_REPLACEABLE_TEXTURES;
+	/** Layers of the team glow (replaceable texture 2) are left out of the drawing. */
+	public boolean teamGlowHidden;
 	// Only instances of a team colored or skinned HD model have these.
 	public Texture[] replaceableTextures_diffuse;
 	public Texture[] replaceableTextures_normal;
@@ -94,10 +107,16 @@ public class MdxComplexInstance extends ModelInstance {
 	private float animationSpeed = 1.0f;
 	private float blendTime;
 	private float blendTimeRemaining;
+	private boolean blendedLastUpdate;
 	public boolean additiveOverrideMeshMode = false;
 	/** A still copy of a model (a fog ghost) shows no particles, ribbons or event effects of its own. */
 	public boolean emittersSuppressed = false;
 	private boolean hasAnyUnselectableMesh = false;
+
+	/** Most instances have none of a kind of these, so they share the empty list until the first one is added. */
+	private static <T> List<T> growable(final List<T> list) {
+		return list == Collections.EMPTY_LIST ? new ArrayList<>(2) : list;
+	}
 
 	// Models whose instances are attaching their attachment models right now (the instances load on one thread).
 	private static final List<MdxModel> attachingModels = new ArrayList<>();
@@ -124,7 +143,7 @@ public class MdxComplexInstance extends ModelInstance {
 		for (int i = 0, l = model.layers.size(); i < l; i++) {
 			this.layerAlphas[i] = 0;
 			this.layerTextures[i] = 0;
-			this.uvAnims[i] = new float[5];
+			this.uvAnims[i] = model.layers.get(i).textureAnimation == null ? UV_NOT_ANIMATED : new float[5];
 		}
 
 		// Create the needed amount of shared nodes.
@@ -136,7 +155,8 @@ public class MdxComplexInstance extends ModelInstance {
 
 		// A shared typed array for all world matrices of the internal nodes.
 		this.worldMatrices = ((List<Matrix4>) sharedNodeData[1]).toArray(new Matrix4[0]);
-		this.worldMatricesCopyArray = new float[16 * this.worldMatrices.length];
+		// only the bones are drawn with, and they come first among the nodes
+		this.worldMatricesCopyArray = new float[16 * model.bones.size()];
 
 		// And now initialize all of the nodes and objects
 		for (final Bone bone : model.bones) {
@@ -145,6 +165,7 @@ public class MdxComplexInstance extends ModelInstance {
 
 		for (final Light light : model.lights) {
 			final LightInstance lightInstance = new LightInstance(this, light);
+			this.lights = growable(this.lights);
 			this.lights.add(lightInstance);
 			this.initNode(this.nodes, this.nodes[nodeIndex++], light, lightInstance);
 		}
@@ -162,6 +183,7 @@ public class MdxComplexInstance extends ModelInstance {
 			if ((attachment.internalModel != null) && !attachingModels.contains(attachment.internalModel)) {
 				attachmentInstance = new AttachmentInstance(this, attachment);
 
+				this.attachments = growable(this.attachments);
 				this.attachments.add(attachmentInstance);
 			}
 
@@ -171,6 +193,7 @@ public class MdxComplexInstance extends ModelInstance {
 		for (final ParticleEmitterObject emitterObject : model.particleEmitters) {
 			final ParticleEmitter emitter = new ParticleEmitter(this, emitterObject);
 
+			this.particleEmitters = growable(this.particleEmitters);
 			this.particleEmitters.add(emitter);
 
 			this.initNode(this.nodes, this.nodes[nodeIndex++], emitterObject, emitter);
@@ -179,6 +202,7 @@ public class MdxComplexInstance extends ModelInstance {
 		for (final ParticleEmitter2Object emitterObject : model.particleEmitters2) {
 			final ParticleEmitter2 emitter = new ParticleEmitter2(this, emitterObject);
 
+			this.particleEmitters2 = growable(this.particleEmitters2);
 			this.particleEmitters2.add(emitter);
 
 			this.initNode(this.nodes, this.nodes[nodeIndex++], emitterObject, emitter);
@@ -187,6 +211,7 @@ public class MdxComplexInstance extends ModelInstance {
 		for (final RibbonEmitterObject emitterObject : model.ribbonEmitters) {
 			final RibbonEmitter emitter = new RibbonEmitter(this, emitterObject);
 
+			this.ribbonEmitters = growable(this.ribbonEmitters);
 			this.ribbonEmitters.add(emitter);
 
 			this.initNode(this.nodes, this.nodes[nodeIndex++], emitterObject, emitter);
@@ -209,6 +234,7 @@ public class MdxComplexInstance extends ModelInstance {
 				emitter = new EventObjectSndEmitter(this, emitterObject);
 			}
 
+			this.eventObjectEmitters = growable(this.eventObjectEmitters);
 			this.eventObjectEmitters.add(emitter);
 
 			this.initNode(this.nodes, this.nodes[nodeIndex++], emitterObject, emitter);
@@ -280,7 +306,7 @@ public class MdxComplexInstance extends ModelInstance {
 	private void initNode(final MdxNode[] nodes, final MdxNode node, final GenericObject genericObject,
 			final UpdatableObject object) {
 		node.name = genericObject.name;
-		node.pivot.set(genericObject.pivot);
+		node.pivot = genericObject.pivotVector();
 
 		final int parentIndex = genericObject.parentId == -1 ? -1
 				: ((MdxModel) this.model).nodeIndexOf(genericObject.parentId);
@@ -291,6 +317,9 @@ public class MdxComplexInstance extends ModelInstance {
 			node.parent = nodes[parentIndex];
 		}
 
+		node.shareDefaultPose(!genericObject.hasTimeline(AnimationMap.KGTR.getWar3id()),
+				!genericObject.hasTimeline(AnimationMap.KGRT.getWar3id()),
+				!genericObject.hasTimeline(AnimationMap.KGSC.getWar3id()));
 		node.dontInheritTranslation = genericObject.dontInheritTranslation > 0;
 		node.dontInheritScaling = genericObject.dontInheritScaling > 0;
 		node.dontInheritRotation = genericObject.dontInheritRotation > 0;
@@ -335,7 +364,8 @@ public class MdxComplexInstance extends ModelInstance {
 	 * @return whether any node transformation was recalculated, so the bone texture needs an upload
 	 */
 	public boolean updateNodes(final float dt, final boolean forced) {
-		if (!this.model.ok) {
+		// A model that finishes loading late loads its instances afterwards; until then they have no nodes.
+		if (!this.model.ok || (this.sortedNodes == null)) {
 			return false;
 		}
 		boolean updated = false;
@@ -346,6 +376,14 @@ public class MdxComplexInstance extends ModelInstance {
 		final MdxModel model = (MdxModel) this.model;
 		final List<GenericObject> sortedGenericObjects = model.sortedGenericObjects;
 		final Scene scene = this.scene;
+		final float blendTimeRatio = this.blendTimeRemaining / this.blendTime;
+		final boolean blending = !Float.isNaN(blendTimeRatio) && (blendTimeRatio > 0);
+		// A blend changes every node it covers each frame, and its end puts them back on the sequence's own pose.
+		final boolean blendChanged = blending || this.blendedLastUpdate;
+		this.blendedLastUpdate = blending;
+
+		GeosetAnimation lastVisibilitySource = null;
+		float lastVisibility = 0;
 
 		// Update the nodes
 		for (int i = 0, l = sortedNodes.length; i < l; i++) {
@@ -353,10 +391,26 @@ public class MdxComplexInstance extends ModelInstance {
 			final SkeletalNode node = sortedNodes[i];
 			final GenericNode parent = node.parent;
 
-			genericObject.getVisibility(visibilityHeap, sequence, frame, counter);
+			// The bones of a model mostly follow the alpha of a few geoset animations, one after another in the
+			// hierarchy, so a bone with the same one as the last takes its value.
+			final GeosetAnimation visibilitySource = genericObject instanceof Bone
+					? ((Bone) genericObject).getVisibilitySource()
+					: null;
+			if ((visibilitySource != null) && (visibilitySource == lastVisibilitySource)) {
+				visibilityHeap[0] = lastVisibility;
+			}
+			else {
+				genericObject.getVisibility(visibilityHeap, sequence, frame, counter);
+				if (visibilitySource != null) {
+					lastVisibilitySource = visibilitySource;
+					lastVisibility = visibilityHeap[0];
+				}
+			}
 
 			final boolean objectVisible = visibilityHeap[0] > 0;
 			final boolean nodeVisible = forced || (parent.visible && objectVisible);
+			// A node was not followed while hidden, so it is worked out again when it shows.
+			final boolean shown = nodeVisible && !node.visible;
 
 			node.visible = nodeVisible;
 
@@ -367,13 +421,16 @@ public class MdxComplexInstance extends ModelInstance {
 			if (nodeVisible) {
 				boolean wasDirty = false;
 				final GenericObject.Variants variants = genericObject.variants;
+				// A face bone is read from the sequence every frame: its pose is overwritten below and the sequence's is
+				// what the line blends in from and out to.
+				final boolean faceDriven = (facePlayback != null) && facePlayback.drives(i);
+				if (faceDriven) {
+					node.ownLocalPose();
+				}
 				final Vector3 localLocation = node.localLocation;
 				final Quaternion localRotation = node.localRotation;
 				final Quaternion overrideWorldRotation = node.overrideWorldRotation;
 				final Vector3 localScale = node.localScale;
-				// A face bone is read from the sequence every frame: its pose is overwritten below and the sequence's is
-				// what the line blends in from and out to.
-				final boolean faceDriven = (facePlayback != null) && facePlayback.drives(i);
 
 				// Only update the local node data if there is a need to
 				if (forced || faceDriven || variants.generic[sequence]) {
@@ -421,14 +478,14 @@ public class MdxComplexInstance extends ModelInstance {
 				}
 
 				final boolean wasReallyDirty = forced || wasDirty || parent.wasDirty || genericObject.anyBillboarding
-						|| (overrideWorldRotation != null);
+						|| (overrideWorldRotation != null) || blendChanged || shown;
 
 				node.wasDirty = wasReallyDirty;
 
 				// If this is a forced update, or this node's local data was updated, or the
 				// parent node was updated, do a full world update.
 				if (wasReallyDirty) {
-					node.recalculateTransformation(scene, this.blendTimeRemaining / this.blendTime);
+					node.recalculateTransformation(scene, blendTimeRatio);
 					updated = true;
 				}
 
@@ -543,7 +600,7 @@ public class MdxComplexInstance extends ModelInstance {
 					uvAnim[4] = scaleHeap[0];
 				}
 			}
-			else if (forced) {
+			else if (forced && (uvAnim != UV_NOT_ANIMATED)) {
 				uvAnim[0] = 0;
 				uvAnim[1] = 0;
 				uvAnim[2] = 0;
@@ -577,7 +634,8 @@ public class MdxComplexInstance extends ModelInstance {
 	public void updateBoneTexture() {
 		if (this.hasBones) {
 			final float[] copy = this.worldMatricesCopyArray;
-			for (int i = 0, l = this.worldMatrices.length; i < l; i++) {
+			// Only the bones are drawn with (they come first among the nodes); the textures hold no more of them.
+			for (int i = 0, l = ((MdxModel) this.model).bones.size(); i < l; i++) {
 				final float[] val = this.worldMatrices[i].val;
 				final int base = i * 16;
 				copy[base + 0] = val[Matrix4.M00];
@@ -610,6 +668,19 @@ public class MdxComplexInstance extends ModelInstance {
 		}
 	}
 
+	/** The scene's bone atlas this instance's bones are packed in, or null when it has its own bone texture. */
+	DataTexture packedBoneTexture() {
+		if (this.hasBones && (this.packedAtlas != null) && (this.packedStamp == this.packedAtlas.getStamp())
+				&& (this.packedBase != -1)) {
+			return this.packedAtlas.getTexture();
+		}
+		return null;
+	}
+
+	int packedBoneBase() {
+		return this.packedBase;
+	}
+
 	/**
 	 * Returns false for a model without bones.
 	 */
@@ -634,8 +705,9 @@ public class MdxComplexInstance extends ModelInstance {
 				this.model.viewer.trackDataTexture(this.boneTexture);
 			}
 			if (this.boneTextureStale) {
-				final FloatBuffer upload = boneUploadBuffer(boneTextureTexels(this.worldMatrices.length) * 4);
-				upload.put(this.worldMatricesCopyArray);
+				final int bones = ((MdxModel) this.model).bones.size();
+				final FloatBuffer upload = boneUploadBuffer(boneTextureTexels(bones) * 4);
+				upload.put(this.worldMatricesCopyArray, 0, bones * 16);
 				while (upload.hasRemaining()) {
 					upload.put(0f);
 				}
@@ -704,6 +776,33 @@ public class MdxComplexInstance extends ModelInstance {
 	public void advanceClock(final float dt) {
 		if (this.rendered && !this.paused) {
 			advanceSequenceClock(dt);
+		}
+	}
+
+	/**
+	 * More sequences than this in one catch-up are not played through one by one: whoever picks them gets a fresh pick
+	 * and the rest of the time is dropped, so a doodad seen again after minutes does not stall the frame.
+	 */
+	private static final int MAX_CATCH_UP_SEQUENCES = 24;
+
+	@Override
+	public void catchUpClock(final float seconds) {
+		float remaining = seconds;
+		for (int i = 0; (i < MAX_CATCH_UP_SEQUENCES) && (remaining > 0) && this.rendered && !this.paused
+				&& endsSequence(); i++) {
+			final MdxModel model = (MdxModel) this.model;
+			final float frameTime = 1000 * this.animationSpeed;
+			if (!(frameTime > 0) || (this.sequence >= model.sequences.size())) {
+				return;
+			}
+			final long[] interval = model.sequences.get(this.sequence).getInterval();
+			final float untilEnd = (((interval[1] - 1) - this.floatingFrame) / frameTime) + 0.0001f;
+			if (untilEnd > remaining) {
+				advanceSequenceClock(remaining);
+				return;
+			}
+			advanceSequenceClock(Math.max(untilEnd, 0.0001f));
+			remaining -= untilEnd;
 		}
 	}
 
@@ -801,6 +900,10 @@ public class MdxComplexInstance extends ModelInstance {
 
 	@Override
 	public void updateAnimations(final float dt) {
+		if (this.sortedNodes == null) {
+			// the model is built but this instance is not loaded yet
+			return;
+		}
 		final int sequenceId = this.sequence;
 
 		advanceSequenceClock(dt);
@@ -865,10 +968,11 @@ public class MdxComplexInstance extends ModelInstance {
 	 * Set the team color of this instance.
 	 */
 	public MdxComplexInstance setTeamColor(final int id) {
-		this.replaceableTextures[1] = (Texture) this.model.viewer.load(
+		this.teamColor = id;
+		ownReplaceableTextures()[1] = (Texture) this.model.viewer.loadInstanceTexture(
 				"ReplaceableTextures\\" + ReplaceableIds.getPathString(1) + ReplaceableIds.getIdString(id) + ".blp",
 				PathSolver.DEFAULT, null);
-		this.replaceableTextures[2] = (Texture) this.model.viewer.load(
+		ownReplaceableTextures()[2] = (Texture) this.model.viewer.loadInstanceTexture(
 				"ReplaceableTextures\\" + ReplaceableIds.getPathString(2) + ReplaceableIds.getIdString(id) + ".blp",
 				PathSolver.DEFAULT, null);
 		for (final AttachmentInstance attachmentInstance : this.attachments) {
@@ -880,9 +984,35 @@ public class MdxComplexInstance extends ModelInstance {
 	}
 
 	@Override
+	protected void modelLoaded() {
+		if (this.teamColor != -1) {
+			setTeamColor(this.teamColor);
+		}
+		if (this.modelLoadedObserver != null) {
+			final Runnable observer = this.modelLoadedObserver;
+			this.modelLoadedObserver = null;
+			observer.run();
+		}
+	}
+
+	@Override
 	public void setReplaceableTexture(final int replaceableTextureId, final String replaceableTextureFile) {
-		this.replaceableTextures[replaceableTextureId] = (Texture) this.model.viewer.load(replaceableTextureFile,
-				PathSolver.DEFAULT, null);
+		ownReplaceableTextures()[replaceableTextureId] = (Texture) this.model.viewer
+				.loadInstanceTexture(replaceableTextureFile, PathSolver.DEFAULT, null);
+	}
+
+	private Texture[] ownReplaceableTextures() {
+		if (this.replaceableTextures == NO_REPLACEABLE_TEXTURES) {
+			this.replaceableTextures = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
+		}
+		return this.replaceableTextures;
+	}
+
+	public void copyReplaceableTexturesFrom(final MdxComplexInstance source) {
+		if (source.replaceableTextures != NO_REPLACEABLE_TEXTURES) {
+			System.arraycopy(source.replaceableTextures, 0, ownReplaceableTextures(), 0,
+					source.replaceableTextures.length);
+		}
 	}
 
 	@Override
@@ -893,11 +1023,11 @@ public class MdxComplexInstance extends ModelInstance {
 			this.replaceableTextures_orm = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 		}
 		this.replaceableTextures_diffuse[replaceableTextureId] = (Texture) this.model.viewer
-				.load(replaceableTextureFile + "_diffuse.dds", PathSolver.DEFAULT, null);
+				.loadInstanceTexture(replaceableTextureFile + "_diffuse.dds", PathSolver.DEFAULT, null);
 		this.replaceableTextures_normal[replaceableTextureId] = (Texture) this.model.viewer
-				.load(replaceableTextureFile + "_normal.dds", PathSolver.DEFAULT, null);
+				.loadInstanceTexture(replaceableTextureFile + "_normal.dds", PathSolver.DEFAULT, null);
 		this.replaceableTextures_orm[replaceableTextureId] = (Texture) this.model.viewer
-				.load(replaceableTextureFile + "_orm.dds", PathSolver.DEFAULT, null);
+				.loadInstanceTexture(replaceableTextureFile + "_orm.dds", PathSolver.DEFAULT, null);
 	}
 
 	/**
@@ -1087,7 +1217,7 @@ public class MdxComplexInstance extends ModelInstance {
 		boolean intersected = false;
 		ray.getEndPoint(intersection, 99999);
 		for (final Geoset geoset : mdxModel.geosets) {
-			if (!geoset.unselectable) {
+			if (geoset.pickVertices != null) {
 				geoset.getAlpha(alphaHeap, this.sequence, this.frame, this.counter);
 				if (alphaHeap[0] > 0) {
 					if (CollisionShape.intersectRayTriangles(ray, this, geoset.pickVertices, geoset.pickFaces, 3,
@@ -1124,11 +1254,10 @@ public class MdxComplexInstance extends ModelInstance {
 		}
 		if (collisionShapes.isEmpty() || alwaysUseMesh) {
 			for (final Geoset geoset : mdxModel.geosets) {
-				if (!geoset.unselectable) {
+				if (geoset.pickVertices != null) {
 					geoset.getAlpha(alphaHeap, this.sequence, this.frame, this.counter);
 					if (alphaHeap[0] > 0) {
-						if (CollisionShape.intersectRayTriangles(ray, this, geoset.pickVertices, geoset.pickFaces, 3,
-								intersection)) {
+						if (CollisionShape.intersectRayTriangles(ray, this, geoset, intersection)) {
 							return true;
 						}
 					}

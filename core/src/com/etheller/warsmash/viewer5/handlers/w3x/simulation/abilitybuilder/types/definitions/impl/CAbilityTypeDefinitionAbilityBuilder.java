@@ -34,7 +34,9 @@ public class CAbilityTypeDefinitionAbilityBuilder
 			for (int level = 1; level <= levels; level++) {
 				levelData.add(createLevelData(abilityEditorData, level));
 			}
-			return innerCreateAbilityType(alias, abilityEditorData, levelData);
+			final CAbilityType<?> abilityType = innerCreateAbilityType(alias, abilityEditorData, levelData);
+			attachLevelDataSource(abilityType, abilityEditorData);
+			return abilityType;
 		} else {
 			return innerCreateAbilityType(alias, null, null);
 		}

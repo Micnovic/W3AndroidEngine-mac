@@ -89,7 +89,7 @@ public final class GameDataConstants {
 		return this.catchCursor;
 	}
 
-	public int mapGameVersion(final String mapFileName, final long gameDataVersion) {
-		return WarsmashConstants.mapGameVersion(mapFileName, gameDataVersion, this.gameVersion);
+	public int mapGameVersion(final String mapFileName, final long gameDataVersion, final boolean campaignGame) {
+		return WarsmashConstants.mapGameVersion(mapFileName, gameDataVersion, campaignGame, this.gameVersion);
 	}
 }

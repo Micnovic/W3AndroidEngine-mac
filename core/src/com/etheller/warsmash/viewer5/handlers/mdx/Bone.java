@@ -26,6 +26,11 @@ public class Bone extends GenericObject {
 		this.geosetAnimation = geosetAnimation;
 	}
 
+	/** Where this bone's visibility comes from, which many bones of a model share; null when it is always shown. */
+	GeosetAnimation getVisibilitySource() {
+		return this.geosetAnimation;
+	}
+
 	@Override
 	public int getVisibility(final float[] out, final int sequence, final int frame, final int counter) {
 		if (this.geosetAnimation != null) {

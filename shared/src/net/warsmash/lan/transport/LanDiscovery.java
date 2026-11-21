@@ -48,6 +48,9 @@ public final class LanDiscovery implements LanLoop.Handler {
 	private final LanNetwork network;
 	private final int bindPort;
 	private final int targetPort;
+	/** Games kept from announcements; a network flooded with made-up games cannot grow the list without end. */
+	static final int MAX_GAMES = 64;
+
 	private final Map<Long, Found> games = new HashMap<Long, Found>();
 	private DatagramChannel channel;
 	private SelectionKey key;
@@ -328,6 +331,9 @@ public final class LanDiscovery implements LanLoop.Handler {
 				return;
 			}
 			final Found known = this.games.get(info.gameId);
+			if (known == null && this.games.size() >= MAX_GAMES) {
+				return;
+			}
 			if (known != null) {
 				// the portrait travels in its own datagram; keep what it told us between announcements
 				info.portrait = known.info.portrait;
@@ -342,9 +348,13 @@ public final class LanDiscovery implements LanLoop.Handler {
 			final LanCodec.GamePortrait p = (LanCodec.GamePortrait) d;
 			final Found f = this.games.get(p.gameId);
 			if (f != null && !p.portrait.equals(f.info.portrait)) {
-				f.info.portrait = p.portrait;
+				// the listener holds the old Found; hand it a new one instead of changing it under the reader
+				final GameInfo updated = f.info.copy();
+				updated.portrait = p.portrait;
+				final Found nf = new Found(updated, f.address, f.lastSeen);
+				this.games.put(p.gameId, nf);
 				if (this.listener != null) {
-					this.listener.onGameFound(f);
+					this.listener.onGameFound(nf);
 				}
 			}
 		}

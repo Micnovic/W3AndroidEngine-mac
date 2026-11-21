@@ -23,8 +23,16 @@ public class Attachment extends GenericObject {
 
 		// Second condition is against custom resources using arbitrary paths
 		if (!path.equals("") && (path.indexOf(".mdx") != -1)) {
-			final MdxModel internalModel = (MdxModel) model.viewer.load(path, model.pathSolver,
-					model.solverParams);
+			// While the game goes on, the model of a building's birth animation or the like is read and built a few
+			// units a frame like the model that attaches it, which waits for it before its instances load.
+			final boolean deferBefore = model.viewer.setDeferModelLoads(model.viewer.isDeferModelTextures());
+			final MdxModel internalModel;
+			try {
+				internalModel = (MdxModel) model.viewer.load(path, model.pathSolver, model.solverParams);
+			}
+			finally {
+				model.viewer.setDeferModelLoads(deferBefore);
+			}
 			// Some DE birth models name themselves by their source path; an instance of such a model would
 			// attach itself without end.
 			if (internalModel != model) {

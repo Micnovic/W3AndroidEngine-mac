@@ -86,6 +86,7 @@ class UnitGroupTest {
 		group.add(removed);
 		group.add(unit(109));
 		TestObjects.set(removed, "removedFromGame", true);
+		UnitGroup.unitRemoved();
 		assertEquals(2, group.size());
 		assertFalse(group.contains(removed));
 		assertEquals(Arrays.asList(109, 101), handleIds(group));
@@ -99,6 +100,107 @@ class UnitGroupTest {
 		group.add(only);
 		assertFalse(group.isEmpty());
 		TestObjects.set(only, "removedFromGame", true);
+		UnitGroup.unitRemoved();
 		assertTrue(group.isEmpty());
+	}
+
+	/** The group as it was before the membership index: a plain list with linear scans and a prune on every read. */
+	private static final class ListGroup extends ArrayList<CUnit> {
+		@Override
+		public boolean add(final CUnit unit) {
+			int index = super.size();
+			for (int i = 0; i < super.size(); i++) {
+				final CUnit other = super.get(i);
+				if ((other == null) || UnitGroup.precedes(unit, other)) {
+					index = i;
+					break;
+				}
+			}
+			super.add(index, unit);
+			return true;
+		}
+
+		void prune() {
+			removeIf(unit -> unit.isRemovedFromGame());
+		}
+	}
+
+	@Test
+	void membershipIndexMatchesTheListUnderRandomOperations() {
+		final java.util.Random random = new java.util.Random(7);
+		final CUnit[] pool = new CUnit[40];
+		final int[] typeLast = { 9 };
+		for (int i = 0; i < pool.length; i++) {
+			pool[i] = unit(100 + random.nextInt(1000) * 2 + i * 2001);
+			if (i % 5 == 0) {
+				pool[i].setStartCreation(i, typeLast);
+			}
+		}
+		final UnitGroup group = new UnitGroup(1);
+		final ListGroup old = new ListGroup();
+		for (int step = 0; step < 5000; step++) {
+			final CUnit unit = pool[random.nextInt(pool.length)];
+			switch (random.nextInt(9)) {
+			case 0:
+			case 1:
+			case 2:
+				if (!group.contains(unit)) {
+					group.add(unit);
+				}
+				if (!old.contains(unit)) {
+					old.add(unit);
+				}
+				break;
+			case 3:
+			case 4:
+				assertEquals(old.remove(unit), group.remove(unit));
+				break;
+			case 5:
+				if (!old.isEmpty()) {
+					final int index = random.nextInt(old.size());
+					assertEquals(old.remove(index), group.remove(index));
+				}
+				break;
+			case 6: {
+				final UnitGroup other = new UnitGroup(2);
+				final ListGroup otherOld = new ListGroup();
+				for (int i = 0; i < 6; i++) {
+					final CUnit added = pool[random.nextInt(pool.length)];
+					if (!other.contains(added)) {
+						other.add(added);
+						otherOld.add(added);
+					}
+				}
+				group.removeAll(other);
+				old.removeAll(otherOld);
+				break;
+			}
+			case 7:
+				if (random.nextInt(8) == 0) {
+					old.clear();
+					group.clear();
+				}
+				else if (!unit.isRemovedFromGame() && (random.nextInt(6) == 0)) {
+					TestObjects.set(unit, "removedFromGame", true);
+					UnitGroup.unitRemoved();
+					old.prune();
+				}
+				break;
+			default:
+				break;
+			}
+			old.prune();
+			assertEquals(old.size(), group.size());
+			assertEquals(old.isEmpty(), group.isEmpty());
+			assertEquals(handleIds(old), handleIds(group));
+			for (final CUnit probe : pool) {
+				assertEquals(old.contains(probe), group.contains(probe));
+				assertEquals(old.indexOf(probe), group.indexOf(probe));
+			}
+			if (!old.isEmpty()) {
+				assertEquals(old.get(0), group.get(0));
+				assertEquals(old.get(old.size() - 1), group.get(group.size() - 1));
+			}
+		}
 	}
 }

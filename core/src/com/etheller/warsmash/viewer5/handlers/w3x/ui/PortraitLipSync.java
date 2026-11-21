@@ -2,7 +2,6 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
 import java.util.function.Supplier;
 
-import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.parsers.facefx.FaceFxActor;
 import com.etheller.warsmash.parsers.facefx.FaceFxAnimSet;
 import com.etheller.warsmash.parsers.facefx.FaceFxLibrary;
@@ -19,15 +18,23 @@ final class PortraitLipSync {
 	/** How long a sound or a scene waits for the other half of the pair, in nanoseconds. */
 	private static final long PAIR_WINDOW = 1_000_000_000L;
 
-	private final DataSource data;
-	private FaceFxLibrary library;
+	private final FaceFxLibrary library;
 	private String soundPath;
 	private long soundAt;
 	private Supplier<MdxComplexInstance> portrait;
 	private long portraitAt;
 
-	PortraitLipSync(final DataSource data) {
-		this.data = data;
+	PortraitLipSync(final FaceFxLibrary library) {
+		this.library = library;
+	}
+
+	/** Reads what the first line needs ahead, while the map is still loading. */
+	void prepare() {
+		library().prepare();
+	}
+
+	private FaceFxLibrary library() {
+		return this.library;
 	}
 
 	/** A script started the sound file of a line. */
@@ -67,10 +74,7 @@ final class PortraitLipSync {
 			return false;
 		}
 		final MdxModel model = (MdxModel) instance.model;
-		if (this.library == null) {
-			this.library = new FaceFxLibrary(this.data);
-		}
-		final FaceFxActor actor = this.library.actorForModel(model.fetchUrl);
+		final FaceFxActor actor = library().actorForModel(model.fetchUrl);
 		if (actor == null) {
 			return false;
 		}

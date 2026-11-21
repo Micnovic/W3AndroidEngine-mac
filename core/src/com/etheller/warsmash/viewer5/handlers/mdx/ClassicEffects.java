@@ -537,7 +537,7 @@ final class ClassicEffects {
 		/** Whether the popcorn emitter is shown in the sequence; keys outside of it say nothing. */
 		private static boolean shownIn(final MdlxParticleEmitterPopcorn popcorn, final MdlxSequence sequence) {
 			final MdlxTimeline<?> visibility = findTimeline(popcorn, AnimationMap.KPPV.getWar3id());
-			if ((visibility == null) || (visibility.globalSequenceId >= 0) || !(visibility.values instanceof float[][])) {
+			if ((visibility == null) || (visibility.globalSequenceId >= 0) || !numeric(visibility)) {
 				return true;
 			}
 			boolean any = false;
@@ -552,13 +552,22 @@ final class ClassicEffects {
 			return !any;
 		}
 
+		/** Parsed timelines keep their values in an Object array, so the type of the array says nothing. */
+		private static boolean numeric(final MdlxTimeline<?> timeline) {
+			for (final Object value : timeline.values) {
+				if (!(value instanceof float[])) {
+					return false;
+				}
+			}
+			return true;
+		}
+
 		private static void putOut(final MdlxGenericObject emitter, final War3ID name, final List<MdlxSequence> off) {
 			if (off.isEmpty()) {
 				return;
 			}
 			final MdlxTimeline<?> existing = findTimeline(emitter, name);
-			if ((existing != null)
-					&& ((existing.globalSequenceId >= 0) || !(existing.values instanceof float[][]))) {
+			if ((existing != null) && ((existing.globalSequenceId >= 0) || !numeric(existing))) {
 				return;
 			}
 			final TreeMap<Long, float[]> keys = new TreeMap<>();

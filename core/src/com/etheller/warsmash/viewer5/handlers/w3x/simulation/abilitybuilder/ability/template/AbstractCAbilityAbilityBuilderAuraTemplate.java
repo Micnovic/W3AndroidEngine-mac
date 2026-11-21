@@ -123,16 +123,15 @@ public abstract class AbstractCAbilityAbilityBuilderAuraTemplate extends Ability
 		if (clockState == AuraCheckClock.RESUME) {
 			this.loopTick = 0;
 		}
-		if ((this.loopTick % LEAVE_GROUP_TICKS) == 0) {
-			if (tracksLevelChanges() && (this.lastSeenLevel != getLevel())) {
-				for (final CUnit iter : new ArrayList<>(this.auraGroup)) {
-					if (!(iter.canBeAreaTargetedBy(game, unit, CAreaTargetVisibility.ANY, this.targetsAllowed)
-							&& unit.canReach(iter, this.range))) {
-						updateLevelOfAura(game, iter, this.lastSeenLevel, getLevel());
-					}
-				}
-				this.lastSeenLevel = getLevel();
+		// Every unit of the aura follows a level change before any joins at the new level, so that each one holds the
+		// effects of the level it is later removed at.
+		if (tracksLevelChanges() && (this.lastSeenLevel != getLevel())) {
+			for (final CUnit iter : new ArrayList<>(this.auraGroup)) {
+				updateLevelOfAura(game, iter, this.lastSeenLevel, getLevel());
 			}
+			this.lastSeenLevel = getLevel();
+		}
+		if ((this.loopTick % LEAVE_GROUP_TICKS) == 0) {
 			for (final CUnit iter : new ArrayList<>(this.auraGroup)) {
 				if (!(iter.canBeAreaTargetedBy(game, unit, CAreaTargetVisibility.ANY, this.targetsAllowed)
 						&& unit.canReach(iter, this.range))) {

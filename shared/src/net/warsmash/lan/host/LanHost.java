@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 
 import net.warsmash.lan.LanGameSetup;
@@ -268,7 +269,7 @@ public final class LanHost {
 	private final ArrayDeque<CmdEntry> incoming = new ArrayDeque<CmdEntry>();
 	private final List<PresenceEntry> pendingPresence = new ArrayList<PresenceEntry>();
 	private final Map<Integer, Map<Integer, Integer>> checksums = new TreeMap<Integer, Map<Integer, Integer>>();
-	private final Set<Integer> reportedDesync = new HashSet<Integer>();
+	private final TreeSet<Integer> reportedDesync = new TreeSet<Integer>();
 	/** The sum the players reported for each checked step, kept for the whole game to verify a rejoining player. */
 	private final TreeMap<Integer, Integer> checksumLog = new TreeMap<Integer, Integer>();
 	private LanLoop.ServerHandle server;
@@ -1525,7 +1526,7 @@ public final class LanHost {
 	}
 
 	private void onMapRequest(final Participant p, final LanConnection c, final LanMessages.MapRequest r) {
-		if (r.offset > this.config.map.size || !this.maps.serve(p.id, c, r.offset)) {
+		if (r.offset >= this.config.map.size || !this.maps.serve(p.id, c, r.offset)) {
 			c.close("map request refused");
 		}
 	}
@@ -2606,6 +2607,9 @@ public final class LanHost {
 		while (this.checksums.size() > 100) {
 			this.checksums.remove(this.checksums.keySet().iterator().next());
 		}
+		while (this.reportedDesync.size() > 100) {
+			this.reportedDesync.pollFirst();
+		}
 	}
 
 	// ----------------------------------------------------------- announcement
@@ -2683,6 +2687,8 @@ public final class LanHost {
 			this.server = null;
 		}
 		this.maps.cancelAll();
+		this.reportedDesync.clear();
+		this.checksums.clear();
 		for (final LanConnection c : new ArrayList<LanConnection>(this.connections)) {
 			c.close("host closed");
 		}

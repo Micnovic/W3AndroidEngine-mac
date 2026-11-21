@@ -25,11 +25,19 @@ public final class LauncherOptions {
 		public final int fallback;
 		/** Slider ends or radio choices, as string resource names. */
 		public final List<String> choices;
+		/** An older on/off setting of the same choice, off meaning the first choice while the row was never set. */
+		private final String legacyFlag;
 
 		Row(final String label, final Kind kind, final String key, final int fallback, final String... choices) {
+			this(label, kind, key, null, fallback, choices);
+		}
+
+		Row(final String label, final Kind kind, final String key, final String legacyFlag, final int fallback,
+				final String... choices) {
 			this.label = label;
 			this.kind = kind;
 			this.key = key;
+			this.legacyFlag = legacyFlag;
 			this.fallback = fallback;
 			this.choices = Collections.unmodifiableList(Arrays.asList(choices));
 		}
@@ -38,6 +46,9 @@ public final class LauncherOptions {
 		public int value(final EngineSettings engine) {
 			if (this.kind == Kind.CHECK) {
 				return engine.flag(this.key, this.fallback != 0) ? 1 : 0;
+			}
+			if ((this.legacyFlag != null) && (engine.number(this.key, -1) < 0) && !engine.flag(this.legacyFlag, true)) {
+				return 0;
 			}
 			final int value = engine.number(this.key, this.fallback);
 			return this.kind == Kind.RADIO ? Math.max(0, Math.min(this.choices.size() - 1, value)) : value;
@@ -49,6 +60,9 @@ public final class LauncherOptions {
 			}
 			else {
 				engine.setNumber(this.key, value);
+			}
+			if (this.legacyFlag != null) {
+				engine.setFlag(this.legacyFlag, value != 0);
 			}
 		}
 	}
@@ -65,8 +79,8 @@ public final class LauncherOptions {
 	/** Graphics after the graphics set and the animated background, which are the launcher's own. */
 	public static final List<Row> GRAPHICS = Collections.unmodifiableList(Arrays.asList(
 			new Row("options_particles", Kind.RADIO, "particles", 2, "options_low", "options_medium", "options_high"),
-			new Row("options_unit_shadows", Kind.RADIO, "unitShadowMode", 2, "options_shadows_off", "options_shadows_blob",
-					"options_shadows_full"),
+			new Row("options_unit_shadows", Kind.RADIO, "unitShadowMode", "unitShadows", 2, "options_shadows_off",
+					"options_shadows_blob", "options_shadows_full"),
 			slider("options_gamma", "gamma", 50, "options_low", "options_high")));
 
 	/**

@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -21,6 +22,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItemType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitTypeRequirement;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTypeJass;
 
 public class CItemData {
@@ -39,6 +42,8 @@ public class CItemData {
 	private static final String STOCK_START_DELAY = "stockStart"; // replaced from 'isst'
 	private static final String STOCK_INITIAL = "stockInitial"; // replaced from 'isit'
 	private static final String STACK_MAX = "stackMax"; // replaced from 'ista'
+	private static final String EQUIPMENT = "equipment";
+	private static final String TAG = "tag";
 	private static final String DEPENDENCY_EQUIVALENTS = "DependencyOr";
 
 	private static final String HIT_POINTS = "HP"; // replaced from 'ihtp'
@@ -60,7 +65,7 @@ public class CItemData {
 	private final Map<Integer, RandomItemSet> levelToRandomChoices = new HashMap<>();
 	private static final String CLASSIFICATION = "class"; // replaced from 'icla'
 
-	private final Map<War3ID, CItemType> itemIdToItemType = new HashMap<>();
+	private final Map<War3ID, CItemType> itemIdToItemType = new LinkedHashMap<>();
 	private final ObjectData itemData;
 	private final int mapGameVersion;
 
@@ -164,6 +169,8 @@ public class CItemData {
 					itemClass, requirements);
 			itemTypeInstance.setStockInitial(itemType.getFieldAsInteger(STOCK_INITIAL, 0));
 			itemTypeInstance.setStackMax(itemType.getFieldAsInteger(STACK_MAX, 0));
+			itemTypeInstance.setEquipmentType(CEquipmentType.fromName(itemType.getFieldAsString(EQUIPMENT, 0)));
+			itemTypeInstance.setItemTag(CItemTag.fromName(itemType.getFieldAsString(TAG, 0)));
 			this.itemIdToItemType.put(typeId, itemTypeInstance);
 
 			if (includeAsRandomChoice) {
@@ -192,7 +199,8 @@ public class CItemData {
 
 	public War3ID chooseRandomItem(final int level, final Random seededRandom) {
 		final RandomItemSet randomItemSet = this.levelToRandomChoices.get(level);
-		if (randomItemSet == null) {
+		// A level may hold only items whose old level is another one.
+		if ((randomItemSet == null) || randomItemSet.unclassifiedItems.isEmpty()) {
 			return null;
 		}
 		return randomItemSet.unclassifiedItems.get(seededRandom.nextInt(randomItemSet.unclassifiedItems.size()));
@@ -211,6 +219,32 @@ public class CItemData {
 			return null;
 		}
 		return itemsOfClass.get(seededRandom.nextInt(itemsOfClass.size()));
+	}
+
+	/**
+	 * A random item of a class and level that also matches an equipment type and a tag (ANY matches everything). A
+	 * negative level takes every level. Items that are not marked for random picks are left out unless
+	 * includeNonPickRandom, and items that are not valid targets for a transformation unless includeInvalidMorphs.
+	 */
+	public War3ID chooseRandomItem(final CItemTypeJass itemClass, final int level, final CEquipmentType equipment,
+			final CItemTag tag, final boolean includeInvalidMorphs, final boolean includeNonPickRandom,
+			final Random seededRandom) {
+		final List<War3ID> candidates = new ArrayList<>();
+		for (final CItemType type : this.itemIdToItemType.values()) {
+			if (((itemClass != CItemTypeJass.ANY) && (type.getItemClass() != itemClass))
+					|| ((level >= 0) && (type.getLevel() != level))
+					|| ((equipment != CEquipmentType.ANY) && (type.getEquipmentType() != equipment))
+					|| ((tag != CItemTag.ANY) && (type.getItemTag() != tag))
+					|| (!includeNonPickRandom && !type.isIncludeAsRandomChoice())
+					|| (!includeInvalidMorphs && !type.isValidTargetForTransformation())) {
+				continue;
+			}
+			candidates.add(type.getTypeId());
+		}
+		if (candidates.isEmpty()) {
+			return null;
+		}
+		return candidates.get(seededRandom.nextInt(candidates.size()));
 	}
 
 	private static final class RandomItemSet {

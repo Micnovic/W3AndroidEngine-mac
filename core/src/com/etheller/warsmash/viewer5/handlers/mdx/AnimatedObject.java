@@ -35,6 +35,10 @@ public class AnimatedObject {
 		}
 	}
 
+	public boolean hasTimeline(final War3ID name) {
+		return findTimeline(name) != null;
+	}
+
 	private Sd<?> findTimeline(final War3ID name) {
 		final int id = name.getValue();
 		final int[] ids = this.timelineIds;

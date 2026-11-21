@@ -25,7 +25,7 @@ public class CAbilityTypeItemLifeBonus extends CAbilityType<CAbilityTypeItemLife
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeItemLifeBonusLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeItemLifeBonusLevelData levelData = getLevelData(existingAbility, level - 1);
 		if (existingAbility instanceof CAbilityItemLifeBonus) {
 			((CAbilityItemLifeBonus) existingAbility).setLifeBonus(game, unit, levelData.getLifeBonus());
 		}

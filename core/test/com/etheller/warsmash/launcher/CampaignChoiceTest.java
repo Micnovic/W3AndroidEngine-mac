@@ -69,4 +69,41 @@ class CampaignChoiceTest {
 		assertEquals(CampaignChoice.ListLine.SECTION, header.kind);
 		assertEquals(CampaignChoice.SECTION_FORSAKEN, header.index);
 	}
+
+	@Test
+	void campaignVersionPlayedIsClassicWithoutTheReforgedMaps() throws IOException {
+		final CampaignCatalog classicOnly = catalog("classic-only");
+		assertFalse(classicOnly.hasReforgedMaps());
+		assertEquals(LaunchRequest.CAMPAIGN_MAPS_CLASSIC,
+				LaunchRequest.playedMaps(classicOnly, LaunchRequest.CAMPAIGN_MAPS_REFORGED));
+		final CampaignCatalog.Entry entry = classicOnly.getEntries().get(0);
+		final LaunchRequest request = LaunchRequest.mission(classicOnly, entry, 0, LaunchRequest.CAMPAIGN_MAPS_REFORGED,
+				"normal");
+		assertEquals(LaunchRequest.CAMPAIGN_MAPS_CLASSIC, request.campaignMaps);
+	}
+
+	@Test
+	void campaignVersionChoiceIsKeptWithTheReforgedMaps() throws IOException {
+		final CampaignCatalog both = catalog("reforged-maps", "UI/CampaignInfoReforged.txt");
+		assertTrue(both.hasReforgedMaps());
+		assertEquals(LaunchRequest.CAMPAIGN_MAPS_REFORGED,
+				LaunchRequest.playedMaps(both, LaunchRequest.CAMPAIGN_MAPS_REFORGED));
+		assertEquals(LaunchRequest.CAMPAIGN_MAPS_CLASSIC,
+				LaunchRequest.playedMaps(both, LaunchRequest.CAMPAIGN_MAPS_CLASSIC));
+	}
+
+	@Test
+	void bandFrameBringsEachModelToTheMiddleOfTheFreeBand() {
+		for (final String scene : new String[] { "roc_prologue", "roc_human", "roc_undead", "roc_orc", "roc_nightelf",
+				"tft_nightelf", "tft_human", "tft_undead" }) {
+			final float[] frame = CampaignChoice.bandFrame(scene, 1.6f, CampaignChoice.RECORDING_ASPECT, 0.44f, 0.40f);
+			final float[] model = CampaignChoice.bandModel(scene);
+			final float visible = 1.6f / CampaignChoice.RECORDING_ASPECT;
+			assertTrue(frame[1] >= 1 && frame[1] <= 1.5f, scene);
+			assertEquals(0.44f, ((model[0] - (frame[0] * (1 - visible))) / visible) * frame[1], 0.05f, scene);
+			final float y = frame[2] + ((model[1] - frame[2]) * frame[1]);
+			// A model high in its recording cannot be brought lower than the zoom allows, but never off the top.
+			assertTrue(y >= 0.10f && y <= 0.45f, scene + " " + y);
+		}
+	}
 }

@@ -2,6 +2,8 @@ package com.etheller.warsmash.launcher;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -26,6 +28,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignCatalog;
 public final class DataContentCheck {
 	/** What the data lacks; each value names the launcher string that tells it. */
 	public enum Problem {
+		UNSUPPORTED_VERSION("data_content_old_version"),
 		SCRIPTS("data_content_scripts"),
 		NO_CAMPAIGN_LIST("data_content_no_campaigns"),
 		NO_CAMPAIGN_MAPS("data_content_no_campaign_maps"),
@@ -48,12 +51,16 @@ public final class DataContentCheck {
 
 	/**
 	 * Checks the data in the folder before any engine configuration exists. An installed game (CASC) is whole by
-	 * its nature and is not opened here; so is data that cannot be read, which has its own message.
+	 * its nature and is not opened here, only its version is read; data that cannot be read has its own message.
 	 *
 	 * @return the problems, none for complete data and for data that this cannot judge
 	 */
 	public static List<Problem> check(final DataFolderCheck.Kind kind, final File folder) {
-		if ((kind == DataFolderCheck.Kind.CASC) || (kind == DataFolderCheck.Kind.NONE)) {
+		if (kind == DataFolderCheck.Kind.CASC) {
+			return DataFolderCheck.isUnsupportedCasc(folder) ? Collections.singletonList(Problem.UNSUPPORTED_VERSION)
+					: Collections.emptyList();
+		}
+		if (kind == DataFolderCheck.Kind.NONE) {
 			return Collections.emptyList();
 		}
 		try {
@@ -63,12 +70,36 @@ public final class DataContentCheck {
 			if (layer != null) {
 				sources.add(new FolderDataSource(layer.toPath()));
 			}
-			return check(new CompoundDataSource(sources), (String) null);
+			final List<Problem> problems = check(new CompoundDataSource(sources), (String) null);
+			// Melee only data was prepared without campaign maps on purpose; that is not a fault of the data.
+			if (preparedMeleeOnly(folder)) {
+				problems.remove(Problem.NO_CAMPAIGN_MAPS);
+			}
+			return problems;
 		}
 		catch (final RuntimeException e) {
 			Log.error(e);
 			return Collections.emptyList();
 		}
+	}
+
+	private static boolean preparedMeleeOnly(final File folder) {
+		final File marker = new File(folder, DataPackage.MARKER);
+		if (!marker.isFile()) {
+			return false;
+		}
+		try {
+			for (final String line : Files.readAllLines(marker.toPath(), StandardCharsets.UTF_8)) {
+				final int equals = line.indexOf('=');
+				if ((equals > 0) && "profile".equalsIgnoreCase(line.substring(0, equals).trim())) {
+					return line.substring(equals + 1).trim().toLowerCase(Locale.ROOT).startsWith("melee");
+				}
+			}
+		}
+		catch (final IOException | RuntimeException e) {
+			// An unreadable marker says nothing about the profile.
+		}
+		return false;
 	}
 
 	/** @param campaignFile the skin's CampaignFile field; null reads it from the data's skin */

@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -35,7 +36,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Writes and reads a whole graph of game objects by their fields, so that the hundreds of ability, buff and behavior
@@ -98,7 +103,7 @@ public final class SavedObjectGraph {
 		void reportDropped(Class<?> holder, String field, Object object);
 	}
 
-	private static List<Field> fieldsOf(final Class<?> type) {
+	static List<Field> fieldsOf(final Class<?> type) {
 		List<Field> fields = FIELDS.get(type);
 		if (fields == null) {
 			fields = new ArrayList<>();
@@ -672,6 +677,115 @@ public final class SavedObjectGraph {
 	}
 
 	/**
+	 * Compresses the chunks of a {@link Bytes} on a thread of its own while they are still being written, so that the
+	 * save never holds more than a few chunks of what it writes. Chunks are handed back and forth, so the memory is a
+	 * fixed number of them whatever the size of the save.
+	 */
+	public static final class GzipPipe implements Bytes.Sink {
+		private static final int CHUNK = 1 << 18;
+		private static final int CHUNKS = 5;
+		private static final Chunk END = new Chunk(null, 0);
+
+		private static final class Chunk {
+			private final byte[] data;
+			private final int length;
+
+			private Chunk(final byte[] data, final int length) {
+				this.data = data;
+				this.length = length;
+			}
+		}
+
+		private final Bytes compressed = new Bytes(1 << 16);
+		private final BlockingQueue<Chunk> full = new LinkedBlockingQueue<>();
+		private final BlockingQueue<byte[]> free = new LinkedBlockingQueue<>();
+		private final Thread worker = new Thread(this::compress, "Save compression");
+		private volatile Throwable failure;
+		private int created;
+		private boolean over;
+
+		public GzipPipe() {
+			this.worker.setDaemon(true);
+			this.worker.start();
+		}
+
+		private void compress() {
+			try (GZIPOutputStream out = new GZIPOutputStream(this.compressed, 1 << 16)) {
+				while (true) {
+					final Chunk chunk = this.full.take();
+					if (chunk == END) {
+						break;
+					}
+					out.write(chunk.data, 0, chunk.length);
+					this.free.add(chunk.data);
+				}
+			}
+			catch (final Throwable t) {
+				this.failure = t;
+			}
+		}
+
+		private void check() throws IOException {
+			final Throwable t = this.failure;
+			if (t != null) {
+				throw new IOException("Compressing the save failed", t);
+			}
+		}
+
+		@Override
+		public byte[] next(final byte[] chunk, final int length) throws IOException {
+			if (chunk != null) {
+				this.full.add(new Chunk(chunk, length));
+			}
+			byte[] empty = this.free.poll();
+			if (empty != null) {
+				return empty;
+			}
+			if (this.created < CHUNKS) {
+				this.created++;
+				return new byte[CHUNK];
+			}
+			try {
+				while ((empty = this.free.poll(50, TimeUnit.MILLISECONDS)) == null) {
+					check();
+				}
+			}
+			catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Interrupted while saving", e);
+			}
+			return empty;
+		}
+
+		@Override
+		public void last(final byte[] chunk, final int length) throws IOException {
+			this.full.add(new Chunk(chunk, length));
+		}
+
+		/** The compressed bytes, once everything written has been taken in. */
+		public Bytes finish() throws IOException {
+			this.full.add(END);
+			try {
+				this.worker.join();
+			}
+			catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Interrupted while saving", e);
+			}
+			check();
+			this.over = true;
+			return this.compressed;
+		}
+
+		/** Stops the thread when the save is given up halfway; harmless after {@link #finish()}. */
+		public void abort() {
+			if (!this.over) {
+				this.worker.interrupt();
+			}
+		}
+	}
+
+	/**
 	 * Data output over {@link Bytes} that stores each value straight into its array; the bytes are those of
 	 * {@link DataOutputStream}, without a call per byte.
 	 */
@@ -780,14 +894,51 @@ public final class SavedObjectGraph {
 		private int position;
 		private int total;
 		private int nextSize;
+		private Sink sink;
+
+		/** Takes the chunks of a {@link Bytes} that does not keep them; see {@link Bytes#streamTo}. */
+		public interface Sink {
+			/** Takes a full chunk (null at the start) and gives the next empty one. */
+			byte[] next(byte[] full, int length) throws IOException;
+
+			void last(byte[] full, int length) throws IOException;
+		}
 
 		public Bytes(final int size) {
 			super(1);
 			this.nextSize = Math.max(16, Math.min(size, MAX_CHUNK));
 		}
 
+		/**
+		 * From now on a chunk goes to the sink when it is full instead of being kept; the sink is also what hands out
+		 * the chunks, and a value written never needs more than eight bytes of one. Only for an empty buffer.
+		 */
+		void streamTo(final Sink sink) {
+			if (this.total != 0) {
+				throw new IllegalStateException("Streaming starts with an empty buffer");
+			}
+			this.sink = sink;
+		}
+
+		void finishStream() throws IOException {
+			if ((this.sink != null) && (this.current != null)) {
+				this.sink.last(this.current, this.position);
+				this.current = null;
+			}
+		}
+
 		private void grow(final int needed) {
 			if ((this.current != null) && ((this.position + needed) <= this.current.length)) {
+				return;
+			}
+			if (this.sink != null) {
+				try {
+					this.current = this.sink.next(this.current, this.position);
+				}
+				catch (final IOException e) {
+					throw new UncheckedIOException(e);
+				}
+				this.position = 0;
 				return;
 			}
 			if (this.current != null) {

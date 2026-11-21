@@ -7,6 +7,7 @@ import java.util.Locale;
 import com.badlogic.gdx.files.FileHandle;
 import com.etheller.warsmash.datasources.AssetPathFallback;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.IndependentStream;
 
 public class DataSourceFileHandle extends FileHandle {
 	private static final String[] SOUND_EXTENSIONS = { ".flac", ".wav", ".ogg", ".mp3" };
@@ -14,8 +15,17 @@ public class DataSourceFileHandle extends FileHandle {
 	private final DataSource dataSource;
 
 	public DataSourceFileHandle(final DataSource dataSource, final String path) {
-		super(resolveSoundPath(dataSource, path));
+		this(resolveSoundPath(dataSource, path), dataSource);
+	}
+
+	private DataSourceFileHandle(final String resolvedPath, final DataSource dataSource) {
+		super(resolvedPath);
 		this.dataSource = dataSource;
+	}
+
+	/** A handle of a path that {@link #resolveSoundPath} already gave, which is not looked up again. */
+	public static DataSourceFileHandle ofResolved(final DataSource dataSource, final String resolvedPath) {
+		return new DataSourceFileHandle(resolvedPath, dataSource);
 	}
 
 	@Override
@@ -31,6 +41,14 @@ public class DataSourceFileHandle extends FileHandle {
 		catch (final IOException e) {
 			throw new RuntimeException("Failed to load FileHandle from DataSource: " + path());
 		}
+	}
+
+	/**
+	 * The file as {@link DataSource#opener} gives it, looked up now: it may be opened and read on another thread, and
+	 * is null where the data source reads only on the thread that uses it.
+	 */
+	public IndependentStream.Opener opener() {
+		return this.dataSource.opener(path());
 	}
 
 	/**

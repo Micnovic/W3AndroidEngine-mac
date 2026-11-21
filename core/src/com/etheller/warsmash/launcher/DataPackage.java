@@ -16,11 +16,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
 
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.datasources.LayeredDataSource;
 
 /**
@@ -32,10 +35,18 @@ import com.etheller.warsmash.datasources.LayeredDataSource;
  * The packer hands a graphics set (the DE or HD package) out as a zip of its own, without a marker, whose files all lie
  * in the package folders. Such a zip is added to Classic data already in the target rather than replacing it, and the
  * graphics sets of the target are kept when a newer Classic package replaces it.
+ * <p>
+ * A language pack has a marker of its own and all its files in one "_locales/xx.w3mod" folder. It is added to the
+ * Classic data like a graphics set, and the "_locales" folder of the target is kept like the sets are.
  */
 public final class DataPackage implements Closeable {
 	/** The packer's marker file, the last file it writes into a folder it made. */
 	public static final String MARKER = "w3-datapacker.txt";
+	/** The marker of a language pack, whose files all lie in one "_locales/xx.w3mod" folder. */
+	public static final String LANGUAGE_MARKER = "w3-datapacker-language.txt";
+	/** The folder of the language layers inside the Classic data. */
+	private static final String LOCALES = "_locales";
+	private static final Pattern LANGUAGE_FOLDER = Pattern.compile("(?i)_locales/([a-z]{4})\\.w3mod/.+");
 	/** The folders of the graphics sets inside the Classic data, as the engine reads them. */
 	private static final String[] SET_FOLDERS = { LayeredDataSource.DE_PACKAGE, LayeredDataSource.HD_PACKAGE };
 	/** The packer puts this into the folder of the set a set zip is made for, and only there. */
@@ -62,6 +73,8 @@ public final class DataPackage implements Closeable {
 		NO_GAME_DATA,
 		/** A graphics set, and the target has no Classic data to add it to. */
 		NO_CLASSIC,
+		/** A language pack, and the target has no Classic data to add it to. */
+		NO_CLASSIC_LANGUAGE,
 		/** A file could not be read or written. */
 		IO,
 		CANCELLED
@@ -98,6 +111,8 @@ public final class DataPackage implements Closeable {
 	private final ZipArchiveEntry marker;
 	/** The package folder of the graphics set this zip holds ("_de.w3mod"); null for a Classic package. */
 	public final String graphicsSet;
+	/** The code of the language a language pack holds ("esES"); empty for the other kinds. */
+	public final String language;
 	/** Bytes of the unpacked files. */
 	public final long totalBytes;
 	public final String tool;
@@ -108,28 +123,35 @@ public final class DataPackage implements Closeable {
 	private DataPackage(final ZipFile zip) throws IOException {
 		this.zip = zip;
 		ZipArchiveEntry found = null;
+		boolean languageMarker = false;
 		final List<ZipArchiveEntry> all = Collections.list(zip.getEntriesInPhysicalOrder());
 		for (final ZipArchiveEntry entry : all) {
 			final String name = entry.getName().replace('\\', '/');
-			if (!entry.isDirectory() && name.toLowerCase(Locale.ROOT).endsWith(MARKER)
+			final String lower = name.toLowerCase(Locale.ROOT);
+			final boolean isLanguage = lower.endsWith(LANGUAGE_MARKER);
+			if (!entry.isDirectory() && (lower.endsWith(MARKER) || isLanguage)
 					&& (name.indexOf('/') == name.lastIndexOf('/'))
 					&& ((found == null) || (name.length() < found.getName().length()))) {
 				found = entry;
+				languageMarker = isLanguage;
 			}
 		}
 		if (found == null) {
 			this.marker = null;
 			this.root = setRoot(all);
 			this.graphicsSet = setFolder(all, this.root);
+			this.language = "";
 		}
 		else {
 			this.marker = found;
 			this.graphicsSet = null;
 			final String markerName = found.getName().replace('\\', '/');
-			this.root = markerName.substring(0, markerName.length() - MARKER.length());
+			this.root = markerName.substring(0,
+					markerName.length() - (languageMarker ? LANGUAGE_MARKER : MARKER).length());
 			if (!this.root.isEmpty() && !this.root.endsWith("/")) {
 				throw new ImportException(Problem.NO_MARKER, "");
 			}
+			this.language = languageMarker ? languageCode(all, this.root, markerName) : "";
 		}
 		long bytes = 0;
 		for (final ZipArchiveEntry entry : all) {
@@ -165,7 +187,8 @@ public final class DataPackage implements Closeable {
 		this.gameVersion = field(lines, "gameVersion");
 		this.profile = field(lines, "profile");
 		this.locale = field(lines, "locale");
-		if (this.tool.isEmpty()) {
+		if (this.tool.isEmpty() || (!this.language.isEmpty() && !this.locale.isEmpty()
+				&& !this.language.equals(GameLanguage.canonical(this.locale)))) {
 			throw new ImportException(Problem.NO_MARKER, "");
 		}
 		final String entries = field(lines, "entries");
@@ -312,6 +335,36 @@ public final class DataPackage implements Closeable {
 		return SET_FOLDERS[best];
 	}
 
+	/** The language every file of a language pack lies in, but for the marker; a pack of two languages is none. */
+	private static String languageCode(final List<ZipArchiveEntry> all, final String root, final String markerName)
+			throws ImportException {
+		String code = null;
+		for (final ZipArchiveEntry entry : all) {
+			final String name = entry.getName().replace('\\', '/');
+			if (entry.isDirectory() || name.equals(markerName)) {
+				continue;
+			}
+			final Matcher matcher = LANGUAGE_FOLDER.matcher(name.startsWith(root) ? name.substring(root.length()) : name);
+			if (!matcher.matches()) {
+				throw new ImportException(Problem.NO_MARKER, "");
+			}
+			final String found = GameLanguage.canonical(matcher.group(1));
+			if ((code != null) && !code.equals(found)) {
+				throw new ImportException(Problem.NO_MARKER, "");
+			}
+			code = found;
+		}
+		if (code == null) {
+			throw new ImportException(Problem.NO_MARKER, "");
+		}
+		return code;
+	}
+
+	/** Whether the package is added to the Classic data of the target: a graphics set or a language pack. */
+	public boolean addsToClassic() {
+		return (this.graphicsSet != null) || !this.language.isEmpty();
+	}
+
 	/** "DE" or "HD" for a graphics set, empty for a Classic package. */
 	public String setName() {
 		if (this.graphicsSet == null) {
@@ -357,7 +410,7 @@ public final class DataPackage implements Closeable {
 		}
 		keepGraphicsSets(old, target);
 		deleteTree(old);
-		if (this.graphicsSet != null) {
+		if (addsToClassic()) {
 			return importSet(target, staging, progress, cancelled);
 		}
 		final long free = parent.getUsableSpace();
@@ -397,7 +450,8 @@ public final class DataPackage implements Closeable {
 	private File importSet(final File target, final File staging, final Progress progress,
 			final BooleanSupplier cancelled) throws ImportException {
 		if (DataFolderCheck.detect(target) == DataFolderCheck.Kind.NONE) {
-			throw new ImportException(Problem.NO_CLASSIC, setName());
+			throw this.language.isEmpty() ? new ImportException(Problem.NO_CLASSIC, setName())
+					: new ImportException(Problem.NO_CLASSIC_LANGUAGE, this.language);
 		}
 		final long free = staging.getAbsoluteFile().getParentFile().getUsableSpace();
 		if (free < neededBytes()) {
@@ -408,6 +462,10 @@ public final class DataPackage implements Closeable {
 			final File[] folders = staging.listFiles();
 			if (folders != null) {
 				for (final File folder : folders) {
+					// The marker of a language pack says what the pack is; the Classic marker of the target stays.
+					if (!folder.isDirectory()) {
+						continue;
+					}
 					final File into = existingChild(target, folder.getName());
 					if (!move(folder, into, true)) {
 						throw new ImportException(Problem.IO, folder.getName());
@@ -422,17 +480,22 @@ public final class DataPackage implements Closeable {
 		return target;
 	}
 
-	/** Moves the graphics set folders of old data into the data that replaces it, without the files it has itself. */
+	/**
+	 * Moves the graphics set folders and the language layers of old data into the data that replaces it, without the
+	 * files it has itself.
+	 */
 	private static void keepGraphicsSets(final File old, final File target) {
 		final File[] children = old.isDirectory() && target.isDirectory() ? old.listFiles() : null;
 		if (children == null) {
 			return;
 		}
 		for (final File child : children) {
+			boolean kept = child.isDirectory() && LOCALES.equalsIgnoreCase(child.getName());
 			for (final String folder : SET_FOLDERS) {
-				if (child.isDirectory() && folder.equalsIgnoreCase(child.getName())) {
-					move(child, existingChild(target, child.getName()), false);
-				}
+				kept |= child.isDirectory() && folder.equalsIgnoreCase(child.getName());
+			}
+			if (kept) {
+				move(child, existingChild(target, child.getName()), false);
 			}
 		}
 	}
@@ -546,7 +609,7 @@ public final class DataPackage implements Closeable {
 
 	/**
 	 * The zip files directly in a folder that hold a data package, by name, the Classic packages before the graphics
-	 * sets, which need them; empty when there are none.
+	 * sets and language packs, which need them; empty when there are none.
 	 */
 	public static List<File> packagesIn(final File folder) {
 		final List<File> found = new ArrayList<>();
@@ -558,7 +621,7 @@ public final class DataPackage implements Closeable {
 		for (final File child : children) {
 			if (child.isFile() && child.getName().toLowerCase(Locale.ROOT).endsWith(".zip")) {
 				try (DataPackage dataPackage = open(child)) {
-					(dataPackage.graphicsSet == null ? found : sets).add(child);
+					(dataPackage.addsToClassic() ? sets : found).add(child);
 				}
 				catch (final IOException e) {
 					// Not a data package.

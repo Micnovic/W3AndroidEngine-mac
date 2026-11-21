@@ -25,13 +25,13 @@ public class CBuffSacredAura extends CBuffAuraBase {
 
 	@Override
 	public void onBuffAdd(final CSimulation game, final CUnit unit) {
-		unit.multiplyHealingReceived(this.healingFactor);
+		unit.addHealingReceivedFactor(this.healingFactor);
 		unit.addDamageTakenModificationListener(this.resistance);
 	}
 
 	@Override
 	public void onBuffRemove(final CSimulation game, final CUnit unit) {
-		unit.multiplyHealingReceived(1f / this.healingFactor);
+		unit.removeHealingReceivedFactor(this.healingFactor);
 		unit.removeDamageTakenModificationListener(this.resistance);
 	}
 }

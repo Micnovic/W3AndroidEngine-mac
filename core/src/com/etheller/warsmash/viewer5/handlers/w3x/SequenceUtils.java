@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.DoubleSupplier;
 
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxComplexInstance;
 import com.etheller.warsmash.viewer5.handlers.mdx.MdxModel;
@@ -31,17 +32,29 @@ public class SequenceUtils {
 	public static final EnumSet<SecondaryTag> ALTERNATE = EnumSet.of(SecondaryTag.ALTERNATE);
 
 	private static final StandSequenceComparator STAND_SEQUENCE_COMPARATOR = new StandSequenceComparator();
-	private static final SecondaryTagSequenceComparator SECONDARY_TAG_SEQUENCE_COMPARATOR = new SecondaryTagSequenceComparator(
-			STAND_SEQUENCE_COMPARATOR);
+
+	/** Same as name.split("-")[0].trim().toLowerCase(Locale.ROOT).equals(type), without the strings. */
+	private static boolean nameBeforeDashIs(final String name, final String type) {
+		int end = name.indexOf('-');
+		if (end < 0) {
+			end = name.length();
+		}
+		int start = 0;
+		while ((start < end) && (name.charAt(start) <= ' ')) {
+			start++;
+		}
+		while ((end > start) && (name.charAt(end - 1) <= ' ')) {
+			end--;
+		}
+		return ((end - start) == type.length()) && name.regionMatches(true, start, type, 0, end - start);
+	}
 
 	public static List<IndexedSequence> filterSequences(final String type, final List<Sequence> sequences) {
 		final List<IndexedSequence> filtered = new ArrayList<>();
 
 		for (int i = 0, l = sequences.size(); i < l; i++) {
 			final Sequence sequence = sequences.get(i);
-			final String name = sequence.getName().split("-")[0].trim().toLowerCase(Locale.ROOT);
-
-			if (name.equals(type)) {
+			if (nameBeforeDashIs(sequence.getName(), type)) {
 				filtered.add(new IndexedSequence(sequence, i));
 			}
 		}
@@ -121,6 +134,13 @@ public class SequenceUtils {
 	public static IndexedSequence selectSequence(AnimationTokens.PrimaryTag type,
 			final EnumSet<AnimationTokens.SecondaryTag> tags, final List<Sequence> sequences,
 			final boolean allowRarityVariations) {
+		return selectSequence(type, tags, sequences, allowRarityVariations, Math::random);
+	}
+
+	/** @param source values in [0, 1), so a caller can make the choice repeatable */
+	public static IndexedSequence selectSequence(AnimationTokens.PrimaryTag type,
+			final EnumSet<AnimationTokens.SecondaryTag> tags, final List<Sequence> sequences,
+			final boolean allowRarityVariations, final DoubleSupplier source) {
 		List<IndexedSequence> filtered = filterSequences(type, tags, sequences);
 		final Comparator<IndexedSequence> sequenceComparator = STAND_SEQUENCE_COMPARATOR;
 
@@ -165,7 +185,7 @@ public class SequenceUtils {
 		filtered.sort(sequenceComparator);
 
 		int i = 0;
-		final double randomRoll = Math.random() * 100;
+		final double randomRoll = source.getAsDouble() * 100;
 		for (final int l = filtered.size(); i < l; i++) {
 			final Sequence sequence = filtered.get(i).sequence;
 			final float rarity = sequence.getRarity();
@@ -182,11 +202,11 @@ public class SequenceUtils {
 		final int sequencesLeft = filtered.size() - i;
 		if (sequencesLeft <= 0) {
 			if (filtered.size() > 0) {
-				return filtered.get((int) Math.floor(Math.random() * filtered.size()));
+				return filtered.get((int) Math.floor(source.getAsDouble() * filtered.size()));
 			}
 			return null; // new IndexedSequence(null, 0);
 		}
-		final int random = (int) (i + Math.floor(Math.random() * sequencesLeft));
+		final int random = (int) (i + Math.floor(source.getAsDouble() * sequencesLeft));
 		final IndexedSequence sequence = filtered.get(random);
 
 		return sequence;
@@ -279,6 +299,20 @@ public class SequenceUtils {
 				return randomSequence(target, null, secondaryAnimationTags, allowRarityVariations);
 			}
 		}
+	}
+
+	/** As above, with the choice drawn from the given values instead of the shared random source. */
+	public static Sequence randomSequence(final MdxComplexInstance target, final PrimaryTag animationName,
+			final EnumSet<SecondaryTag> secondaryAnimationTags, final boolean allowRarityVariations,
+			final DoubleSupplier source) {
+		final MdxModel model = (MdxModel) target.model;
+		final IndexedSequence sequence = selectSequence(animationName, secondaryAnimationTags, model.getSequences(),
+				allowRarityVariations, source);
+		if (sequence == null) {
+			return null;
+		}
+		target.setSequence(sequence.index);
+		return sequence.sequence;
 	}
 
 	public static Sequence randomSequence(final MdxComplexInstance target, final PrimaryTag animationName) {

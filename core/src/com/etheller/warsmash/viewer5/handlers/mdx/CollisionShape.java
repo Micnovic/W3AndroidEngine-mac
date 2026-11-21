@@ -18,6 +18,8 @@ public class CollisionShape extends GenericObject {
 	private static final Vector3 intersectHeap2 = new Vector3();
 	private static final Matrix4 intersectMatrixHeap = new Matrix4();
 	private static final Ray intersectRayHeap = new Ray();
+	/** How far a ray may drift sideways along its length for a grid cell to stand for all of it, in model units. */
+	private static final float MAX_VERTICAL_DRIFT = PickGrid.MARGIN / 4;
 	private Intersectable intersectable;
 
 	public CollisionShape(final MdxModel model, final MdlxCollisionShape object, final int index) {
@@ -128,6 +130,40 @@ public class CollisionShape extends GenericObject {
 		intersectHeap2.sub(intersectHeap);
 		intersectRayHeap.set(intersectHeap, intersectHeap2);
 		if (RenderMathUtils.intersectRayTriangles(intersectRayHeap, vertices, indices, vertexSize, intersection)) {
+			intersection.prj(mdxNode.worldMatrix);
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * The ray against a geoset's triangles. A ray that is vertical in the model's own space (the height of the
+	 * ground under a unit) only tests the triangles of the grid cell it passes through.
+	 */
+	public static boolean intersectRayTriangles(final Ray ray, final GenericNode mdxNode, final Geoset geoset,
+			final Vector3 intersection) {
+		intersectMatrixHeap.set(mdxNode.worldMatrix);
+		Matrix4.inv(intersectMatrixHeap.val);
+		intersectHeap.set(ray.origin);
+		intersectHeap2.set(ray.direction);
+		intersectHeap2.add(ray.origin);
+		intersectHeap.prj(intersectMatrixHeap);
+		intersectHeap2.prj(intersectMatrixHeap);
+		intersectHeap2.sub(intersectHeap);
+		intersectRayHeap.set(intersectHeap, intersectHeap2);
+		final boolean hit;
+		if ((Math.max(Math.abs(intersectHeap2.x), Math.abs(intersectHeap2.y)) <= MAX_VERTICAL_DRIFT)
+				&& (geoset.pickGrid() != null)) {
+			final PickGrid grid = geoset.pickGrid();
+			final int cell = grid.cellAt(intersectHeap.x, intersectHeap.y);
+			hit = (cell >= 0) && RenderMathUtils.intersectRayTriangles(intersectRayHeap, geoset.pickVertices,
+					geoset.pickFaces, 3, grid.faces(), grid.start(cell), grid.end(cell), intersection);
+		}
+		else {
+			hit = RenderMathUtils.intersectRayTriangles(intersectRayHeap, geoset.pickVertices, geoset.pickFaces, 3,
+					intersection);
+		}
+		if (hit) {
 			intersection.prj(mdxNode.worldMatrix);
 			return true;
 		}

@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
@@ -27,6 +28,7 @@ import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.parsers.jass.JassAIEnvironment;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.WarsmashConstants;
+import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderLightningEffect;
@@ -59,11 +61,13 @@ public final class SavedGame {
 	 * authorship line closing the header; 2 is
 	 * still read, its script positions then need the very same scripts.
 	 */
-	private static final int FORMAT_VERSION = 8;
+	private static final int FORMAT_VERSION = 9;
 	/** The first format whose header says the campaign and difficulty of the game. */
 	public static final int CAMPAIGN_FORMAT_VERSION = 7;
 	/** The first format whose header closes with the authorship line. */
 	private static final int AUTHORSHIP_FORMAT_VERSION = 8;
+	/** The first format whose header says whether the game is a campaign's, before the authorship line. */
+	public static final int CAMPAIGN_GAME_FORMAT_VERSION = 9;
 	/** Every game used this seed before the seed was saved. */
 	private static final int SEED_BEFORE_FORMAT_5 = 1337;
 	private static final int OLDEST_FORMAT_VERSION = 2;
@@ -84,6 +88,11 @@ public final class SavedGame {
 		public int campaign = -1;
 		/** Whether that campaign is played in its Reforged version, its maps and graphics. */
 		public boolean reforgedCampaignMaps;
+		/**
+		 * Whether the game is a campaign's, as it was started; a save before format 9 is told by where its map is
+		 * kept.
+		 */
+		public boolean campaignGame;
 		/** The game's difficulty; null in a save before format 7. */
 		public CMapDifficulty difficulty;
 		public int formatVersion = FORMAT_VERSION;
@@ -127,6 +136,7 @@ public final class SavedGame {
 				created.write(out);
 			}
 			this.positions.write(out);
+			out.writeBoolean(this.campaignGame);
 			out.writeUTF(ProjectInfo.AUTHORSHIP);
 		}
 
@@ -177,6 +187,8 @@ public final class SavedGame {
 			if (version >= 3) {
 				header.positions = SavedScriptPositions.Table.read(in, version >= 4);
 			}
+			header.campaignGame = version >= CAMPAIGN_GAME_FORMAT_VERSION ? in.readBoolean()
+					: CampaignMaps.isCampaignMap(header.mapFile);
 			if (version >= AUTHORSHIP_FORMAT_VERSION) {
 				// Who made the build; kept for people reading the file, loading never needs it.
 				in.readUTF();
@@ -280,22 +292,38 @@ public final class SavedGame {
 		return loadability(file, null);
 	}
 
-	/**
-	 * With a running game, a save of its map is also held against its scripts, as loading would. A save of another
-	 * map can only be checked that far once loading started.
-	 */
-	public static Loadability loadability(final FileHandle file, final War3MapViewer running) {
+	/** What reading a save's header and class table showed; it stays true for as long as the file is unchanged. */
+	private static final class Checked {
+		final Loadability reason;
+		final Header header;
+
+		Checked(final Loadability reason, final Header header) {
+			this.reason = reason;
+			this.header = header;
+		}
+	}
+
+	private static final int CHECKED_LIMIT = 512;
+	private static final Map<String, Checked> CHECKED = new HashMap<>();
+
+	static void clearCheckedCache() {
+		synchronized (CHECKED) {
+			CHECKED.clear();
+		}
+	}
+
+	private static Checked checkFile(final FileHandle file) {
 		try (DataInputStream in = new DataInputStream(new BufferedInputStream(file.read()))) {
 			if (in.readInt() != MAGIC) {
-				return Loadability.DAMAGED;
+				return new Checked(Loadability.DAMAGED, null);
 			}
 			final int version = in.readInt();
 			if ((version < OLDEST_FORMAT_VERSION) || (version > FORMAT_VERSION)) {
-				return Loadability.OTHER_VERSION;
+				return new Checked(Loadability.OTHER_VERSION, null);
 			}
 		}
 		catch (final IOException | RuntimeException e) {
-			return Loadability.DAMAGED;
+			return new Checked(Loadability.DAMAGED, null);
 		}
 		final Header header;
 		final byte[] table;
@@ -303,17 +331,45 @@ public final class SavedGame {
 			header = Header.read(in);
 			final byte[] tableBytes = new byte[in.readInt()];
 			in.readFully(tableBytes);
-			table = readFully(gunzip(tableBytes));
+			table = gunzipFully(tableBytes);
 		}
 		catch (final IOException | RuntimeException e) {
-			return Loadability.DAMAGED;
+			return new Checked(Loadability.DAMAGED, null);
 		}
 		try {
 			SavedObjectGraph.checkClassesMatch(table, header.formatVersion);
 		}
 		catch (final IOException | RuntimeException e) {
-			return Loadability.OTHER_VERSION;
+			return new Checked(Loadability.OTHER_VERSION, null);
 		}
+		return new Checked(Loadability.LOADABLE, header);
+	}
+
+	/**
+	 * With a running game, a save of its map is also held against its scripts, as loading would. A save of another
+	 * map can only be checked that far once loading started.
+	 */
+	public static Loadability loadability(final FileHandle file, final War3MapViewer running) {
+		final String cacheKey = failureKey(file) + "|" + file.length();
+		Checked checked;
+		synchronized (CHECKED) {
+			checked = CHECKED.get(cacheKey);
+		}
+		if (checked == null) {
+			checked = checkFile(file);
+			if (checked.reason != Loadability.DAMAGED) {
+				synchronized (CHECKED) {
+					if (CHECKED.size() >= CHECKED_LIMIT) {
+						CHECKED.clear();
+					}
+					CHECKED.put(cacheKey, checked);
+				}
+			}
+		}
+		if (checked.reason != Loadability.LOADABLE) {
+			return checked.reason;
+		}
+		final Header header = checked.header;
 		final Loadability failed = FAILED_LOADS.get(failureKey(file));
 		if (failed != null) {
 			return failed;
@@ -407,6 +463,7 @@ public final class SavedGame {
 		header.gameSeed = viewer.getGameSeed();
 		header.campaign = viewer.getCampaign();
 		header.reforgedCampaignMaps = viewer.isReforgedCampaignMaps();
+		header.campaignGame = viewer.isCampaignGame();
 		header.difficulty = viewer.getMapConfig() == null ? null : viewer.getMapConfig().getGameDifficulty();
 		for (int i = 0; i < simulation.getGameData().getMaxPlayers(); i++) {
 			final CPlayer player = simulation.getPlayer(i);
@@ -471,11 +528,23 @@ public final class SavedGame {
 			}
 
 			// Only taking the state apart has to happen between two steps; the rest is left to the save writer.
-			final SavedObjectGraph.Bytes bodyBytes = new SavedObjectGraph.Bytes(1 << 22);
+			// The bodies are most of the save and are compressed as they are written, by a thread beside this one:
+			// kept whole until the background write they were a second copy of the state, tens of megabytes at once.
+			final SavedObjectGraph.Bytes bodyBytes = new SavedObjectGraph.Bytes(1 << 20);
+			final SavedObjectGraph.GzipPipe bodyPipe = new SavedObjectGraph.GzipPipe();
 			final SavedObjectGraph.Writer writer;
-			try (SavedObjectGraph.BytesData bodies = new SavedObjectGraph.BytesData(bodyBytes)) {
-				writer = new SavedObjectGraph.Writer(rules, bodies);
-				writer.writeRoot(root);
+			final SavedObjectGraph.Bytes compressedBodies;
+			try {
+				bodyBytes.streamTo(bodyPipe);
+				try (SavedObjectGraph.BytesData bodies = new SavedObjectGraph.BytesData(bodyBytes)) {
+					writer = new SavedObjectGraph.Writer(rules, bodies);
+					writer.writeRoot(root);
+				}
+				bodyBytes.finishStream();
+				compressedBodies = bodyPipe.finish();
+			}
+			finally {
+				bodyPipe.abort();
 			}
 			header.positions = rules.getPositions();
 			header.positions.recordGlobals(scopes);
@@ -486,14 +555,23 @@ public final class SavedGame {
 			try (DataOutputStream out = new DataOutputStream(headerBytes)) {
 				header.write(out);
 			}
+			// The two lengths come before the data they count, so they are filled in once the data is written.
+			final long[] lengthAt = new long[2];
+			final int[] length = new int[2];
 			CSaveStorage.writeInBackground(file, out -> {
-				final SavedObjectGraph.Bytes tableBytes = gzip(table::writeToAndRelease);
-				final SavedObjectGraph.Bytes compressedBodies = gzip(bodyBytes::writeToAndRelease);
 				headerBytes.writeTo(out);
-				out.writeInt(tableBytes.size());
-				tableBytes.writeTo(out);
-				out.writeInt(compressedBodies.size());
-				compressedBodies.writeTo(out);
+				lengthAt[0] = out.size();
+				out.writeInt(0);
+				length[0] = gzip(table::writeToAndRelease, out);
+				lengthAt[1] = out.size();
+				out.writeInt(0);
+				length[1] = compressedBodies.size();
+				compressedBodies.writeToAndRelease(out);
+			}, patched -> {
+				for (int i = 0; i < 2; i++) {
+					patched.seek(lengthAt[i]);
+					patched.writeInt(length[i]);
+				}
 			});
 			final StringBuilder report = new StringBuilder("Saved game ").append(file.name()).append(": ")
 					.append(writer.objectCount()).append(" objects, ")
@@ -515,24 +593,45 @@ public final class SavedGame {
 		void writeTo(OutputStream out) throws IOException;
 	}
 
-	/** Compressed into chunks: growing one array copied the result again at each doubling. */
-	private static SavedObjectGraph.Bytes gzip(final Content content) throws IOException {
-		final SavedObjectGraph.Bytes compressed = new SavedObjectGraph.Bytes(1 << 16);
-		try (GZIPOutputStream out = new GZIPOutputStream(compressed, 1 << 16)) {
+	/** Compressed straight into the file; returns the compressed length. */
+	private static int gzip(final Content content, final DataOutputStream target) throws IOException {
+		final int before = target.size();
+		final OutputStream open = new FilterOutputStream(target) {
+			@Override
+			public void write(final byte[] b, final int off, final int len) throws IOException {
+				this.out.write(b, off, len);
+			}
+
+			@Override
+			public void close() throws IOException {
+				flush();
+			}
+		};
+		try (GZIPOutputStream out = new GZIPOutputStream(open, 1 << 16)) {
 			content.writeTo(out);
 		}
-		return compressed;
+		return target.size() - before;
 	}
 
-	private static byte[] readFully(final DataInputStream compressed) throws IOException {
-		try (DataInputStream in = compressed) {
-			final ByteArrayOutputStream out = new ByteArrayOutputStream(1 << 16);
-			final byte[] buffer = new byte[1 << 16];
-			int read;
-			while ((read = in.read(buffer)) != -1) {
-				out.write(buffer, 0, read);
+	/**
+	 * The gzip trailer holds the length of the content, so the result is read into an array of its exact size; going
+	 * through a growing buffer held two to three copies of a table that runs to megabytes at once.
+	 */
+	static byte[] gunzipFully(final byte[] compressed) throws IOException {
+		try (DataInputStream in = gunzip(compressed)) {
+			final int n = compressed.length;
+			final long size = (n < 4) ? -1
+					: ((compressed[n - 4] & 0xFFL) | ((compressed[n - 3] & 0xFFL) << 8)
+							| ((compressed[n - 2] & 0xFFL) << 16) | ((compressed[n - 1] & 0xFFL) << 24));
+			// Deflate cannot pack more than about 1000 to 1, so a trailer saying more is damaged.
+			if ((size >= 0) && (size < Integer.MAX_VALUE - 8) && (size <= (n * 1100L) + 1024)) {
+				final byte[] result = new byte[(int) size];
+				in.readFully(result);
+				if (in.read() == -1) {
+					return result;
+				}
 			}
-			return out.toByteArray();
+			throw new IOException("Damaged save: content length differs from its trailer");
 		}
 	}
 
@@ -550,13 +649,12 @@ public final class SavedGame {
 		final byte[] table;
 		try (DataInputStream in = new DataInputStream(new BufferedInputStream(file.read(), 1 << 16))) {
 			header = Header.read(in);
-			tableBytes = new byte[in.readInt()];
-			in.readFully(tableBytes);
-			bodyBytes = new byte[in.readInt()];
-			in.readFully(bodyBytes);
+			final long fileLength = file.length();
+			tableBytes = readBlock(in, fileLength);
+			bodyBytes = readBlock(in, fileLength);
 			checkIntact(tableBytes);
 			checkIntact(bodyBytes);
-			table = readFully(gunzip(tableBytes));
+			table = gunzipFully(tableBytes);
 			// A save from another engine build must be refused here, while the map can still start normally.
 			try {
 				SavedObjectGraph.checkClassesMatch(table, header.formatVersion);
@@ -573,7 +671,15 @@ public final class SavedGame {
 		}
 		final List<JassAIEnvironment> aiEnvironments = new ArrayList<>();
 		for (final AiEntry entry : header.aiScripts) {
-			aiEnvironments.add(simulation.getPlayer(entry.playerIndex).getAiScript());
+			final JassAIEnvironment ai = (entry.playerIndex >= 0)
+					&& (entry.playerIndex < simulation.getGameData().getMaxPlayers())
+							? simulation.getPlayer(entry.playerIndex).getAiScript()
+							: null;
+			if (ai == null) {
+				throw new LoadRefused(Loadability.OTHER_SCRIPTS,
+						"The AI script " + entry.scriptFile + " of player " + entry.playerIndex + " did not start");
+			}
+			aiEnvironments.add(ai);
 		}
 		final Map<Integer, CDestructable> placedDestructables = new HashMap<>();
 		int legacyHandleId = HandleIdAllocator.LEGACY_FIRST_ID;
@@ -698,6 +804,20 @@ public final class SavedGame {
 	/** Loads a script again without running it: for a player's AI, or for the map's own program at index -1. */
 	public interface AiScriptStarter {
 		void start(AiEntry entry);
+	}
+
+	/**
+	 * A length that a cut or damaged file gives wrongly must not become an allocation: no block is longer than the file
+	 * it is in.
+	 */
+	static byte[] readBlock(final DataInputStream in, final long fileLength) throws IOException {
+		final int length = in.readInt();
+		if ((length < 0) || (length > fileLength)) {
+			throw new IOException("Damaged save: a block of " + length + " bytes in a file of " + fileLength);
+		}
+		final byte[] block = new byte[length];
+		in.readFully(block);
+		return block;
 	}
 
 	private static void checkIntact(final byte[] compressed) throws IOException {

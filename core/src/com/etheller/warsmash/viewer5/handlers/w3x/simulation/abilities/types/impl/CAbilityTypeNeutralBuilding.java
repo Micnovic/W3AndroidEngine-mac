@@ -27,7 +27,7 @@ public class CAbilityTypeNeutralBuilding extends CAbilityType<CAbilityTypeNeutra
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeNeutralBuildingLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeNeutralBuildingLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityNeutralBuilding heroAbility = ((CAbilityNeutralBuilding) existingAbility);
 
 		heroAbility.setActivationRadius(levelData.getActivationRadius());

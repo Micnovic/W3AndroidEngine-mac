@@ -2,6 +2,9 @@ package com.etheller.warsmash.parsers.jass.ai;
 
 import static com.etheller.warsmash.parsers.jass.ai.AIUnits.distance;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitClassification;
@@ -60,7 +63,7 @@ final class AITowns {
 	static void refreshTowns(final AIController ai) {
 		for (final AITown town : ai.towns) {
 			CUnit mine = town.getMine();
-			if ((mine == null) || mine.isDead()) {
+			if ((mine == null) || ai.isGone(mine)) {
 				mine = findGoldMineNear(ai, town.getX(), town.getY(), town.getId() == 0 ? 1600f : 400f);
 				town.setMine(mine);
 			}
@@ -159,7 +162,7 @@ final class AITowns {
 
 	static boolean townHasHall(final AIController ai, final int id) {
 		final AITown town = getTown(ai, id);
-		return (town != null) && (town.getHall() != null) && !town.getHall().isDead();
+		return (town != null) && (town.getHall() != null) && !ai.isGone(town.getHall());
 	}
 
 	private static boolean isMineOwned(final AIController ai, final AITown town) {
@@ -207,20 +210,51 @@ final class AITowns {
 		return null;
 	}
 
+	/** One pass over the units for everything an expansion check looks at. */
+	private static final class ExpansionScan {
+		final List<CUnit> mines = new ArrayList<>();
+		final List<CUnit> overlays = new ArrayList<>();
+		final List<CUnit> foreignHalls = new ArrayList<>();
+
+		ExpansionScan(final AIController ai) {
+			for (final CUnit unit : ai.simulation.getUnits()) {
+				if (unit.isDead()) {
+					continue;
+				}
+				if ((unit.getGoldMineData() != null) && (unit.getOverlayedGoldMineData() == null)) {
+					this.mines.add(unit);
+				}
+				if (unit.getOverlayedGoldMineData() != null) {
+					this.overlays.add(unit);
+				}
+				if ((unit.getPlayerIndex() != ai.playerIndex)
+						&& unit.getClassifications().contains(CUnitClassification.TOWNHALL)) {
+					this.foreignHalls.add(unit);
+				}
+			}
+		}
+	}
+
 	static int getNextExpansion(final AIController ai) {
-		if ((ai.pendingExpansion != null) && isExpansionAvailable(ai, ai.pendingExpansion.getMine())) {
-			return ai.pendingExpansion.getId();
+		ExpansionScan scan = null;
+		if (ai.pendingExpansion != null) {
+			scan = new ExpansionScan(ai);
+			if (isExpansionAvailable(ai, ai.pendingExpansion.getMine(), scan)) {
+				return ai.pendingExpansion.getId();
+			}
 		}
 		ai.pendingExpansion = null;
 		final AITown home = getTown(ai, 0);
 		if (home == null) {
 			return -1;
 		}
+		if (scan == null) {
+			scan = new ExpansionScan(ai);
+		}
 		CUnit best = null;
 		float bestDistance = Float.MAX_VALUE;
-		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (!unit.isDead() && (unit.getGoldMineData() != null) && (unit.getOverlayedGoldMineData() == null)
-					&& isExpansionAvailable(ai, unit)) {
+		for (final CUnit unit : scan.mines) {
+			if (isExpansionAvailable(ai, unit, scan)) {
 				final float d = distance(home.getX(), home.getY(), unit.getX(), unit.getY());
 				if (d < bestDistance) {
 					bestDistance = d;
@@ -235,19 +269,23 @@ final class AITowns {
 		return ai.pendingExpansion.getId();
 	}
 
-	private static boolean isExpansionAvailable(final AIController ai, final CUnit mine) {
-		if ((mine == null) || mine.isDead() || (mine.getGold() <= 0) || (findOverlayOn(ai, mine) != null)) {
+	private static boolean isExpansionAvailable(final AIController ai, final CUnit mine, final ExpansionScan scan) {
+		if ((mine == null) || ai.isGone(mine) || (mine.getGold() <= 0)) {
 			return false;
+		}
+		for (final CUnit unit : scan.overlays) {
+			if ((unit.getOverlayedGoldMineData().getParentGoldMineUnit() == mine)
+					|| (distance(unit.getX(), unit.getY(), mine.getX(), mine.getY()) < 64)) {
+				return false;
+			}
 		}
 		for (final AITown town : ai.towns) {
 			if (town.getMine() == mine) {
 				return false;
 			}
 		}
-		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (!unit.isDead() && (unit.getPlayerIndex() != ai.playerIndex)
-					&& unit.getClassifications().contains(CUnitClassification.TOWNHALL)
-					&& (distance(unit.getX(), unit.getY(), mine.getX(), mine.getY()) < 1200f)) {
+		for (final CUnit unit : scan.foreignHalls) {
+			if (distance(unit.getX(), unit.getY(), mine.getX(), mine.getY()) < 1200f) {
 				return false;
 			}
 		}
@@ -265,9 +303,15 @@ final class AITowns {
 			final float radius) {
 		CUnit best = null;
 		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (ai.isEnemy(unit) && (distance(x, y, unit.getX(), unit.getY()) < radius)
-					&& ((best == null) || (unit.getUnitType().getLevel() > best.getUnitType().getLevel()))) {
-				best = unit;
+			if (ai.isEnemy(unit) && (distance(x, y, unit.getX(), unit.getY()) < radius)) {
+				// Measured: of equal ones the nearest to the expansion, whichever came first.
+				final int level = unit.getUnitType().getLevel();
+				if ((best == null) || (level > best.getUnitType().getLevel())
+						|| ((level == best.getUnitType().getLevel())
+								&& (distance(x, y, unit.getX(), unit.getY()) < distance(x, y, best.getX(),
+										best.getY())))) {
+					best = unit;
+				}
 			}
 		}
 		return best;

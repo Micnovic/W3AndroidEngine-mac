@@ -115,14 +115,15 @@ public final class JassNumbers {
 	}
 
 	/**
-	 * A real literal in script source: the whole part and the fraction part are read separately and then added.
+	 * A real literal in script source: the whole part and the fraction part are read separately and then added. The
+	 * whole part is read as a 32-bit integer, so it wraps (10000000000.0 is 1410065408.0).
 	 */
 	public static double parseLiteral(final String text) {
 		final int dot = text.indexOf('.');
 		if (dot < 0) {
-			return digitsAsReal(text);
+			return wholeLiteralAsReal(text);
 		}
-		final double whole = digitsAsReal(text.substring(0, dot));
+		final double whole = wholeLiteralAsReal(text.substring(0, dot));
 		final String fraction = text.substring(dot + 1);
 		if (fraction.isEmpty()) {
 			return whole;
@@ -169,6 +170,13 @@ public final class JassNumbers {
 			return 0;
 		}
 		return reciprocal(StrictMath.pow(10, exponent));
+	}
+
+	private static double wholeLiteralAsReal(final String digits) {
+		if (digits.isEmpty()) {
+			return 0;
+		}
+		return fromInt(new BigInteger(digits).intValue());
 	}
 
 	private static double digitsAsReal(final String digits) {

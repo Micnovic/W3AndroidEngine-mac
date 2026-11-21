@@ -10,4 +10,12 @@ public interface MdxAssetLoader {
 	public MdxModel emptyModel();
 
 	public ArgbImage loadPathingTexture(String pathingTexture);
+
+	/**
+	 * While set and the game goes on, the models loaded from now on are read on a helper thread, see
+	 * {@link com.etheller.warsmash.viewer5.ModelViewer#setDeferModelLoads}.
+	 *
+	 * @return the setting before
+	 */
+	public boolean setDeferModelLoadsInGame(boolean defer);
 }

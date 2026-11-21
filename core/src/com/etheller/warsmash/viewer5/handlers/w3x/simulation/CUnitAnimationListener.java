@@ -42,4 +42,76 @@ public interface CUnitAnimationListener {
 
 	void clearHeadFacing();
 
+	/** Stands in for the model of a unit that left the game, so the unit no longer keeps its model alive. */
+	CUnitAnimationListener NONE = new CUnitAnimationListener() {
+		@Override
+		public void playAnimation(final boolean force, final PrimaryTag animationName,
+				final EnumSet<SecondaryTag> secondaryAnimationTags, final float speedRatio,
+				final boolean allowRarityVariations) {
+		}
+
+		@Override
+		public void playAnimationWithDuration(final boolean force, final PrimaryTag animationName,
+				final EnumSet<SecondaryTag> secondaryAnimationTags, final float duration,
+				final boolean allowRarityVariations) {
+		}
+
+		@Override
+		public void playWalkAnimation(final boolean force, final float currentMovementSpeed,
+				final boolean allowRarityVariations) {
+		}
+
+		@Override
+		public void playAnimation(final boolean force, final int sequenceIndex, final float speedRatio,
+				final boolean allowRarityVariations) {
+		}
+
+		@Override
+		public void queueAnimation(final PrimaryTag animationName, final EnumSet<SecondaryTag> secondaryAnimationTags,
+				final boolean allowRarityVariations) {
+		}
+
+		@Override
+		public void playStopAnimation() {
+		}
+
+		@Override
+		public boolean addSecondaryTag(final SecondaryTag secondaryTag) {
+			return false;
+		}
+
+		@Override
+		public boolean removeSecondaryTag(final SecondaryTag secondaryTag) {
+			return false;
+		}
+
+		@Override
+		public void forceResetCurrentAnimation() {
+		}
+
+		@Override
+		public void replayEndedAnimation() {
+		}
+
+		@Override
+		public EnumSet<SecondaryTag> getSecondaryTags() {
+			return EnumSet.noneOf(SecondaryTag.class);
+		}
+
+		@Override
+		public void lockTurretFacing(final AbilityTarget target) {
+		}
+
+		@Override
+		public void clearTurretFacing() {
+		}
+
+		@Override
+		public void lockHeadFacing(final AbilityTarget target) {
+		}
+
+		@Override
+		public void clearHeadFacing() {
+		}
+	};
 }

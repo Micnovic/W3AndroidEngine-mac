@@ -27,13 +27,38 @@ public final class LanSessionService extends Service {
 	private static final String CHANNEL = "lan-session";
 	private static final int NOTIFICATION_ID = 6112;
 
+	private static final Object STATE = new Object();
+	private static boolean wanted;
+	private static LanSessionService running;
+	private static int lastStartId;
+
 	/** Starts the service; the system gives it a few seconds to show its notification. */
 	static void start(final Context context) {
-		context.startForegroundService(new Intent(context, LanSessionService.class));
+		synchronized (STATE) {
+			wanted = true;
+		}
+		try {
+			context.startForegroundService(new Intent(context, LanSessionService.class));
+		}
+		catch (final RuntimeException e) {
+			synchronized (STATE) {
+				wanted = false;
+			}
+			throw e;
+		}
 	}
 
+	/**
+	 * A service stopped before the system created it makes the system complain that it never went foreground. So a stop
+	 * that comes too early only clears the wish: the service still shows its notification, then ends by itself.
+	 */
 	static void stop(final Context context) {
-		context.stopService(new Intent(context, LanSessionService.class));
+		synchronized (STATE) {
+			wanted = false;
+			if (running != null) {
+				running.stopSelf(lastStartId);
+			}
+		}
 	}
 
 	/** Whether Android would show the notification (before Android 13 it always does). */
@@ -52,6 +77,9 @@ public final class LanSessionService extends Service {
 	@Override
 	public void onCreate() {
 		super.onCreate();
+		synchronized (STATE) {
+			running = this;
+		}
 		// Before anything can stop it: a service started as foreground that never shows its notification crashes the app.
 		showNotification();
 	}
@@ -59,7 +87,23 @@ public final class LanSessionService extends Service {
 	@Override
 	public int onStartCommand(final Intent intent, final int flags, final int startId) {
 		showNotification();
+		synchronized (STATE) {
+			lastStartId = startId;
+			if (!wanted) {
+				stopSelf(startId);
+			}
+		}
 		return START_NOT_STICKY;
+	}
+
+	@Override
+	public void onDestroy() {
+		synchronized (STATE) {
+			if (running == this) {
+				running = null;
+			}
+		}
+		super.onDestroy();
 	}
 
 	@Override

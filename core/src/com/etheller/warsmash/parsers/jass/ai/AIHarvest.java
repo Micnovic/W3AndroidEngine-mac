@@ -9,6 +9,7 @@ import static com.etheller.warsmash.parsers.jass.ai.AIUnits.isWorkerType;
 import static com.etheller.warsmash.parsers.jass.ai.AIUnits.minesFromOverlay;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -75,11 +76,11 @@ final class AIHarvest {
 		final List<CUnit> workers = new ArrayList<>();
 		for (final CUnit unit : ai.simulation.getUnits()) {
 			if (ai.isOurs(unit) && !unit.isGuardPositionRemoved() && !ai.isBuildJobWorker(unit)
-					&& !ai.attackCaptain.getMembers().contains(unit) && (canHarvestGold(unit) || canHarvestLumber(unit))) {
+					&& !ai.attackCaptain.isMember(unit) && (canHarvestGold(unit) || canHarvestLumber(unit))) {
 				workers.add(unit);
 			}
 		}
-		ai.harvestJobs.keySet().retainAll(workers);
+		ai.harvestJobs.keySet().retainAll(new HashSet<>(workers));
 		ai.harvestUnsent.retainAll(ai.harvestJobs.keySet());
 		// A script sets its requests over several calls that may run in different ticks; they are dealt once it is
 		// done.
@@ -108,11 +109,11 @@ final class AIHarvest {
 		// Orders the town cannot carry out yet (no trees or mine known) are given again until the worker sets off.
 		for (final Iterator<CUnit> iterator = ai.harvestUnsent.iterator(); iterator.hasNext();) {
 			final CUnit worker = iterator.next();
-			if (!isIdle(worker)) {
+			final int[] job = ai.harvestJobs.get(worker);
+			if (!isIdle(worker) || (job == null)) {
 				iterator.remove();
 			}
 			else if (!worker.isHidden()) {
-				final int[] job = ai.harvestJobs.get(worker);
 				orderHarvest(ai, worker, job[0], job[1]);
 			}
 		}

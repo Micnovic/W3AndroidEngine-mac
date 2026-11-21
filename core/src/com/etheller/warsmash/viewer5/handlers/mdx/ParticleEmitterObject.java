@@ -14,30 +14,25 @@ public class ParticleEmitterObject extends GenericObject implements EmitterObjec
 	public float gravity;
 	public float emissionRate;
 
-	/**
-	 * No need to create instances of the internal model if it didn't load.
-	 *
-	 * Such instances won't actually render, and who knows if the model will ever
-	 * load?
-	 */
-	public boolean ok = false;
-
 	public ParticleEmitterObject(final MdxModel model, final MdlxParticleEmitter emitter, final int index) {
 		super(model, emitter, index);
 
-		this.internalModel = War3MapViewer.loadModelMdx(model.viewer.dataSource, model.viewer, emitter.getPath(),
-				model.pathSolver, model.solverParams);
+		// While the game goes on, the particle model is read and built a few units a frame like an attachment's;
+		// the emitter emits once it is built.
+		final boolean deferBefore = model.viewer.setDeferModelLoads(model.viewer.isDeferModelTextures());
+		try {
+			this.internalModel = War3MapViewer.loadModelMdx(model.viewer.dataSource, model.viewer, emitter.getPath(),
+					model.pathSolver, model.solverParams);
+		}
+		finally {
+			model.viewer.setDeferModelLoads(deferBefore);
+		}
 		this.speed = emitter.getSpeed();
 		this.latitude = emitter.getLatitude();
 		this.longitude = emitter.getLongitude();
 		this.lifeSpan = emitter.getLifeSpan();
 		this.gravity = emitter.getGravity();
 		this.emissionRate = emitter.getEmissionRate();
-
-		// Activate emitters based on this emitter object only when and if the internal
-		// model loads successfully.
-		// TODO async removed here
-		this.ok = this.internalModel.ok;
 	}
 
 	public int getSpeed(final float[] out, final int sequence, final int frame, final int counter) {
@@ -76,6 +71,8 @@ public class ParticleEmitterObject extends GenericObject implements EmitterObjec
 
 	@Override
 	public boolean ok() {
-		return this.ok;
+		// No need to create instances of the internal model if it didn't load: they would not render. A model still
+		// being built is not ok yet.
+		return (this.internalModel != null) && this.internalModel.ok;
 	}
 }

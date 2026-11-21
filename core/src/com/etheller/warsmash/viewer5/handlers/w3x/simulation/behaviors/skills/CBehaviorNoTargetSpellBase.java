@@ -1,5 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.skills;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
+import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CReleaseCheats;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -9,6 +11,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CExactExpiry;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.JassGameEventsWar3;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringErrorKeys;
 
@@ -40,10 +43,15 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 
 	@Override
 	public CBehavior update(final CSimulation simulation) {
-		this.unit.getUnitAnimationListener().playAnimation(false, this.ability.getCastingPrimaryTag(),
-				this.ability.getCastingSecondaryTags(), 1.0f, true);
+		if (this.doneEffect && this.channeling) {
+			// A one-shot cast animation plays once, a channel keeps its animation running until it ends.
+			this.unit.getUnitAnimationListener().playAnimation(false, this.ability.getCastingPrimaryTag(),
+					this.ability.getCastingSecondaryTags(), 1.0f, true);
+		}
 		if (this.castStartTick == 0) {
 			this.castStartTick = simulation.getGameTurnTick();
+			this.unit.getUnitAnimationListener().playAnimation(true, this.ability.getCastingPrimaryTag(),
+					this.ability.getCastingSecondaryTags(), 1.0f, true);
 			if (!this.castEventsFired) {
 				this.castEventsFired = true;
 				final CBehavior prevBeh = this.unit.getCurrentBehavior();
@@ -114,6 +122,8 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 			this.unit.fireSpellEvents(simulation, JassGameEventsWar3.EVENT_UNIT_SPELL_EFFECT, this.ability, null);
 			this.unit.setMana(Math.max(0, this.unit.getMana() - manaCost));
 			this.channeling = this.ability.doEffect(simulation, this.unit, null);
+			// 1.29: a spell without a target takes its Effectart on the caster, the caster being its target.
+			simulation.createTemporarySpellEffectOnUnit(this.unit, this.ability.getAlias(), CEffectType.EFFECT);
 			if (this.unit.getInventoryData() != null) {
 				this.unit.getInventoryData().onItemAbilityEffect(simulation, this.unit, this.ability);
 			}
@@ -121,6 +131,7 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 				simulation.unitLoopSoundEffectEvent(this.unit, this.ability.getAlias());
 			} else {
 				simulation.unitSoundEffectEvent(this.unit, this.ability.getAlias());
+				this.unit.getUnitAnimationListener().queueAnimation(PrimaryTag.STAND, SequenceUtils.EMPTY, true);
 			}
 		}
 		this.channeling = this.channeling && this.ability.doChannelTick(simulation, this.unit, null);

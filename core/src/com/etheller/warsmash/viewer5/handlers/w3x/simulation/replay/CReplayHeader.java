@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.etheller.warsmash.launcher.ProjectInfo;
+import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ai.AIDifficulty;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.CBasePlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
@@ -38,6 +39,8 @@ public final class CReplayHeader {
 	private final List<Slot> slots;
 	private final byte[] gameCaches;
 	private final int keyboardAndMouseSlots;
+	private final boolean campaignGame;
+	private boolean wholeChecksums;
 
 	/**
 	 * @param dataChecksum the checksum of the game data the game ran on (see {@code GameReplays#dataChecksum})
@@ -60,7 +63,22 @@ public final class CReplayHeader {
 			final int dataChecksum, final long recordedAt, final int seed, final int localPlayerIndex,
 			final float gameSpeed, final CMapDifficulty difficulty, final int checksumInterval, final List<Slot> slots,
 			final byte[] gameCaches, final int keyboardAndMouseSlots) {
+		this(engineVersion, buildCommit, officialBuild, mapPath, mapChecksum, mapSize, dataChecksum, recordedAt, seed,
+				localPlayerIndex, gameSpeed, difficulty, checksumInterval, slots, gameCaches, keyboardAndMouseSlots,
+				CampaignMaps.isCampaignMap(mapPath));
+	}
+
+	/**
+	 * @param campaignGame whether the game was a campaign's; the header of a replay recorded before it was kept takes
+	 *                     it from the map's folder
+	 */
+	public CReplayHeader(final String engineVersion, final String buildCommit, final boolean officialBuild,
+			final String mapPath, final int mapChecksum, final long mapSize,
+			final int dataChecksum, final long recordedAt, final int seed, final int localPlayerIndex,
+			final float gameSpeed, final CMapDifficulty difficulty, final int checksumInterval, final List<Slot> slots,
+			final byte[] gameCaches, final int keyboardAndMouseSlots, final boolean campaignGame) {
 		this.keyboardAndMouseSlots = keyboardAndMouseSlots;
+		this.campaignGame = campaignGame;
 		this.engineVersion = engineVersion;
 		this.buildCommit = buildCommit;
 		this.officialBuild = officialBuild;
@@ -87,20 +105,32 @@ public final class CReplayHeader {
 			final long mapSize, final int dataChecksum, final long recordedAt, final int seed,
 			final int localPlayerIndex, final float gameSpeed, final War3MapConfig config, final int checksumInterval,
 			final byte[] gameCaches) {
+		return of(engineVersion, buildCommit, officialBuild, mapPath, mapChecksum, mapSize, dataChecksum, recordedAt,
+				seed, localPlayerIndex, gameSpeed, config, checksumInterval, gameCaches,
+				CampaignMaps.isCampaignMap(mapPath));
+	}
+
+	public static CReplayHeader of(final String engineVersion, final String buildCommit, final boolean officialBuild,
+			final String mapPath, final int mapChecksum,
+			final long mapSize, final int dataChecksum, final long recordedAt, final int seed,
+			final int localPlayerIndex, final float gameSpeed, final War3MapConfig config, final int checksumInterval,
+			final byte[] gameCaches, final boolean campaignGame) {
 		final List<Slot> slots = new ArrayList<>();
 		for (int i = 0; i < config.getMaxPlayers(); i++) {
 			slots.add(Slot.of(config.getPlayer(i)));
 		}
 		return new CReplayHeader(engineVersion, buildCommit, officialBuild, mapPath, mapChecksum, mapSize,
 				dataChecksum, recordedAt, seed,
-				localPlayerIndex, gameSpeed, config.getGameDifficulty(), checksumInterval, slots, gameCaches);
+				localPlayerIndex, gameSpeed, config.getGameDifficulty(), checksumInterval, slots, gameCaches, 0,
+				campaignGame);
 	}
 
 	/** The same header with these slots marked as played with a keyboard and mouse (bit i: player slot i). */
 	public CReplayHeader withKeyboardAndMouseSlots(final int slotMask) {
 		return new CReplayHeader(this.engineVersion, this.buildCommit, this.officialBuild, this.mapPath,
 				this.mapChecksum, this.mapSize, this.dataChecksum, this.recordedAt, this.seed, this.localPlayerIndex,
-				this.gameSpeed, this.difficulty, this.checksumInterval, this.slots, this.gameCaches, slotMask);
+				this.gameSpeed, this.difficulty, this.checksumInterval, this.slots, this.gameCaches, slotMask,
+				this.campaignGame);
 	}
 
 	/** Whether the human in this player slot played with a keyboard and mouse when the game began. */
@@ -175,6 +205,19 @@ public final class CReplayHeader {
 		return this.slots;
 	}
 
+	/**
+	 * Whether the replay's checksums were made all at once at their step (formats before 8); later ones are spread
+	 * over the steps up to the one they are named by.
+	 */
+	public boolean isWholeChecksums() {
+		return this.wholeChecksums;
+	}
+
+	/** Whether the game was a campaign's, so that it is played back with a campaign's rules and graphics. */
+	public boolean isCampaignGame() {
+		return this.campaignGame;
+	}
+
 	public byte[] getGameCaches() {
 		return this.gameCaches == null ? null : this.gameCaches.clone();
 	}
@@ -205,6 +248,7 @@ public final class CReplayHeader {
 			out.write(this.gameCaches);
 		}
 		out.writeInt(this.keyboardAndMouseSlots);
+		out.writeBoolean(this.campaignGame);
 		out.writeUTF(ProjectInfo.AUTHORSHIP);
 	}
 
@@ -230,17 +274,21 @@ public final class CReplayHeader {
 		final int cachesLength = in.readInt();
 		byte[] gameCaches = null;
 		if (cachesLength >= 0) {
-			gameCaches = new byte[cachesLength];
-			in.readFully(gameCaches);
+			gameCaches = CReplay.readBytes(in, cachesLength);
 		}
 		final int keyboardAndMouseSlots = formatVersion >= 5 ? in.readInt() : 0;
+		// Before format 7 a campaign game was told by where its map is kept.
+		final boolean campaignGame = formatVersion >= 7 ? in.readBoolean() : CampaignMaps.isCampaignMap(mapPath);
 		if (formatVersion >= 6) {
 			// Who made the build; kept for people reading the file, the simulation never needs it.
 			in.readUTF();
 		}
-		return new CReplayHeader(engineVersion, buildCommit, officialBuild, mapPath, mapChecksum, mapSize,
-				dataChecksum, recordedAt, seed,
-				localPlayerIndex, gameSpeed, difficulty, checksumInterval, slots, gameCaches, keyboardAndMouseSlots);
+		final CReplayHeader header = new CReplayHeader(engineVersion, buildCommit, officialBuild, mapPath,
+				mapChecksum, mapSize, dataChecksum, recordedAt, seed,
+				localPlayerIndex, gameSpeed, difficulty, checksumInterval, slots, gameCaches, keyboardAndMouseSlots,
+				campaignGame);
+		header.wholeChecksums = formatVersion < 8;
+		return header;
 	}
 
 	/** A player slot as the game setup left it. */

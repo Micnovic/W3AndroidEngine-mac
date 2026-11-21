@@ -4,10 +4,14 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Rectangle;
@@ -16,7 +20,9 @@ import com.etheller.interpreter.ast.debug.JassException;
 import com.etheller.interpreter.ast.execution.JassThread;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
+import com.etheller.interpreter.ast.scope.trigger.Trigger;
 import com.etheller.interpreter.ast.util.JassLog;
+import com.etheller.interpreter.ast.definition.JassDefinitionBlock;
 import com.etheller.interpreter.ast.util.JassProgram;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.HandleJassType;
@@ -35,6 +41,9 @@ import com.etheller.warsmash.parsers.fdf.datamodel.FramePoint;
 import com.etheller.warsmash.parsers.fdf.frames.SetPoint;
 import com.etheller.warsmash.parsers.fdf.frames.StringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
+import com.etheller.warsmash.parsers.jass.triggers.CForce;
+import com.etheller.warsmash.parsers.jass.triggers.CRect;
+import com.etheller.warsmash.parsers.jass.triggers.LocationJass;
 import com.etheller.warsmash.parsers.jass.triggers.UnitGroup;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.util.GameDataConstants;
@@ -48,8 +57,11 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.CBasePlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerState;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.region.CRegion;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimerJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CGameType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CHashtable;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CScriptDialog;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
 import net.warsmash.parsers.jass.SmashJassParser;
 
@@ -65,6 +77,7 @@ public class Jass2 {
 				war3MapViewer, meleeUI, files);
 		// The scripts of the game are simulation data: the same for every graphics set.
 		final DataSource scripts = dataSource.graphicsIndependent();
+		final List<String> readPaths = new ArrayList<>();
 		for (final String file : files) {
 			String jassFilePath = file;
 			if (!scripts.has(jassFilePath)) {
@@ -86,11 +99,13 @@ public class Jass2 {
 					if (lowerCasePath.startsWith(lowerCaseDirectoryPath)
 							|| lowerCasePath.startsWith(lowerCaseDirectoryPathLinux)) {
 						environment.scriptFailed(readJassFile(scripts, jassProgramVisitor, realPath));
+						readPaths.add(realPath);
 					}
 				}
 			}
 			else {
 				environment.scriptFailed(readJassFile(scripts, jassProgramVisitor, jassFilePath));
+				readPaths.add(jassFilePath);
 			}
 		}
 		// The handles the global initializers make come before the players in 1.29.
@@ -106,6 +121,11 @@ public class Jass2 {
 			war3MapViewer.simulation.getHandleIdAllocator().setEarlyIds(false);
 		}
 		jassProgramVisitor.getJassNativeManager().checkUnregisteredNatives();
+		for (final String path : readPaths) {
+			if (!isEngineScript(path)) {
+				preparseAIScripts(dataSource, uiViewport, uiScene, war3MapViewer, meleeUI, jassProgramVisitor, path);
+			}
+		}
 		return environment;
 	}
 
@@ -506,6 +526,7 @@ public class Jass2 {
 			globals.registerHandleType("hashtable");
 			globals.registerHandleType("framehandle");
 			globals.registerHandleType("minimapicon");
+			globals.registerHandleType("commandbuttoneffect");
 
 			// Warsmash Ability API
 			globals.registerHandleType("abilitytype");
@@ -770,6 +791,7 @@ public class Jass2 {
 			final HandleJassType hashtableType = globals.registerHandleType("hashtable");
 			final HandleJassType frameHandleType = globals.registerHandleType("framehandle");
 			final HandleJassType minimapiconType = globals.registerHandleType("minimapicon");
+			globals.registerHandleType("commandbuttoneffect");
 
 			// Warsmash Ability API
 			final HandleJassType abilitytypeType = globals.registerHandleType("abilitytype");
@@ -840,6 +862,36 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("CreateGroup",
 					(arguments, globalScope, triggerScope) -> new HandleJassValue(groupType,
 							new UnitGroup(configHandleIds.createHandleId())));
+			// The map's own global initializers run in this phase too, and create these as well.
+			jassProgramVisitor.getJassNativeManager().createNative("Location",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(locationType,
+							new LocationJass(arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue(),
+									arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue(),
+									configHandleIds.createHandleId())));
+			jassProgramVisitor.getJassNativeManager().createNative("CreateTrigger",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(triggerType,
+							configHandleIds.assign(new Trigger())));
+			jassProgramVisitor.getJassNativeManager().createNative("CreateForce",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(forceType,
+							configHandleIds.assign(new CForce())));
+			jassProgramVisitor.getJassNativeManager().createNative("CreateRegion",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(regionType,
+							configHandleIds.assign(new CRegion())));
+			jassProgramVisitor.getJassNativeManager().createNative("Rect", (arguments, globalScope, triggerScope) -> {
+				final float minx = arguments.get(0).visit(RealJassValueVisitor.getInstance()).floatValue();
+				final float miny = arguments.get(1).visit(RealJassValueVisitor.getInstance()).floatValue();
+				final float maxx = arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue();
+				final float maxy = arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue();
+				return new HandleJassValue(rectType,
+						configHandleIds.assign(new CRect(minx, miny, maxx - minx, maxy - miny)));
+			});
+			jassProgramVisitor.getJassNativeManager().createNative("InitHashtable",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(hashtableType,
+							configHandleIds.assign(new CHashtable())));
+			// There is no screen in this phase; a dialog made here only holds what the script gives it.
+			jassProgramVisitor.getJassNativeManager().createNative("DialogCreate",
+					(arguments, globalScope, triggerScope) -> new HandleJassValue(dialogType,
+							configHandleIds.assign(new CScriptDialog(globalScope, null, null))));
 			jassProgramVisitor.getJassNativeManager().createNative("SetPlayerState",
 					(arguments, globalScope, triggerScope) -> {
 						final CBasePlayer player = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
@@ -858,6 +910,11 @@ public class Jass2 {
 			if ((error != null) && (this.scriptError == null)) {
 				this.scriptError = error;
 			}
+		}
+
+		/** Why the scripts do not compile, or null. */
+		public Exception getScriptError() {
+			return this.scriptError;
 		}
 
 		public void config() {
@@ -907,6 +964,85 @@ public class Jass2 {
 		}
 	}
 
+	private static final String AI_COMMON_SCRIPT = "Scripts\\common.ai";
+	private static final Pattern AI_SCRIPT_LITERAL = Pattern.compile("\"([^\"\\r\\n]+\\.ai)\"",
+			Pattern.CASE_INSENSITIVE);
+
+	private static boolean isEngineScript(final String file) {
+		final String lower = file.toLowerCase(Locale.US);
+		return lower.endsWith("blizzard.j") || lower.endsWith("common.j");
+	}
+
+	/**
+	 * The parse of an AI file, shared by every AI player of the game: parsing is the expensive part of starting a
+	 * computer player.
+	 */
+	private static List<JassDefinitionBlock> parseAIFile(final DataSource scripts, final String aiFile,
+			final JassProgram cacheOwner) throws IOException {
+		final List<JassDefinitionBlock> cached = cacheOwner.getParsedBlocks(aiFile);
+		if (cached != null) {
+			return cached;
+		}
+		final List<JassDefinitionBlock> blocks = new ArrayList<>();
+		final JassProgram collector = new JassProgram() {
+			@Override
+			public void addAll(final List<JassDefinitionBlock> parsed) {
+				blocks.addAll(parsed);
+			}
+		};
+		try (InputStreamReader reader = new InputStreamReader(scripts.getResourceAsStream(aiFile),
+				StandardCharsets.UTF_8)) {
+			new SmashJassParser(reader).scanAndParse(aiFile, collector);
+		}
+		cacheOwner.putParsedBlocks(aiFile, blocks);
+		return blocks;
+	}
+
+	/**
+	 * Parses what the map's own script says its computer players need while the map loads, not in the first game
+	 * ticks.
+	 */
+	private static void preparseAIScripts(final DataSource dataSource, final Viewport uiViewport,
+			final Scene uiScene, final War3MapViewer war3MapViewer, final WarsmashUI meleeUI,
+			final JassProgram jassProgram, final String mapScriptPath) {
+		final DataSource scripts = dataSource.graphicsIndependent();
+		try {
+			final StringBuilder builder = new StringBuilder();
+			try (InputStreamReader reader = new InputStreamReader(scripts.getResourceAsStream(mapScriptPath),
+					StandardCharsets.UTF_8)) {
+				final char[] buffer = new char[8192];
+				int read;
+				while ((read = reader.read(buffer)) >= 0) {
+					builder.append(buffer, 0, read);
+				}
+			}
+			final String text = builder.toString();
+			if (!(text.contains("StartCampaignAI") || text.contains("StartMeleeAI")
+					|| text.contains("MeleeStartingAI")) || !scripts.has(AI_COMMON_SCRIPT)) {
+				return;
+			}
+			parseAIFile(scripts, AI_COMMON_SCRIPT, jassProgram);
+			// The first computer player pays for the class loading of its natives; a throwaway one makes that
+			// happen here. It is built like a real one and then dropped, so no game state is touched.
+			final JassProgram warm = new JassProgram();
+			warm.inheritFrom(jassProgram);
+			new JassAIEnvironment(warm, dataSource, uiViewport, uiScene, war3MapViewer.simulation, 0, meleeUI);
+			AINatives.registerSharedCommonAIFunctions(warm, war3MapViewer, meleeUI, war3MapViewer.simulation);
+			final Matcher matcher = AI_SCRIPT_LITERAL.matcher(text);
+			while (matcher.find()) {
+				final String filename = matcher.group(1);
+				final String scriptPath = scripts.has(filename) ? filename : "Scripts\\" + filename;
+				if (scripts.has(scriptPath)) {
+					parseAIFile(scripts, scriptPath, jassProgram);
+				}
+			}
+		}
+		catch (final Exception e) {
+			// Only an optimisation: a script that does not parse reports its error when the AI starts.
+			Log.info("AI script preparse skipped: " + e);
+		}
+	}
+
 	static void doAIScript(final DataSource dataSource, final Viewport uiViewport, final Scene uiScene,
 			final War3MapViewer war3MapViewer, final CPlayer player, final String filename, final WarsmashUI meleeUI,
 			final String[] originalFiles, final JassProgram jassProgramVisitor, final CSimulation game,
@@ -926,12 +1062,8 @@ public class Jass2 {
 			return;
 		}
 		try {
-			for (final String aiFile : new String[] { "Scripts\\common.ai", scriptPath }) {
-				try (InputStreamReader reader = new InputStreamReader(scripts.getResourceAsStream(aiFile),
-						StandardCharsets.UTF_8)) {
-					final SmashJassParser smashJassParser = new SmashJassParser(reader);
-					smashJassParser.scanAndParse(aiFile, jassProgram);
-				}
+			for (final String aiFile : new String[] { AI_COMMON_SCRIPT, scriptPath }) {
+				jassProgram.addAll(parseAIFile(scripts, aiFile, jassProgramVisitor));
 			}
 			jassProgram.initialize();
 		}

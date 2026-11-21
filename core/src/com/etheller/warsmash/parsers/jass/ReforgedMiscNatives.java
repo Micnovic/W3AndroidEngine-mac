@@ -23,21 +23,29 @@ import com.etheller.interpreter.ast.value.visitor.IntegerJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.ObjectJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.RealJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
+import com.etheller.warsmash.viewer5.FogSettings;
+import com.etheller.warsmash.viewer5.FogStyle;
+import com.etheller.warsmash.viewer5.handlers.w3x.ScriptUiState;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityDisableType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CAbilityAuraBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.template.AbstractCAbilityAbilityBuilderAuraTemplate;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CheckpointSaves;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIdUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.CommandButtonEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSound;
 
@@ -72,6 +80,7 @@ final class ReforgedMiscNatives {
 		natives.registerClientOnly();
 		natives.registerTriggerState();
 		natives.registerWithoutCounterpart();
+		natives.registerScriptInterface();
 	}
 
 	private void add(final String name, final JassFunction function) {
@@ -443,8 +452,9 @@ final class ReforgedMiscNatives {
 			final CPlayer player = object(arguments, 1);
 			return BooleanJassValue.of((force != null) && (player != null) && force.contains(player));
 		});
-		// The data of this engine is read for one language folder; its text is the one of the English game.
-		add("BlzGetLocale", (arguments, globalScope, triggerScope) -> new StringJassValue("enUS"));
+		// The language this machine reads its game data in. Every machine of a network game can differ, so a script
+		// must not let this reach the game state.
+		add("BlzGetLocale", (arguments, globalScope, triggerScope) -> new StringJassValue(GameLanguage.inGame()));
 		add("BlzConvertColor", (arguments, globalScope, triggerScope) -> IntegerJassValue
 				.of(((integer(arguments, 0) & 0xFF) << 24) | ((integer(arguments, 1) & 0xFF) << 16)
 						| ((integer(arguments, 2) & 0xFF) << 8) | (integer(arguments, 3) & 0xFF)));
@@ -474,6 +484,41 @@ final class ReforgedMiscNatives {
 		});
 		add("BlzSetTerrainFogDensity", (arguments, globalScope, triggerScope) -> {
 			this.viewer.worldScene.fogSettings.density = real(arguments, 0);
+			return null;
+		});
+		add("BlzSetTerrainFogHeightStart", (arguments, globalScope, triggerScope) -> {
+			this.viewer.worldScene.fogSettings.heightMin = real(arguments, 0);
+			return null;
+		});
+		add("BlzSetTerrainFogHeightEnd", (arguments, globalScope, triggerScope) -> {
+			this.viewer.worldScene.fogSettings.heightMax = real(arguments, 0);
+			return null;
+		});
+		// Same reading as the map's own fog setting: a value outside (0, 1) is the uncapped fog.
+		add("BlzSetTerrainFogMaxLinearDensity", (arguments, globalScope, triggerScope) -> {
+			final float maxOpacity = real(arguments, 0);
+			this.viewer.worldScene.fogSettings.maxOpacity = ((maxOpacity > 0) && (maxOpacity < 1)) ? maxOpacity : 1f;
+			return null;
+		});
+		add("BlzSetTerrainFogDrawOverSky", (arguments, globalScope, triggerScope) -> {
+			this.viewer.worldScene.fogSettings.drawOverSky = bool(arguments, 0);
+			return null;
+		});
+		add("SetTerrainFogExV", (arguments, globalScope, triggerScope) -> {
+			final FogSettings fog = this.viewer.worldScene.fogSettings;
+			fog.setStyleByIndex(integer(arguments, 0) + 1);
+			fog.start = real(arguments, 1);
+			fog.end = real(arguments, 2);
+			fog.density = real(arguments, 3);
+			fog.heightMin = real(arguments, 4);
+			fog.heightMax = real(arguments, 5);
+			final float linearStart = real(arguments, 6);
+			final float linearEnd = real(arguments, 7);
+			if ((fog.style == FogStyle.LINEAR) && (linearEnd > linearStart) && (linearEnd > 0)) {
+				fog.start = linearStart;
+				fog.end = linearEnd;
+			}
+			fog.color = new Color(real(arguments, 8), real(arguments, 9), real(arguments, 10), 1f);
 			return null;
 		});
 		add("BlzSetTerrainFogColor", (arguments, globalScope, triggerScope) -> {
@@ -559,22 +604,15 @@ final class ReforgedMiscNatives {
 	}
 
 	/**
-	 * Settings of features this engine does not have: HD water, height fog, point light shadows, the hero glow
-	 * model, the minimap picture, camera blockers and the sky and terrain switches. A map that sets them runs on;
-	 * the switches that read back (point light count) keep what was set.
+	 * Settings of features this engine does not have: HD water, height fog, point light shadows and camera blockers.
+	 * A map that sets them runs on; the switches that read back (point light count) keep what was set.
 	 */
 	private void registerWithoutCounterpart() {
-		ignored("no height fog in the renderer", "BlzSetTerrainFogHeightStart", "BlzSetTerrainFogHeightEnd");
 		ignored("no HD water in the renderer", "SetHDWaterParams", "BlzSetHDWaterColor", "BlzSetHDWaterColorOverride",
 				"BlzSetHDWaterVertexDisplacement", "BlzSetHDWaterMinOpacity", "BlzSetHDWaterMaxOpacity",
 				"BlzSetHDWaterReflectivity", "BlzSetHDWaterEmissivity", "BlzSetHDWaterEdgeSoftness",
 				"BlzSetHDWaterWaveStrength", "BlzSetHDWaterEnvMapStrength");
-		ignored("portrait lights come from the portrait model", "SetPortraitLight");
-		ignored("music keeps playing when the window loses focus on this engine", "BlzPauseThematicMusicOnFocusLost");
 		ignored("no camera blockers in the camera of this engine", "EnableCameraBlocker", "AddCameraBlocker");
-		ignored("terrain and sky are drawn as long as the map is", "BlzShowTerrain", "BlzShowSkyBox");
-		ignored("no checkpoint saves in this engine", "SetMaxCheckpointSaves");
-		add("BlzChangeMinimapTerrainTex", (arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
 		add("BlzSetMinShadowCastingPointLightCount", (arguments, globalScope, triggerScope) -> {
 			this.minShadowPointLights = integer(arguments, 0);
 			return null;
@@ -583,7 +621,102 @@ final class ReforgedMiscNatives {
 				.of(this.minShadowPointLights));
 	}
 
-	/** What only the client of the original has something to do with: a video recorder and its test harness. */
+	/**
+	 * What a script switches in the picture and the interface of this machine: terrain and sky, the minimap's
+	 * terrain, the portrait light, music on a lost focus, glows on command buttons, the team glow and color of
+	 * models, and the number of checkpoint saves kept. None of it is read by the simulation.
+	 */
+	private void registerScriptInterface() {
+		final ScriptUiState state = this.viewer.scriptUiState;
+		add("BlzShowTerrain", (arguments, globalScope, triggerScope) -> {
+			state.setTerrainShown(bool(arguments, 0));
+			return null;
+		});
+		add("BlzShowSkyBox", (arguments, globalScope, triggerScope) -> {
+			state.setSkyBoxShown(bool(arguments, 0));
+			return null;
+		});
+		add("BlzChangeMinimapTerrainTex", (arguments, globalScope, triggerScope) -> {
+			final String path = string(arguments, 0);
+			if (!textureExists(path)) {
+				return BooleanJassValue.FALSE;
+			}
+			state.setMinimapTerrainTexture(path);
+			return BooleanJassValue.TRUE;
+		});
+		add("SetPortraitLight", (arguments, globalScope, triggerScope) -> {
+			this.viewer.setPortraitLight(string(arguments, 0));
+			return null;
+		});
+		add("BlzPauseThematicMusicOnFocusLost", (arguments, globalScope, triggerScope) -> {
+			state.setPauseThematicMusicOnFocusLost(bool(arguments, 0));
+			return null;
+		});
+		add("SetMaxCheckpointSaves", (arguments, globalScope, triggerScope) -> {
+			CheckpointSaves.delete(state.getCheckpointSaves().setMax(integer(arguments, 0)));
+			return null;
+		});
+		add("BlzShowUnitTeamGlow", (arguments, globalScope, triggerScope) -> {
+			final CUnit unit = inGame(object(arguments, 0));
+			if (unit != null) {
+				unit.setTeamGlowShown(bool(arguments, 1));
+			}
+			return null;
+		});
+		add("SetItemColor", (arguments, globalScope, triggerScope) -> {
+			final CItem item = object(arguments, 0);
+			if (item != null) {
+				item.setScriptColor(constant(arguments, 1));
+			}
+			return null;
+		});
+		add("CreateCommandButtonEffect", (arguments, globalScope, triggerScope) -> newButtonEffect(globalScope,
+				CommandButtonEffect.ability(integer(arguments, 0), orderOf(string(arguments, 1)))));
+		add("CreateUpgradeCommandButtonEffect", (arguments, globalScope, triggerScope) -> newButtonEffect(globalScope,
+				CommandButtonEffect.upgrade(integer(arguments, 0))));
+		add("CreateLearnCommandButtonEffect", (arguments, globalScope, triggerScope) -> newButtonEffect(globalScope,
+				CommandButtonEffect.learn(integer(arguments, 0))));
+		add("DestroyCommandButtonEffect", (arguments, globalScope, triggerScope) -> {
+			final CommandButtonEffect effect = object(arguments, 0);
+			if (effect != null) {
+				state.removeCommandButtonEffect(effect);
+			}
+			return null;
+		});
+	}
+
+	private JassValue newButtonEffect(final GlobalScope globalScope, final CommandButtonEffect effect) {
+		this.viewer.scriptUiState.addCommandButtonEffect(effect);
+		return new HandleJassValue(globalScope.getHandleType("commandbuttoneffect"), effect);
+	}
+
+	/** An order as the script names it: an order string, or the unit it trains or builds; 0 for none. */
+	private int orderOf(final String order) {
+		if ((order == null) || order.isEmpty()) {
+			return 0;
+		}
+		final int orderId = OrderIdUtils.getOrderId(order);
+		if (orderId != 0) {
+			return orderId;
+		}
+		final CUnitType unitType = this.simulation.getUnitData().getUnitTypeByJassLegacyName(order);
+		if (unitType != null) {
+			return unitType.getTypeId().getValue();
+		}
+		return order.length() == 4 ? War3ID.fromString(order).getValue() : 0;
+	}
+
+	private boolean textureExists(final String path) {
+		if ((path == null) || path.isEmpty() || (this.viewer.mapMpq == null)) {
+			return false;
+		}
+		final int dot = path.lastIndexOf('.');
+		final String base = dot < 0 ? path : path.substring(0, dot);
+		return this.viewer.mapMpq.has(path) || this.viewer.mapMpq.has(base + ".blp")
+				|| this.viewer.mapMpq.has(base + ".dds") || this.viewer.mapMpq.has(base + ".tga");
+	}
+
+	/** A video recorder and its test harness, neither of which exists here. */
 	private void registerClientOnly() {
 		ignored("no video recorder in this engine", "BlzStartRecording", "BlzEndRecording");
 		ignored("quality assurance test harness of the original", "AutomationSetTestType",

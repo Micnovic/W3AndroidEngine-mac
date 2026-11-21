@@ -9,6 +9,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Camera;
+import com.etheller.warsmash.viewer5.FogStyle;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.FastForwardListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.UnitIndicator;
@@ -82,6 +83,25 @@ final class MapViewerUpdate {
 		}
 	}
 
+	/**
+	 * Plays the first steps of the game while the loading screen is still up. The map's script starts in the first
+	 * step and its first moments (the units it makes, their first orders and paths, the first fog update) are the
+	 * slowest steps of the game, and played in its first frames they froze the picture.
+	 *
+	 * @return the number of steps played
+	 */
+	static int playOpeningSteps(final War3MapViewer viewer, final int count) {
+		int played = 0;
+		while ((played < count) && !viewer.gameEnded && !viewer.worldHidden && !viewer.isGamePaused()
+				&& (viewer.gameTurnManager.getLatestCompletedTurn() >= viewer.simulation.getGameTurnTick())) {
+			viewer.simulation.update();
+			viewer.gameTurnManager.turnCompleted(viewer.simulation.getGameTurnTick());
+			MapViewerSaves.runPendingSaveRequests(viewer);
+			played++;
+		}
+		return played;
+	}
+
 	static void stepSimulationWithoutRender(final War3MapViewer viewer) {
 		if (viewer.isGamePaused()) {
 			MapViewerSaves.runPendingSaveRequests(viewer);
@@ -141,6 +161,13 @@ final class MapViewerUpdate {
 		skyCamera.setRotation(camera.rotation);
 		skyCamera.update();
 		viewer.skyInstance.setLocation(camera.location);
+		// The sky scene has no fog of its own; it takes the world fog only when the map draws fog over the sky.
+		if (viewer.worldScene.fogSettings.drawOverSky) {
+			viewer.skyScene.fogSettings.copyFrom(viewer.worldScene.fogSettings);
+		}
+		else if (viewer.skyScene.fogSettings.style != FogStyle.NONE) {
+			viewer.skyScene.fogSettings.style = FogStyle.NONE;
+		}
 		viewer.skyScene.startFrame();
 		viewer.skyScene.renderOpaque();
 		viewer.skyScene.renderTranslucent();
@@ -200,20 +227,21 @@ final class MapViewerUpdate {
 				}
 			}
 			viewer.startFrame();
-			final boolean unitShadows = !viewer.worldHidden
+			final boolean terrainShown = viewer.scriptUiState.isTerrainShown();
+			final boolean unitShadows = !viewer.worldHidden && terrainShown
 					&& viewer.dynamicShadowManager.renderUnitShadowMask(viewer.webGL, worldScene, viewer.terrain);
 			final float scale = beginScaledWorld(viewer, true);
 			worldScene.startFrame();
-			if (!viewer.worldHidden && (viewer.skyInstance != null)) {
+			if (!viewer.worldHidden && (viewer.skyInstance != null) && viewer.scriptUiState.isSkyBoxShown()) {
 				renderSky(viewer);
 			}
 			// The score screen covers the game: only the interface scenes are drawn.
 			PerfStats.end(PerfStats.Section.SHADOWS);
-			if (!viewer.worldHidden && (viewer.debugDepth > 1)) {
+			if (!viewer.worldHidden && terrainShown && (viewer.debugDepth > 1)) {
 				viewer.terrain.renderGround(viewer.dynamicShadowManager);
 			}
 			PerfStats.end(PerfStats.Section.GROUND);
-			if (!viewer.worldHidden && (viewer.debugDepth > 2)) {
+			if (!viewer.worldHidden && terrainShown && (viewer.debugDepth > 2)) {
 				viewer.terrain.renderCliffs();
 			}
 			if (unitShadows) {
@@ -224,11 +252,11 @@ final class MapViewerUpdate {
 				worldScene.renderOpaque();
 			}
 			PerfStats.end(PerfStats.Section.OPAQUE);
-			if (!viewer.worldHidden && (viewer.debugDepth > 4)) {
+			if (!viewer.worldHidden && terrainShown && (viewer.debugDepth > 4)) {
 				viewer.terrain.renderUberSplats(false);
 			}
 			PerfStats.end(PerfStats.Section.SPLATS);
-			if (!viewer.worldHidden && (viewer.debugDepth > 5)) {
+			if (!viewer.worldHidden && terrainShown && (viewer.debugDepth > 5)) {
 				viewer.terrain.renderWater();
 			}
 			PerfStats.end(PerfStats.Section.WATER);
@@ -236,7 +264,7 @@ final class MapViewerUpdate {
 				worldScene.renderTranslucent();
 			}
 			PerfStats.end(PerfStats.Section.TRANSLUCENT);
-			if (!viewer.worldHidden && (viewer.debugDepth > 7)) {
+			if (!viewer.worldHidden && terrainShown && (viewer.debugDepth > 7)) {
 				viewer.terrain.renderUberSplats(true);
 			}
 			PerfStats.end(PerfStats.Section.SPLATS);

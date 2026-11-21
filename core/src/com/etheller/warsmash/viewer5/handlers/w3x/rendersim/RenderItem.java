@@ -26,12 +26,13 @@ public class RenderItem implements RenderWidget {
 	public SplatMover selectionPreviewHighlight;
 	private boolean hidden;
 	private boolean dead;
+	private int shownScriptColor = -1;
 
 	public RenderItem(final War3MapViewer map, RenderItemType itemType, final float x, final float y, final float z,
 			final float angle, final CItem simulationItem) {
 		this.portraitModel = itemType.getPortraitModel();
 		this.simulationItem = simulationItem;
-		final MdxComplexInstance instance = (MdxComplexInstance) itemType.getModel().addInstance();
+		final MdxComplexInstance instance = (MdxComplexInstance) itemType.getModel().addWaitingInstance();
 
 		this.angle = angle;
 		this.location[0] = x;
@@ -54,11 +55,12 @@ public class RenderItem implements RenderWidget {
 	}
 	
 	public void updateItemModel(final War3MapViewer map, RenderItemType itemType) {
+		this.shownScriptColor = -1;
 		this.instance.detach();
 		this.portraitModel.detach();
 		
 		this.portraitModel = itemType.getPortraitModel();
-		final MdxComplexInstance instance = (MdxComplexInstance) itemType.getModel().addInstance();
+		final MdxComplexInstance instance = (MdxComplexInstance) itemType.getModel().addWaitingInstance();
 		instance.move(this.location);
 		instance.rotate(new Quaternion().setFromAxisRad(RenderMathUtils.VEC3_UNIT_Z, this.angle));
 		instance.setScene(map.worldScene);
@@ -107,9 +109,19 @@ public class RenderItem implements RenderWidget {
 				}
 			}
 		}
+		final int scriptColor = this.simulationItem.getScriptColor();
+		if (scriptColor != this.shownScriptColor) {
+			this.shownScriptColor = scriptColor;
+			if (scriptColor >= 0) {
+				this.instance.setTeamColor(scriptColor);
+			}
+		}
 		final boolean dead = this.simulationItem.isDead();
 		final MdxComplexInstance mdxComplexInstance = this.instance;
-		if (dead) {
+		if (mdxComplexInstance.isWaiting()) {
+			// no sequences to choose from yet, and a death is shown when the model is built
+		}
+		else if (dead) {
 			if (!this.dead) {
 				this.dead = dead;
 				SequenceUtils.randomDeathSequence(mdxComplexInstance);

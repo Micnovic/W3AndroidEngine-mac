@@ -1,5 +1,6 @@
 package com.etheller.warsmash.units;
 
+import com.etheller.warsmash.util.SafeParse;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -25,10 +26,7 @@ public class Element extends HashedGameObject {
 		final LinkedList<Integer> output = new LinkedList<>();
 		if ((listAsArray != null) && (listAsArray.length > 0) && !listAsArray[0].equals("")) {
 			for (final String levelString : listAsArray) {
-				final Integer level = Integer.parseInt(levelString);
-				if (level != null) {
-					output.add(level);
-				}
+				output.add(SafeParse.parseInt(levelString));
 			}
 		}
 		return output;

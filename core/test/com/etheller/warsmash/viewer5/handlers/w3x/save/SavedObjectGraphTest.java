@@ -76,6 +76,22 @@ class SavedObjectGraphTest {
 		Map<String, Integer> shared;
 	}
 
+	static final class OldCached {
+		String name;
+		Map<String, Integer> cache;
+		int cacheTick;
+		Map<String, Integer> shared;
+	}
+
+	static final class NewCached {
+		String name;
+		@SavedTransient
+		Map<String, Integer> cache;
+		@SavedTransient
+		int cacheTick;
+		Map<String, Integer> shared;
+	}
+
 	static final class Mover {
 		int id;
 	}
@@ -371,6 +387,42 @@ class SavedObjectGraphTest {
 	}
 
 	@Test
+	void aFieldThatBecameATransientCacheIsReadAndLeftOutOfOldSaves() throws IOException {
+		final OldCached old = new OldCached();
+		old.name = "Jaina";
+		old.cache = new HashMap<>();
+		old.cache.put("footman", 4);
+		old.cacheTick = 90;
+		old.shared = old.cache;
+		final ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
+		final SavedObjectGraph.Writer writer;
+		try (DataOutputStream bodies = new DataOutputStream(bodyBytes)) {
+			writer = new SavedObjectGraph.Writer(new Rules(), bodies);
+			writer.writeRoot(old);
+		}
+		// The save of an engine that still stored the cache.
+		final byte[] table = new String(writer.finishTable(), StandardCharsets.ISO_8859_1)
+				.replace("$OldCached", "$NewCached").getBytes(StandardCharsets.ISO_8859_1);
+		SavedObjectGraph.checkClassesMatch(table);
+		try (DataInputStream bodies = new DataInputStream(new ByteArrayInputStream(bodyBytes.toByteArray()))) {
+			final NewCached loaded = (NewCached) new SavedObjectGraph.Reader(new Rules(), table, bodies).readRoot();
+			assertEquals("Jaina", loaded.name);
+			assertNull(loaded.cache);
+			assertEquals(0, loaded.cacheTick);
+			assertEquals(Integer.valueOf(4), loaded.shared.get("footman"));
+		}
+
+		final NewCached current = new NewCached();
+		current.name = "Uther";
+		current.cache = new HashMap<>();
+		current.cacheTick = 5;
+		final NewCached reloaded = (NewCached) roundTrip(current, new Rules(), new Rules());
+		assertEquals("Uther", reloaded.name);
+		assertNull(reloaded.cache);
+		assertEquals(0, reloaded.cacheTick);
+	}
+
+	@Test
 	void identityMapsWithPlainKeysAreStored() throws IOException {
 		final Turns turns = new Turns();
 		turns.kept = new Mover();
@@ -519,6 +571,54 @@ class SavedObjectGraphTest {
 		head.writeToAndRelease(written);
 		assertArrayEquals(expected.toByteArray(), written.toByteArray());
 		assertEquals(0, head.size());
+	}
+
+	@Test
+	void bytesCompressedWhileWrittenUnzipToTheBytesWritten() throws IOException {
+		final java.util.Random random = new java.util.Random(5);
+		final ByteArrayOutputStream plain = new ByteArrayOutputStream();
+		final SavedObjectGraph.Bytes streamed = new SavedObjectGraph.Bytes(1 << 18);
+		final SavedObjectGraph.GzipPipe pipe = new SavedObjectGraph.GzipPipe();
+		try {
+			streamed.streamTo(pipe);
+			final SavedObjectGraph.BytesData b = new SavedObjectGraph.BytesData(streamed);
+			try (DataOutputStream a = new DataOutputStream(plain)) {
+				for (int i = 0; i < 400000; i++) {
+					final int value = random.nextInt(1000);
+					a.writeInt(value);
+					b.writeInt(value);
+					if ((i % 1000) == 0) {
+						final byte[] bytes = new byte[random.nextInt(5000)];
+						random.nextBytes(bytes);
+						a.write(bytes);
+						b.write(bytes);
+					}
+				}
+			}
+			streamed.finishStream();
+			assertEquals(plain.size(), streamed.size());
+			final byte[] unzipped = new java.util.zip.GZIPInputStream(
+					new ByteArrayInputStream(pipe.finish().toByteArray())).readAllBytes();
+			assertArrayEquals(plain.toByteArray(), unzipped);
+		}
+		finally {
+			pipe.abort();
+		}
+	}
+
+	@Test
+	void abortedCompressionStopsItsThread() throws IOException, InterruptedException {
+		final SavedObjectGraph.Bytes streamed = new SavedObjectGraph.Bytes(1 << 18);
+		final SavedObjectGraph.GzipPipe pipe = new SavedObjectGraph.GzipPipe();
+		streamed.streamTo(pipe);
+		streamed.write(new byte[1 << 20], 0, 1 << 20);
+		pipe.abort();
+		for (final Thread thread : Thread.getAllStackTraces().keySet()) {
+			if (thread.getName().equals("Save compression")) {
+				thread.join(5000);
+				assertTrue(!thread.isAlive());
+			}
+		}
 	}
 
 	@Test

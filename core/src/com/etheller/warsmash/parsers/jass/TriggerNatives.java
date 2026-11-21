@@ -14,6 +14,7 @@ import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.RealJassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.CodeJassValueVisitor;
+import com.etheller.interpreter.ast.value.visitor.IntegerJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.ObjectJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.RealJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
@@ -35,6 +36,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.HandleIdAllocator;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CTrackable;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIdUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass;
@@ -188,6 +190,29 @@ final class TriggerNatives extends CommonNatives {
 							ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 					return newEvent(eventType,
 							region.add(new CRegionTriggerLeave(globalScope, trigger, boolexpr)));
+				});
+		// The button's ability and order; an order the script left empty matches every order of that ability.
+		jassProgramVisitor.getJassNativeManager().createNative("TriggerRegisterCommandEvent",
+				(arguments, globalScope, triggerScope) -> {
+					final Trigger trigger = arguments.get(0).visit(ObjectJassValueVisitor.<Trigger>getInstance());
+					if (trigger == null) {
+						return eventType.getNullValue();
+					}
+					final int abilityId = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+					final String order = arguments.get(2).visit(StringJassValueVisitor.getInstance());
+					final int orderId = ((order == null) || order.isEmpty()) ? 0 : OrderIdUtils.getOrderId(order);
+					return newEvent(eventType, this.simulation.getCommandEvents().addCommandEvent(trigger,
+							new War3ID(abilityId), orderId));
+				});
+		jassProgramVisitor.getJassNativeManager().createNative("TriggerRegisterUpgradeCommandEvent",
+				(arguments, globalScope, triggerScope) -> {
+					final Trigger trigger = arguments.get(0).visit(ObjectJassValueVisitor.<Trigger>getInstance());
+					if (trigger == null) {
+						return eventType.getNullValue();
+					}
+					final int upgradeId = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+					return newEvent(eventType,
+							this.simulation.getCommandEvents().addUpgradeEvent(trigger, new War3ID(upgradeId)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("TriggerRegisterTrackableHitEvent",
 				(arguments, globalScope, triggerScope) -> {
@@ -862,22 +887,22 @@ final class TriggerNatives extends CommonNatives {
 		// funcs...)
 		// ============================================================================
 		jassProgramVisitor.getJassNativeManager().createNative("And", (arguments, globalScope, triggerScope) -> {
-			final TriggerBooleanExpression operandA = arguments.get(0)
-					.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
-			final TriggerBooleanExpression operandB = arguments.get(1)
-					.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+			final TriggerBooleanExpression operandA = nullable(arguments, 0,
+					ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+			final TriggerBooleanExpression operandB = nullable(arguments, 1,
+					ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 			return new HandleJassValue(boolexprType, handleIds.assign(new BoolExprAnd(operandA, operandB)));
 		});
 		jassProgramVisitor.getJassNativeManager().createNative("Or", (arguments, globalScope, triggerScope) -> {
-			final TriggerBooleanExpression operandA = arguments.get(0)
-					.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
-			final TriggerBooleanExpression operandB = arguments.get(1)
-					.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+			final TriggerBooleanExpression operandA = nullable(arguments, 0,
+					ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+			final TriggerBooleanExpression operandB = nullable(arguments, 1,
+					ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 			return new HandleJassValue(boolexprType, handleIds.assign(new BoolExprOr(operandA, operandB)));
 		});
 		jassProgramVisitor.getJassNativeManager().createNative("Not", (arguments, globalScope, triggerScope) -> {
-			final TriggerBooleanExpression operand = arguments.get(0)
-					.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+			final TriggerBooleanExpression operand = nullable(arguments, 0,
+					ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 			return new HandleJassValue(boolexprType, handleIds.assign(new BoolExprNot(operand)));
 		});
 		jassProgramVisitor.getJassNativeManager().createNative("Condition", (arguments, globalScope, triggerScope) -> {
@@ -912,8 +937,8 @@ final class TriggerNatives extends CommonNatives {
 		jassProgramVisitor.getJassNativeManager().createNative("TriggerAddCondition",
 				(arguments, globalScope, triggerScope) -> {
 					final Trigger whichTrigger = arguments.get(0).visit(ObjectJassValueVisitor.<Trigger>getInstance());
-					final TriggerBooleanExpression condition = arguments.get(1)
-							.visit(ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+					final TriggerBooleanExpression condition = nullable(arguments, 1,
+							ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 					final int index = whichTrigger.addCondition(condition);
 					return new HandleJassValue(triggerconditionType,
 							handleIds.assign(new TriggerCondition(condition, whichTrigger, index)));
@@ -923,10 +948,11 @@ final class TriggerNatives extends CommonNatives {
 					final Trigger whichTrigger = arguments.get(0).visit(ObjectJassValueVisitor.<Trigger>getInstance());
 					final TriggerCondition condition = arguments.get(1)
 							.visit(ObjectJassValueVisitor.<TriggerCondition>getInstance());
-					if (condition.getTrigger() != whichTrigger) {
-						throw new IllegalArgumentException("Unable to remove condition, wrong trigger");
+					if ((whichTrigger == null) || (condition == null) || (condition.getTrigger() != whichTrigger)) {
+						return null;
 					}
-					whichTrigger.removeConditionAtIndex(condition.getConditionIndex());
+					// By the condition, not by its index: removing or clearing conditions moves the others.
+					whichTrigger.removeCondition(condition.getBoolexpr());
 					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("TriggerClearConditions",

@@ -285,17 +285,60 @@ final class CrashLogs {
 		}
 	}
 
-	/** The share sheet for the newest log; false when there is none. */
+	/**
+	 * Writes the log snapshot to share: this run's app log and the newest crash log. Blocks while the log is read, so
+	 * not for the main thread. Null when there is nothing to share.
+	 */
+	static File snapshot(final Context context) throws IOException {
+		final CrashReport.Details details = new CrashReport.Details();
+		details.time = System.currentTimeMillis();
+		final BuildInfo build = BuildInfo.current();
+		details.appVersion = build.getVersionName();
+		details.commit = build.getCommit();
+		details.device = Build.MANUFACTURER + " " + Build.MODEL;
+		details.androidVersion = Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")";
+		details.log = ownLog();
+		details.renderer = CrashReport.rendererFrom(details.log);
+		details.graphics = graphics(context);
+		String crash = null;
+		final File last = latest(context);
+		if (last != null) {
+			crash = new String(java.nio.file.Files.readAllBytes(last.toPath()), StandardCharsets.UTF_8);
+		}
+		if (details.log.isEmpty() && (crash == null)) {
+			return null;
+		}
+		final File folder = privateFolder(context);
+		folder.mkdirs();
+		final String[] names = folder.list();
+		if (names != null) {
+			for (final String old : names) {
+				if (CrashReport.isSnapshot(old)) {
+					new File(folder, old).delete();
+				}
+			}
+		}
+		final File file = new File(folder, CrashReport.snapshotName(details.time, ZoneId.systemDefault()));
+		try (OutputStream out = new java.io.FileOutputStream(file)) {
+			out.write(CrashReport.snapshotText(details, crash, ZoneId.systemDefault())
+					.getBytes(StandardCharsets.UTF_8));
+		}
+		return file;
+	}
+
+	/** The share sheet for the newest crash log; false when there is none. */
 	static boolean share(final Context context) {
 		final File log = latest(context);
-		if (log == null) {
-			return false;
-		}
+		return (log != null) && share(context, log, "Warsmash crash log");
+	}
+
+	/** The share sheet for a file of the private folder. */
+	static boolean share(final Context context, final File log, final String subject) {
 		final Uri uri = CrashLogProvider.uri(context, log.getName());
 		final Intent send = new Intent(Intent.ACTION_SEND);
 		send.setType("text/plain");
 		send.putExtra(Intent.EXTRA_STREAM, uri);
-		send.putExtra(Intent.EXTRA_SUBJECT, "Warsmash crash log");
+		send.putExtra(Intent.EXTRA_SUBJECT, subject);
 		send.setClipData(ClipData.newRawUri(log.getName(), uri));
 		send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 		final Intent chooser = Intent.createChooser(send, null);

@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import com.etheller.warsmash.util.ArgbImage;
@@ -314,8 +315,19 @@ final class CUnitPlacement {
 		regionManager.checkRegions(
 				self.placement.collisionRectangle == null ? CWidget.tempRect.set(self.getX(), self.getY(), 0, 0) : self.placement.collisionRectangle,
 				regionCheckerImpl.reset(self, regionManager));
+		// A leave trigger may move the unit again, which swaps and clears both sets, so the leaving regions are
+		// collected before any of them is dispatched.
+		List<CRegion> left = null;
 		for (final CRegion region : self.priorContainingRegions) {
 			if (!self.containingRegions.contains(region)) {
+				if (left == null) {
+					left = new ArrayList<>();
+				}
+				left.add(region);
+			}
+		}
+		if (left != null) {
+			for (final CRegion region : left) {
 				dispatchRegionEvent(self, regionManager, region, false);
 			}
 		}

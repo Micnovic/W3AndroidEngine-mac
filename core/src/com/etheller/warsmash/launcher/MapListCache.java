@@ -234,7 +234,7 @@ public final class MapListCache {
 		final List<GameCatalog.MapEntry> entries = new ArrayList<>();
 		final List<Skipped> skipped = new ArrayList<>();
 		final Set<String> seen = new HashSet<>();
-		for (final String path : data.getListfile(MapListContainer::isListedMap)) {
+		for (final String path : data.getListfile(MapListContainer.LISTED_MAPS)) {
 			// Several data sources can list the same file, also spelled with other case or separators.
 			if (!seen.add(path.replace('\\', '/').toLowerCase(Locale.ROOT))) {
 				continue;

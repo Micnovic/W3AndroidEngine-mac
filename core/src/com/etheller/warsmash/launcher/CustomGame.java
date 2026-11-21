@@ -49,6 +49,14 @@ public final class CustomGame {
 		return details.fixedSettings && details.customForces;
 	}
 
+	/**
+	 * Whether the lobby lets the host change who plays a slot. Fixed settings fix races, teams and colours and the
+	 * computers the map itself plays; a user slot can still be closed or given a computer.
+	 */
+	public static boolean typeEditable(final GameCatalog.MapDetails details, final int index) {
+		return !fixedSlots(details) || (details.slots.get(index).type != 2);
+	}
+
 	/** The advanced options as the launcher stores them: the names of those that are on. */
 	public static boolean[] advancedOptions(final String stored) {
 		final List<String> on = Arrays.asList((stored == null ? OPTION_NAMES[0] : stored).split(","));
@@ -140,15 +148,22 @@ public final class CustomGame {
 	/** The game this lobby starts on a map. */
 	public LaunchRequest request(final GameCatalog.MapDetails details) {
 		final StringBuilder slots = new StringBuilder();
-		if (!fixedSlots(details)) {
-			for (int i = 0; i < details.slots.size(); i++) {
-				if (this.slotTypes[i] == SLOT_HIDDEN) {
-					continue;
-				}
-				final String type = this.slotTypes[i] == SLOT_YOU ? "USER" : SLOT_TYPES[this.slotTypes[i]][0];
-				new LauncherSlot(details.slots.get(i).id, type, this.slotRaces[i], this.slotTeams[i], this.slotColors[i])
-						.appendTo(slots);
+		final boolean fixed = fixedSlots(details);
+		for (int i = 0; i < details.slots.size(); i++) {
+			if (this.slotTypes[i] == SLOT_HIDDEN) {
+				continue;
 			}
+			if (fixed) {
+				// The map keeps races, teams, colours and its own computers; only what the host changed goes on.
+				if (typeEditable(details, i) && (this.slotTypes[i] != SLOT_YOU) && (this.slotTypes[i] != SLOT_OPEN)) {
+					new LauncherSlot(details.slots.get(i).id, SLOT_TYPES[this.slotTypes[i]][0], LauncherSlot.MAP_VALUE,
+							LauncherSlot.MAP_VALUE, LauncherSlot.MAP_VALUE).appendTo(slots);
+				}
+				continue;
+			}
+			final String type = this.slotTypes[i] == SLOT_YOU ? "USER" : SLOT_TYPES[this.slotTypes[i]][0];
+			new LauncherSlot(details.slots.get(i).id, type, this.slotRaces[i], this.slotTeams[i], this.slotColors[i])
+					.appendTo(slots);
 		}
 		final StringBuilder options = new StringBuilder();
 		for (int i = 0; i < OPTION_NAMES.length; i++) {

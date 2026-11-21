@@ -24,7 +24,8 @@ public class JassStackFrame {
 	private boolean[] countedSlots;
 
 	public JassStackFrame(final int argumentCount) {
-		this.contents = new ArrayList<>(argumentCount);
+		// Room for the locals and temporaries too: growing from the argument count copies the array several times.
+		this.contents = new ArrayList<>(argumentCount + 8);
 		this.parameterCount = argumentCount;
 	}
 

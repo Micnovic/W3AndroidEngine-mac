@@ -1,28 +1,44 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.parsers.jass.ScriptPreload;
 import com.etheller.warsmash.parsers.w3x.unitsdoo.War3MapUnitsDoo;
+import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3i;
 import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3iFlags;
+import com.etheller.warsmash.util.ImageUtils;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
+import com.etheller.warsmash.viewer5.PathSolver;
+import com.etheller.warsmash.viewer5.handlers.blp.TextureTranscoder;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.MapLoader;
+import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderItemTypeData;
+import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnitTypeData;
+import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.AbilityDataUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CPlayerSlotState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRaceManagerEntry;
@@ -36,11 +52,39 @@ final class MapViewerPrewarm {
 	private static final Pattern SCRIPT_LABEL_SOUND = Pattern
 			.compile("(?:SetAmbientDaySound|SetAmbientNightSound|CreateMIDISound)\\s*\\(\\s*\"([^\"]+)\"");
 	private static final int MAX_PREFETCHED_FILES = 4;
+	private static final Pattern SCRIPT_FILE_SOUND = Pattern
+			.compile("\\b(?:CreateSound|CreateSoundFilenameWithLabel)\\s*\\(\\s*\"((?:[^\"\\\\]++|\\\\.)*+)\"");
 	private static final Pattern SCRIPT_PRELOAD = Pattern
-			.compile("\\bPreload\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+			.compile("\\bPreload\\s*\\(\\s*\"((?:[^\"\\\\]++|\\\\.)*+)\"");
 	private static final Pattern SCRIPT_PRELOADER = Pattern
-			.compile("\\bPreloader\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+			.compile("\\bPreloader\\s*\\(\\s*\"((?:[^\"\\\\]++|\\\\.)*+)\"");
+	private static final Pattern SCRIPT_SKY_MODEL = Pattern
+			.compile("\\bSetSkyModel\\s*\\(\\s*\"((?:[^\"\\\\]++|\\\\.)++)\"");
+	// The model is the last argument of the BJ forms, so any model path on the line is taken. The string patterns
+	// here are possessive: a repeated alternative is matched recursively, and a long string overflowed the stack.
+	static final Pattern SCRIPT_EFFECT_MODEL = Pattern.compile(
+			"\\bAddSpecialEffect\\w*\\s*\\([^\\n]*?\"((?:[^\"\\\\\\n]++|\\\\.)*+)(?<=\\.[mM][dD][lLxX])\"");
+	private static final Pattern SCRIPT_LABEL_PARAMETERS = Pattern
+			.compile("\\bSetSoundParamsFromLabel\\s*\\([^,()]+,\\s*\"((?:[^\"\\\\]++|\\\\.)++)\"");
+	private static final Pattern SCRIPT_LABEL_CREATE = Pattern
+			.compile("\\bCreateSoundFromLabel\\s*\\(\\s*\"((?:[^\"\\\\]++|\\\\.)++)\"");
 	private static final long PRELOAD_BATCH_NANOS = 8_000_000L;
+	static final Pattern SCRIPT_UNIT_CREATION = Pattern.compile(
+			"\\b(?:CreateUnit\\w*|CreateNUnits\\w*|BlzCreateUnit\\w*|UnitPoolAddUnitType|ReplaceUnit\\w*|CreateCorpse)\\s*\\(");
+	static final Pattern SCRIPT_ITEM_CREATION = Pattern
+			.compile("\\b(?:CreateItem\\w*|BlzCreateItem\\w*)\\s*\\(");
+	static final Pattern SCRIPT_DESTRUCTABLE_CREATION = Pattern.compile(
+			"\\b(?:CreateDestructable\\w*|CreateDeadDestructable\\w*|BlzCreateDestructable\\w*)\\s*\\(");
+	private static final Pattern SCRIPT_DESTRUCTABLE_CALL = Pattern
+			.compile("\\b((?:CreateDestructable|CreateDeadDestructable|BlzCreateDestructable)\\w*)\\s*\\(");
+	private static final Pattern RAW_CODE = Pattern.compile("'(\\w{4})'");
+	/** What a model's vertices, sequences and bookkeeping hold on the heap beside its textures, on average. */
+	private static final long MODEL_HEAP_BYTES = 1_500_000L;
+	/** Sizes within a megabyte of each other count as the same size. */
+	private static final int COST_BUCKET_SHIFT = 20;
+	private static final String TYPE_COSTS_FILE = "script-type-costs.lst";
+	private static final int MAX_TYPE_COSTS = 2000;
+	private static final String BLIZZARD_SCRIPT = "Scripts\\Blizzard.j";
 
 	private MapViewerPrewarm() {
 	}
@@ -56,8 +100,15 @@ final class MapViewerPrewarm {
 		viewer.renderUnitTypeDataObjects = viewer.allObjectData;
 
 		final String script = readMapScript(viewer);
+		viewer.scriptSpeaksLines = script.contains("Transmission") || script.contains("CinematicScene")
+				|| script.contains("Dialogue");
+		viewer.prefetchFrameTemplates();
 		// First, so that the decoding runs beside the model loading that follows.
 		loader.addLoadTask(() -> prefetchAmbientSounds(viewer, script, loader));
+		loader.addLoadTask(() -> prefetchInterfaceTextures(viewer, loader));
+		loader.addLoadTask(() -> prefetchScriptSounds(viewer, script, loader));
+		loader.addLoadTask(() -> prepareScriptLabels(viewer, script));
+		loader.addLoadTask(() -> SimulationClassPrewarm.queue(loader));
 
 		final Set<War3ID> placed = new LinkedHashSet<>();
 		final Set<War3ID> ownTypes = new LinkedHashSet<>();
@@ -81,13 +132,425 @@ final class MapViewerPrewarm {
 		started.removeAll(placed);
 		otherTypes.removeAll(ownTypes);
 		loader.addLoadTask(() -> prefetchUnitSounds(viewer, ownTypes, otherTypes, loader));
+		// The map's items share the file with the units, and its script makes them in the first step.
+		final RenderItemTypeData items = viewer.miscData == null ? null
+				: new RenderItemTypeData(viewer.allObjectData.getItems(), viewer.mapMpq, viewer, viewer.miscData);
 		for (final War3ID typeId : placed) {
-			loader.addLoadTask(loader.modelTask(() -> load(types, typeId)));
+			loader.addLoadTask(loader.modelTask(() -> load(viewer, types, items, typeId)));
 		}
 		for (final War3ID typeId : started) {
-			loader.addLoadTask(loader.modelTask(() -> load(types, typeId)));
+			loader.addLoadTask(loader.modelTask(() -> load(viewer, types, items, typeId)));
 		}
 		loader.addLoadTask(() -> queuePreloads(viewer, w3i, script, loader));
+		final Set<War3ID> known = new LinkedHashSet<>(placed);
+		known.addAll(started);
+		loader.addLoadTask(loader.settled(() -> queueScriptCreations(viewer, script, known, types, items, loader)));
+		loader.addLoadTask(loader.modelTask(() -> loadSleepEffect(viewer)));
+		loader.addLoadTask(() -> queueSimulationTypes(viewer, script, known, loader));
+		if (viewer.scriptSpeaksLines) {
+			// Last, so that it runs beside the decoding of the textures the loading still has under way.
+			loader.addLoadTask(() -> viewer.faceFxLibrary().prepare());
+		}
+	}
+
+	/**
+	 * Reads the simulation's data of the unit types the map places and its script makes, and makes one of each of
+	 * their abilities, while the loading screen is still up: the first unit of a type parses its data and loads the
+	 * classes of its abilities, in the frame the script made it in. The abilities made here are thrown away.
+	 */
+	private static void queueSimulationTypes(final War3MapViewer viewer, final String script, final Set<War3ID> known,
+			final MapLoader loader) throws IOException {
+		final Set<War3ID> typeIds = new LinkedHashSet<>(known);
+		typeIds.addAll(createdTypes(SCRIPT_UNIT_CREATION, script));
+		loader.addSlices(typeIds.iterator(), typeId -> loadSimulationType(viewer.simulation, typeId), () -> {
+		});
+		loader.addLoadTask(() -> queuePathingData(viewer, typeIds, loader));
+	}
+
+	/** The path search data of the walking sizes among the types, one size at a time, as the first orders need it. */
+	private static void queuePathingData(final War3MapViewer viewer, final Set<War3ID> typeIds,
+			final MapLoader loader) throws IOException {
+		final Set<String> sizes = new LinkedHashSet<>();
+		final List<CUnitType> walkers = new ArrayList<>();
+		for (final War3ID typeId : typeIds) {
+			final CUnitType type = viewer.simulation.getUnitData().getUnitType(typeId);
+			if ((type != null) && (type.getSpeed() > 0) && !type.isBuilding()
+					&& sizes.add(type.getMovementType() + ":" + type.getCollisionSize()) && (walkers.size() < 4)) {
+				walkers.add(type);
+			}
+		}
+		loader.addSlices(walkers.iterator(), viewer.simulation::prewarmPathing, () -> {
+		});
+	}
+
+	/** The effect a creep falls asleep under, which a creep made at night shows in the first step. */
+	private static void loadSleepEffect(final War3MapViewer viewer) {
+		try {
+			// Read from the data: the interface that names the effects is made after the loading screen.
+			final GameObject row = viewer.allObjectData.getAbilities().get(CUnit.CREEP_SLEEP);
+			if (row != null) {
+				for (final String path : row.getFieldAsList(AbilityDataUI.CASTER_ART)) {
+					viewer.loadModelMdx(path);
+				}
+			}
+		}
+		catch (final RuntimeException e) {
+			// Made again when a creep falls asleep, and fails there as it would have anyway.
+			Log.error(e);
+		}
+	}
+
+	private static void loadSimulationType(final CSimulation simulation, final War3ID typeId) {
+		try {
+			final CUnitType type = simulation.getUnitData().getUnitType(typeId);
+			if (type != null) {
+				for (final War3ID abilityId : type.getAbilityList()) {
+					makeAbility(simulation, abilityId);
+				}
+				for (final War3ID abilityId : type.getHeroAbilityList()) {
+					makeAbility(simulation, abilityId);
+				}
+			}
+		}
+		catch (final RuntimeException e) {
+			// The same type is made again when a unit of it is made, and fails there as it would have anyway.
+			Log.error(e);
+		}
+	}
+
+	private static void makeAbility(final CSimulation simulation, final War3ID abilityId) {
+		try {
+			simulation.getAbilityData().createAbility(abilityId, 0);
+		}
+		catch (final RuntimeException e) {
+			// Made again when the ability is added to a unit, and fails there as it would have anyway.
+			Log.error(e);
+		}
+	}
+
+	/**
+	 * The memory the types a script makes may take up ahead of time: their textures in the bytes they are uploaded in,
+	 * and an allowance for the heap of each model. The rest is loaded when the script makes the first of their units,
+	 * a frame that waits for the files. The textures stay in memory for the whole game whether the script makes the
+	 * types or not, so a phone with little memory takes only as much as a few small types need.
+	 */
+	static long scriptCreationBudget(final long deviceMemoryMb, final long maxHeapBytes) {
+		final long mb = 1L << 20;
+		if (deviceMemoryMb <= 0) {
+			return Math.min(1024 * mb, maxHeapBytes / 2);
+		}
+		final long fromTier = deviceMemoryMb < 4 * 1024 ? 16 * mb
+				: deviceMemoryMb < 6 * 1024 ? 32 * mb : deviceMemoryMb < 8 * 1024 ? 64 * mb : 128 * mb;
+		return Math.min(maxHeapBytes / 4, fromTier);
+	}
+
+	/** The raw codes a script hands to the calls that make something, most often named first. */
+	static List<War3ID> createdTypes(final Pattern call, final String script) {
+		final Map<War3ID, int[]> counts = new LinkedHashMap<>();
+		final Matcher matcher = call.matcher(script);
+		while (matcher.find()) {
+			int lineEnd = script.indexOf('\n', matcher.end());
+			if (lineEnd == -1) {
+				lineEnd = script.length();
+			}
+			// Not a region of the whole script: on Android each matcher keeps a native copy of its input until the
+			// collector frees it, and there is one for every call in the script.
+			final Matcher raw = RAW_CODE.matcher(script.substring(matcher.end(), lineEnd));
+			if (raw.find()) {
+				counts.computeIfAbsent(War3ID.fromString(raw.group(1)), id -> new int[1])[0]++;
+			}
+		}
+		return mostOftenFirst(counts);
+	}
+
+	/**
+	 * The variations of each destructable type a script makes, as far as they are written into the calls as numbers.
+	 * A variation is the model that is shown, and the models of a type differ in their files.
+	 */
+	static Map<War3ID, Set<Integer>> createdDestructableVariations(final String script) {
+		final Map<War3ID, Set<Integer>> variations = new LinkedHashMap<>();
+		final Matcher matcher = SCRIPT_DESTRUCTABLE_CALL.matcher(script);
+		while (matcher.find()) {
+			int lineEnd = script.indexOf('\n', matcher.end());
+			if (lineEnd == -1) {
+				lineEnd = script.length();
+			}
+			final List<String> arguments = splitArguments(script.substring(matcher.end(), lineEnd));
+			// The argument order of the natives: type, x, y, [z], face, [pitch, roll], scale, variation.
+			final String name = matcher.group(1);
+			final int index = 5 + (name.contains("DestructableZ") ? 1 : 0) + (name.contains("PitchRoll") ? 2 : 0);
+			if ((arguments.size() <= index) || !RAW_CODE.matcher(arguments.get(0)).matches()) {
+				continue;
+			}
+			final War3ID typeId = War3ID.fromString(arguments.get(0).substring(1, 5));
+			try {
+				final int variation = Integer.parseInt(arguments.get(index));
+				variations.computeIfAbsent(typeId, id -> new LinkedHashSet<>()).add(variation);
+			}
+			catch (final NumberFormatException e) {
+				// Not a number the script writes into the call: the first variation stands in for it.
+			}
+		}
+		return variations;
+	}
+
+	/** The arguments of a call whose opening bracket is cut off, up to its closing one. */
+	private static List<String> splitArguments(final String text) {
+		final List<String> arguments = new ArrayList<>();
+		int depth = 0;
+		boolean quoted = false;
+		int start = 0;
+		for (int i = 0; i < text.length(); i++) {
+			final char c = text.charAt(i);
+			if (quoted) {
+				quoted = c != '"' && c != '\n';
+			}
+			else if (c == '"') {
+				quoted = true;
+			}
+			else if (c == '(') {
+				depth++;
+			}
+			else if ((c == ')') && (depth-- == 0)) {
+				arguments.add(text.substring(start, i).trim());
+				return arguments;
+			}
+			else if ((c == ',') && (depth == 0)) {
+				arguments.add(text.substring(start, i).trim());
+				start = i + 1;
+			}
+		}
+		return arguments;
+	}
+
+	/** Every raw code in a script, most often named first. */
+	static List<War3ID> namedTypes(final String script) {
+		final Map<War3ID, int[]> counts = new LinkedHashMap<>();
+		final Matcher matcher = RAW_CODE.matcher(script);
+		while (matcher.find()) {
+			counts.computeIfAbsent(War3ID.fromString(matcher.group(1)), id -> new int[1])[0]++;
+		}
+		return mostOftenFirst(counts);
+	}
+
+	private static List<War3ID> mostOftenFirst(final Map<War3ID, int[]> counts) {
+		final List<Map.Entry<War3ID, int[]>> entries = new ArrayList<>(counts.entrySet());
+		entries.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
+		final List<War3ID> types = new ArrayList<>(entries.size());
+		for (final Map.Entry<War3ID, int[]> entry : entries) {
+			types.add(entry.getKey());
+		}
+		return types;
+	}
+
+	/** A type the map's script may make, with what it took in texture memory the last time it was loaded. */
+	private static final class Candidate {
+		private final String key;
+		private final Runnable load;
+		private long bytes = -1;
+
+		private Candidate(final String key, final Runnable load) {
+			this.key = key;
+			this.load = load;
+		}
+
+		/** Types whose size was never seen come after those whose size is known. */
+		private long cost() {
+			return this.bytes < 0 ? Long.MAX_VALUE : this.bytes >> COST_BUCKET_SHIFT;
+		}
+	}
+
+	/**
+	 * Queues the loading of the types the map's script makes while it plays, a type for each step of the loader, until
+	 * the budget is spent: first the types it hands to the calls that make units, items and destructables, then the
+	 * unit types it names anywhere else, which it takes from lists and variables. Of each group the types that took
+	 * the least texture memory when they were loaded before come first, the ones the script names most often among
+	 * those of about the same size, so that the budget covers as many types as it can; with nothing known yet the
+	 * script's order stands. A type made for the first time in the game loaded its model and textures in the frame
+	 * the script made it in.
+	 */
+	private static void queueScriptCreations(final War3MapViewer viewer, final String script,
+			final Set<War3ID> known, final RenderUnitTypeData types, final RenderItemTypeData items,
+			final MapLoader loader) {
+		final long budget = scriptCreationBudget(GraphicsSettings.deviceMemoryMb(), Runtime.getRuntime().maxMemory());
+		if (budget <= 0) {
+			return;
+		}
+		final List<War3ID> units = createdTypes(SCRIPT_UNIT_CREATION, script);
+		units.removeAll(known);
+		final List<War3ID> itemTypes = createdTypes(SCRIPT_ITEM_CREATION, script);
+		itemTypes.removeAll(known);
+		final List<War3ID> destructables = createdTypes(SCRIPT_DESTRUCTABLE_CREATION, script);
+		final Map<War3ID, Set<Integer>> variations = createdDestructableVariations(script);
+		final List<Candidate> created = new ArrayList<>();
+		final int count = Math.max(units.size(), Math.max(itemTypes.size(), destructables.size()));
+		for (int i = 0; i < count; i++) {
+			if (i < units.size()) {
+				final War3ID typeId = units.get(i);
+				created.add(new Candidate("u" + typeId, () -> load(viewer, types, null, typeId)));
+			}
+			if (i < destructables.size()) {
+				final War3ID typeId = destructables.get(i);
+				created.add(new Candidate("d" + typeId, () -> loadDestructable(viewer, typeId, variations.get(typeId))));
+			}
+			if (i < itemTypes.size()) {
+				final War3ID typeId = itemTypes.get(i);
+				created.add(new Candidate("i" + typeId, () -> loadItem(items, typeId)));
+			}
+		}
+		final Set<War3ID> made = new LinkedHashSet<>(units);
+		made.addAll(known);
+		final List<Candidate> named = new ArrayList<>();
+		for (final War3ID typeId : namedTypes(script)) {
+			if (!made.contains(typeId) && (viewer.allObjectData.getUnits().get(typeId) != null)) {
+				named.add(new Candidate("u" + typeId, () -> load(viewer, types, null, typeId)));
+			}
+		}
+		final Map<String, Long> seen = readTypeCosts();
+		for (final Candidate candidate : created) {
+			candidate.bytes = seen.getOrDefault(candidate.key, -1L);
+		}
+		for (final Candidate candidate : named) {
+			candidate.bytes = seen.getOrDefault(candidate.key, -1L);
+		}
+		// The sort keeps the order of the script among types of about the same size.
+		created.sort(Comparator.comparingLong(Candidate::cost));
+		named.sort(Comparator.comparingLong(Candidate::cost));
+		final Deque<Candidate> pending = new ArrayDeque<>(created);
+		pending.addAll(named);
+		final long started = System.nanoTime();
+		final int total = pending.size();
+		loader.addNextTask(loader.settled(loader.modelTask(() -> loadScriptCreations(viewer, pending, budget,
+				viewer.getTextureBytes(), started, 0, total, null, 0, seen, loader))));
+	}
+
+	private static void loadScriptCreations(final War3MapViewer viewer, final Deque<Candidate> pending,
+			final long budget, final long baseline, final long started, final int loaded, final int total,
+			final Candidate last, final long lastBefore, final Map<String, Long> seen, final MapLoader loader) {
+		// The textures of the type loaded in the step before are uploaded by now, so what they added is its size.
+		final long now = viewer.getTextureBytes();
+		if (last != null) {
+			// A type whose textures an earlier one loaded took nothing then, so it counts as cheap until it is seen
+			// loading them itself; the largest size seen is its own.
+			final long size = now - lastBefore;
+			final Long known = seen.get(last.key);
+			if ((known == null) || (size > known)) {
+				seen.put(last.key, size);
+			}
+		}
+		final long used = (now - baseline) + (loaded * MODEL_HEAP_BYTES);
+		final Candidate next = pending.peek();
+		if ((next == null) || (used >= budget) || ((next.bytes >= 0) && ((used + next.bytes) > budget))) {
+			Log.info("Script types loaded ahead: " + loaded + " of " + total + ", " + (used >> 20) + " of "
+					+ (budget >> 20) + " MB in " + ((System.nanoTime() - started) / 1_000_000) + " ms");
+			writeTypeCosts(seen);
+			return;
+		}
+		pending.poll().load.run();
+		loader.addNextTask(loader.settled(loader.modelTask(() -> loadScriptCreations(viewer, pending, budget, baseline,
+				started, loaded + 1, total, next, now, seen, loader))));
+	}
+
+	/** What the types took in texture memory when last loaded ahead, which the next loading sorts them by. */
+	private static Map<String, Long> readTypeCosts() {
+		final Map<String, Long> costs = new LinkedHashMap<>();
+		try {
+			final File file = typeCostsFile();
+			if ((file != null) && file.isFile()) {
+				for (final String line : new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8)
+						.split("\n")) {
+					final int space = line.indexOf(' ');
+					if (space > 0) {
+						costs.put(line.substring(0, space), Long.parseLong(line.substring(space + 1).trim()));
+					}
+				}
+			}
+		}
+		catch (final IOException | RuntimeException e) {
+			// The script's order stands.
+		}
+		return costs;
+	}
+
+	private static void writeTypeCosts(final Map<String, Long> costs) {
+		try {
+			final File file = typeCostsFile();
+			if ((file != null) && !costs.isEmpty()) {
+				final StringBuilder text = new StringBuilder();
+				int lines = 0;
+				for (final Map.Entry<String, Long> cost : costs.entrySet()) {
+					if (lines++ < MAX_TYPE_COSTS) {
+						text.append(cost.getKey()).append(' ').append(cost.getValue()).append('\n');
+					}
+				}
+				final File partial = new File(file.getParentFile(), TYPE_COSTS_FILE + ".tmp");
+				Files.write(partial.toPath(), text.toString().getBytes(StandardCharsets.UTF_8));
+				Files.move(partial.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+		catch (final IOException | RuntimeException e) {
+			Log.warn("Costs of script types not kept: " + e);
+		}
+	}
+
+	/** Kept beside the decoded textures, in the application's cache, never in the game's files. */
+	private static File typeCostsFile() {
+		final File folder = TextureTranscoder.cacheFolder();
+		return folder == null ? null : new File(folder, TYPE_COSTS_FILE);
+	}
+
+	private static void loadItem(final RenderItemTypeData items, final War3ID typeId) {
+		try {
+			if (items != null) {
+				items.get(typeId);
+			}
+		}
+		catch (final RuntimeException e) {
+			// Made again when the script makes the item, and fails there as it would have anyway.
+			Log.error(e);
+		}
+	}
+
+	/**
+	 * Loads what the first destructable of a type reads when the script makes it: the models of the variations the
+	 * script names, the model of its portrait, its pathing maps and the simulation's data of the type.
+	 */
+	private static void loadDestructable(final War3MapViewer viewer, final War3ID typeId,
+			final Set<Integer> variations) {
+		try {
+			final GameObject row = viewer.allObjectData.getDestructibles().get(typeId);
+			if (row != null) {
+				if (variations == null) {
+					MapViewerDoodads.getDoodadModel(viewer, 0, row);
+				}
+				else {
+					for (final int variation : variations) {
+						MapViewerDoodads.getDoodadModel(viewer, variation, row);
+					}
+				}
+				viewer.loadModelMdx(row.readSLKTag("portraitmodel"));
+				viewer.getDestructablePathingPixelMap(row);
+				viewer.getDestructablePathingDeathPixelMap(row);
+				viewer.simulation.getDestructableData().getUnitType(typeId);
+			}
+		}
+		catch (final RuntimeException e) {
+			// Made again when the script makes the destructable, and fails there as it would have anyway.
+			Log.error(e);
+		}
+	}
+
+	/**
+	 * Decodes the textures the last game screen's setup loaded while this loading screen is still up, so that the
+	 * setup, which is a single frame, only uploads them. The list is what that setup recorded, so nothing here is
+	 * a guess about the interface.
+	 */
+	private static void prefetchInterfaceTextures(final War3MapViewer viewer, final MapLoader loader)
+			throws IOException {
+		ImageUtils.dropPrefetched();
+		final List<String> paths = ImageUtils.readUiTextureList();
+		loader.addSlices(paths.iterator(), path -> ImageUtils.prefetchTexture(viewer.mapMpq, path), () -> {
+		});
 	}
 
 	private static String readMapScript(final War3MapViewer viewer) {
@@ -182,9 +645,34 @@ final class MapViewerPrewarm {
 			}
 		}
 		addPreloadedFiles(files, script);
+		final Matcher sky = SCRIPT_SKY_MODEL.matcher(script);
+		while (sky.find()) {
+			final String path = unescape(sky.group(1));
+			loader.addLoadTask(loader.modelTask(() -> MapViewerEffects.loadModelMdx(viewer.dataSource, viewer, path,
+					viewer.mapPathSolver, viewer.solverParams)));
+		}
+		final Set<String> effects = new LinkedHashSet<>();
+		addMatches(effects, SCRIPT_EFFECT_MODEL, script);
+		for (final String path : effects) {
+			loader.addLoadTask(loader.modelTask(() -> loadEffectModel(viewer, path)));
+		}
 		if (!files.isEmpty()) {
 			final Deque<String> names = new ArrayDeque<>(files);
 			loader.addLoadTask(loader.modelTask(() -> loadPreloaded(viewer, names, loader)));
+		}
+	}
+
+	/** The model of an effect the script makes, which it may do from its first step on. */
+	private static void loadEffectModel(final War3MapViewer viewer, final String path) {
+		final String mdxPath = War3MapViewer.mdx(path);
+		if (viewer.dataSource.has(mdxPath) || viewer.dataSource.has(War3MapViewer.mdl(mdxPath))) {
+			try {
+				MapViewerEffects.loadModelMdx(viewer, path);
+			}
+			catch (final RuntimeException e) {
+				// Made again when the script makes the effect, and fails there as it would have anyway.
+				Log.error(e);
+			}
 		}
 	}
 
@@ -237,13 +725,66 @@ final class MapViewerPrewarm {
 			final UnitSound sound = viewer.uiSounds.getSound(label);
 			if (sound.getSoundCount() <= MAX_PREFETCHED_FILES) {
 				sound.prefetch();
+				for (int i = 0; i < sound.getSoundCount(); i++) {
+					sound.getDuration(i);
+				}
 			}
 			else if (sound.getSoundCount() > 0) {
 				// The script starts the day ambience in the first step, whose file is known from the step and the count.
-				sound.prefetch(CSoundFromLabel.variant(0, 0, sound.getSoundCount()));
+				final int variant = CSoundFromLabel.variant(0, 0, sound.getSoundCount());
+				sound.prefetch(variant);
+				sound.getDuration(0);
+				sound.getDuration(variant);
 			}
 		}, () -> {
 		});
+	}
+
+	/**
+	 * Starts the decoding of the sound files the map's script makes sounds of. The script makes them all at its start,
+	 * in the first game step, which decoded a campaign's dialogue there for half a second. What the script does not
+	 * make by the end of the sound preload is let go then.
+	 */
+	private static void prefetchScriptSounds(final War3MapViewer viewer, final String script,
+			final MapLoader loader) throws IOException {
+		final Matcher matcher = SCRIPT_FILE_SOUND.matcher(script);
+		// Each time a path is named, as two sounds of the same file each take a decoding.
+		final List<String> files = new ArrayList<>();
+		while (matcher.find()) {
+			files.add(unescape(matcher.group(1)));
+		}
+		loader.addSlices(files.iterator(),
+				file -> UnitSound.prefetchSound(viewer.mapMpq, viewer.getScriptSoundFile(file)), () -> {
+				});
+	}
+
+	/**
+	 * Finds the sound labels the script asks for, with the lengths of their files: the map script's own labels are in
+	 * a table read only for them, and the game's script makes sounds of labels too, all in the first step.
+	 */
+	private static void prepareScriptLabels(final War3MapViewer viewer, final String script) {
+		if (script.isEmpty()) {
+			return;
+		}
+		final Matcher parameters = SCRIPT_LABEL_PARAMETERS.matcher(script);
+		while (parameters.find()) {
+			viewer.getSoundLabel(unescape(parameters.group(1)));
+		}
+		final Set<String> labels = new LinkedHashSet<>();
+		addMatches(labels, SCRIPT_LABEL_CREATE, script);
+		if (viewer.mapMpq.has(BLIZZARD_SCRIPT)) {
+			addMatches(labels, SCRIPT_LABEL_CREATE, readText(viewer.mapMpq, BLIZZARD_SCRIPT));
+		}
+		for (final String label : labels) {
+			viewer.uiSounds.getSound(label).getDuration();
+		}
+	}
+
+	static void addMatches(final Set<String> found, final Pattern pattern, final String text) {
+		final Matcher matcher = pattern.matcher(text);
+		while (matcher.find()) {
+			found.add(unescape(matcher.group(1)));
+		}
 	}
 
 	/**
@@ -300,9 +841,19 @@ final class MapViewerPrewarm {
 		return prefetches;
 	}
 
-	private static void load(final RenderUnitTypeData types, final War3ID typeId) {
+	private static void load(final War3MapViewer viewer, final RenderUnitTypeData types,
+			final RenderItemTypeData items, final War3ID typeId) {
 		try {
-			types.get(typeId);
+			final RenderUnitType type = types.get(typeId);
+			if (type != null) {
+				// The building's ground texture, which its unit's first frame loaded otherwise.
+				if (type.getUberSplat() != null) {
+					viewer.load(type.getUberSplat(), PathSolver.DEFAULT, null);
+				}
+			}
+			else if (items != null) {
+				items.get(typeId);
+			}
 		}
 		catch (final RuntimeException e) {
 			// The same type is made again when a unit of it is placed, and fails there as it would have anyway.

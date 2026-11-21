@@ -1,7 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
 import java.util.Locale;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.SplittableRandom;
 
 import com.badlogic.gdx.math.Quaternion;
 import com.etheller.warsmash.units.GameObject;
@@ -14,6 +14,7 @@ import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
 import com.etheller.warsmash.viewer5.handlers.mdx.Sequence;
 
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
+import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPlayerFogOfWar;
@@ -54,6 +55,51 @@ public class RenderDoodad {
 	 * animation only takes over again when the script picks one.
 	 */
 	private boolean holdsScriptedEnd;
+	/** Picks among a doodad's stand animations; made from the doodad's own place so every run shows the same ones. */
+	private SplittableRandom animationRandom;
+
+	private SplittableRandom animationRandom() {
+		if (this.animationRandom == null) {
+			this.animationRandom = new SplittableRandom(
+					(Float.floatToIntBits(this.x) * 0x9E3779B97F4A7C15L) ^ (Float.floatToIntBits(this.y) * 0xC2B2AE3D27D4EB4FL)
+							^ (Float.floatToIntBits(this.z) * 0x165667B19E3779F9L)
+							^ (((long) this.row.getId().hashCode() << 32) | this.variation));
+		}
+		return this.animationRandom;
+	}
+
+	/**
+	 * Makes the doodad's animation clock run only while it is in view: what ends while it is not is played through when
+	 * it is seen again, the stand animation following each end by the doodad's own picks.
+	 */
+	public void enableLazyClock() {
+		final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+		mdxInstance.lazyClock = true;
+		mdxInstance.sequenceEndObserver = this::pickStandSequence;
+	}
+
+	/** Starts the first stand animation once the model has loaded; false while it has not. */
+	public boolean startStandSequence() {
+		final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+		if (mdxInstance.sequence != -1) {
+			return true;
+		}
+		pickStandSequence();
+		if (mdxInstance.sequence == -1) {
+			return false;
+		}
+		// The clock starts now, not at the time the doodad was made.
+		mdxInstance.settleClock(false);
+		return true;
+	}
+
+	private void pickStandSequence() {
+		if (!this.holdsScriptedEnd) {
+			final SplittableRandom random = animationRandom();
+			SequenceUtils.randomSequence((MdxComplexInstance) this.instance, getAnimation(), SequenceUtils.EMPTY, true,
+					() -> random.nextDouble());
+		}
+	}
 
 	public boolean holdsScriptedEnd() {
 		return this.holdsScriptedEnd;
@@ -120,6 +166,7 @@ public class RenderDoodad {
 			return;
 		}
 		final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+		mdxInstance.settleClock(true);
 		final Sequence[] sequences = ((MdxModel) mdxInstance.model).getSequences().toArray(new Sequence[0]);
 		final String prefix = animation.toLowerCase(Locale.ROOT);
 		int matches = 0;
@@ -131,7 +178,7 @@ public class RenderDoodad {
 		if (matches == 0) {
 			return;
 		}
-		int pick = ThreadLocalRandom.current().nextInt(matches);
+		int pick = animationRandom().nextInt(matches);
 		for (int i = 0; i < sequences.length; i++) {
 			if (sequences[i].getName().toLowerCase(Locale.ROOT).startsWith(prefix) && (pick-- == 0)) {
 				mdxInstance.setSequence(i);
@@ -144,6 +191,7 @@ public class RenderDoodad {
 	public void playAnimation(final String animation) {
 		if (this.instance instanceof MdxComplexInstance) {
 			final MdxComplexInstance mdxInstance = (MdxComplexInstance) this.instance;
+			mdxInstance.settleClock(true);
 			final Sequence[] sequences = ((MdxModel) mdxInstance.model).getSequences().toArray(new Sequence[0]);
 			for (int i = 0; i < sequences.length; i++) {
 				if (sequences[i].getName().toLowerCase(Locale.ROOT).startsWith(animation.toLowerCase(Locale.ROOT))) {
@@ -158,6 +206,18 @@ public class RenderDoodad {
 	public RenderDoodad(final War3MapViewer map, final MdxModel model, final GameObject row, final float[] location3D,
 			final float[] scale3D, final float facingRadians, final float maxPitch, final float maxRoll,
 			final float selectionScale, final int doodadVariation) {
+		this(map, model, row, location3D, scale3D, facingRadians, maxPitch, maxRoll, selectionScale, doodadVariation,
+				false);
+	}
+
+	/**
+	 * @param waitForModel whether the instance is made before the model is built (see
+	 *                     {@link MdxModel#addWaitingInstance()}); what depends on the model's contents is then left to
+	 *                     the owner once it is built
+	 */
+	protected RenderDoodad(final War3MapViewer map, final MdxModel model, final GameObject row,
+			final float[] location3D, final float[] scale3D, final float facingRadians, final float maxPitch,
+			final float maxRoll, final float selectionScale, final int doodadVariation, final boolean waitForModel) {
 		this.maxPitch = maxPitch;
 		this.maxRoll = maxRoll;
 		this.z = location3D[2];
@@ -172,10 +232,14 @@ public class RenderDoodad {
 			instance = model.addInstance(1);
 		}
 		else {
-			instance = model.addInstance();
+			instance = waitForModel ? model.addWaitingInstance() : model.addInstance();
 			((MdxComplexInstance) instance).setSequenceLoopMode(SequenceLoopMode.NEVER_LOOP);
 		}
 
+		if (!waitForModel) {
+			((MdxComplexInstance) instance).sceneryShadow = map.getDynamicShadowManager().castsSceneShadow(model,
+					scale3D[2]);
+		}
 		instance.move(location3D);
 		// TODO: the following pitch/roll system is a heuristic, and we probably want to
 		// revisit it later.

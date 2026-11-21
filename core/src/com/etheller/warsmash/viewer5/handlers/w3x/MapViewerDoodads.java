@@ -25,7 +25,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.LoadMapTask;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.MapLoader;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.BuildingShadow;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
-import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderDoodad;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
@@ -149,7 +148,9 @@ final class MapViewerDoodads {
 		final RenderDoodad renderDoodad = new RenderDoodad(viewer, model, row, location, scale, facingRadians, maxPitch,
 				maxRoll, defScale, doodadVariation);
 		renderDoodad.instance.uniformScale(defScale);
+		renderDoodad.enableLazyClock();
 		viewer.doodads.add(renderDoodad);
+		viewer.pendingDoodads.add(renderDoodad);
 		viewer.decals.add(renderDoodad);
 	}
 
@@ -214,17 +215,34 @@ final class MapViewerDoodads {
 		BuildingShadow destructableShadow = null;
 		RemovablePathingMapInstance destructablePathing = null;
 		RemovablePathingMapInstance destructablePathingDeath = null;
-		final MdxModel model = getDoodadModel(viewer, doodadVariation, row);
-
-		final String portraitModelPath = row.readSLKTag("portraitmodel");
-		final MdxModel portraitModel = viewer.loadModelMdx(portraitModelPath);
+		// A walkable one (bridge, ramp, gate) is walked on by its model's bounds as soon as it stands, so its model is
+		// read at once; any other may be read in the background while the game goes on.
+		final boolean walkable = row.readSLKTagBoolean("walkable");
+		final MdxModel model;
+		final boolean deferBefore = viewer.setDeferModelLoadsInGame(!walkable);
+		try {
+			model = getDoodadModel(viewer, doodadVariation, row);
+		}
+		finally {
+			viewer.setDeferModelLoadsInGame(deferBefore);
+		}
+		final MdxModel portraitModel = viewer.loadWaitingModelMdx(row.readSLKTag("portraitmodel"));
+		final boolean waitForModel = model.isPending();
 
 		final float maxPitch = row.readSLKTagFloat("maxPitch");
 		final float maxRoll = row.readSLKTagFloat("maxRoll");
 		final String shadowString = row.readSLKTag("shadow");
+		String lateShadow = null;
 		if ((shadowString != null) && (shadowString.length() > 0) && !"_".equals(shadowString)
 				&& !"none".equalsIgnoreCase(shadowString)) {
-			destructableShadow = viewer.terrain.addShadow(shadowString, location[0], location[1]);
+			if (waitForModel) {
+				// whether the model casts a shadow of its own is known once it is built
+				lateShadow = shadowString;
+			}
+			else {
+				destructableShadow = viewer.terrain.addShadow(shadowString, location[0], location[1],
+						!viewer.dynamicShadowManager.castsSceneShadow(model, scale[2]));
+			}
 		}
 
 		final ArgbImage destructablePathingPixelMap = viewer.getDestructablePathingPixelMap(row);
@@ -252,9 +270,9 @@ final class MapViewerDoodads {
 		final float selectionScale = 1.0f;
 		simulationDestructable.setLife(viewer.simulation, simulationDestructable.getLife() * (lifePercent / 100f));
 		final RenderDestructable renderDestructable = new RenderDestructable(viewer, model, portraitModel, row, location,
-				scale, facingRadians, selectionScale, maxPitch, maxRoll, lifePercent, destructableShadow,
-				simulationDestructable, doodadVariation);
-		if (row.readSLKTagBoolean("walkable")) {
+				scale, facingRadians, selectionScale, maxPitch, maxRoll, lifePercent, destructableShadow, lateShadow,
+				waitForModel, simulationDestructable, doodadVariation);
+		if (walkable) {
 			final float angle = facingRadians;
 			BoundingBox boundingBox = model.bounds.getBoundingBox();
 			if (boundingBox == null) {

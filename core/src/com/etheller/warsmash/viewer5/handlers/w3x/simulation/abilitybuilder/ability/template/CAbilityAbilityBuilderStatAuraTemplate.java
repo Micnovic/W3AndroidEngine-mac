@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.template;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -9,6 +10,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff.ABGenericAuraBuff;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.DataFieldLetter;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.MeleeRangeTargetOverride;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.StatBuffFromDataField;
@@ -72,7 +74,7 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbstractCAbilityAbil
 		final int index = statBuff.getDataField().getIndex();
 		float value;
 		try {
-			value = Float.parseFloat(levelData.get(getLevel() - 1).getData().get(index));
+			value = ABDataText.parseFloat(levelData.get(getLevel() - 1).getData().get(index));
 		} catch (NumberFormatException exc) {
 			value = 0;
 		}
@@ -104,6 +106,9 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbstractCAbilityAbil
 	}
 
 	private void removeExistingBuffs(CSimulation game, StatBuffFromDataField statBuff) {
+		if (auraGroup == null) {
+			return;
+		}
 		for (CUnit unit : auraGroup) {
 			unit.removeNonStackingStatBuff(game, statBuff.getBuff());
 			if (statBuff.getSecondAtkBuff() != null) {
@@ -113,6 +118,9 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbstractCAbilityAbil
 	}
 
 	private void addNewBuffs(CSimulation game, StatBuffFromDataField statBuff) {
+		if (auraGroup == null) {
+			return;
+		}
 		for (CUnit unit : auraGroup) {
 			unit.addNonStackingStatBuff(game, statBuff.getBuff());
 			if (statBuff.getSecondAtkBuff() != null) {
@@ -230,7 +238,8 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbstractCAbilityAbil
 					}
 				}
 			}
-			for (CUnit unitA : auraGroup) {
+			// An aura added while disabled has no group until it is enabled.
+			for (CUnit unitA : auraGroup == null ? Collections.<CUnit>emptySet() : auraGroup) {
 				if (statBuff.getBuff().getBuffType().isHeroStat()) {
 					unitA.computeDerivedHeroFields(game, statBuff.getBuff().getBuffType());
 				} else {

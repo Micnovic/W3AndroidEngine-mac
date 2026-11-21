@@ -108,7 +108,10 @@ public class CAbilityHero extends AbstractCAbility {
 	public boolean checkBeforeQueue(final CSimulation game, final CUnit caster, final int playerIndex,
 			final int orderId, final boolean autoOrder, final AbilityTarget target) {
 		final War3ID orderIdAsRawtype = new War3ID(orderId);
-		learnSkill(game, caster, orderIdAsRawtype);
+		// The order comes from a player's command: only a skill of this hero it may learn now (points, level).
+		if (this.skillsAvailable.contains(orderIdAsRawtype)) {
+			selectHeroSkill(game, caster, orderIdAsRawtype);
+		}
 		return false;
 	}
 

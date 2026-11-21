@@ -53,7 +53,7 @@ public class CAbilityItemSpellBook extends AbstractCAbilityItemInstantUse implem
 				this.minimumSpells + ((this.maximumSpells > this.minimumSpells)
 						? game.getSeededRandom().nextInt(this.maximumSpells - this.minimumSpells + 1)
 						: 0));
-		while (this.spells.size() < spellCount) {
+		while ((this.spells.size() < spellCount) && !pool.isEmpty()) {
 			final War3ID spellId = pool.remove(game.getSeededRandom().nextInt(pool.size()));
 			final CAbilityType<?> abilityType = game.getAbilityData().getAbilityType(spellId);
 			if (abilityType == null) {

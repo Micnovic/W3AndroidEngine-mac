@@ -28,7 +28,7 @@ public class CAbilityTypeItemPermanentStatGain extends CAbilityType<CAbilityType
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
 
-		final CAbilityTypeLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CLevelingAbility heroAbility = (existingAbility);
 
 		// TODO ignores fields

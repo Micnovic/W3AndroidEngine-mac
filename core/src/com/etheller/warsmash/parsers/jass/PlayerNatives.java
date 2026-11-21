@@ -89,10 +89,7 @@ final class PlayerNatives extends CommonNatives {
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
 					final CPlayerJass player = arguments.get(1)
 							.visit(ObjectJassValueVisitor.<CPlayerJass>getInstance());
-					if (force == null) {
-						throw new JassException(globalScope, "force is null", new NullPointerException());
-					}
-					if (player != null) {
+					if ((force != null) && (player != null)) {
 						force.add(player);
 					}
 					return null;
@@ -119,6 +116,7 @@ final class PlayerNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final List<CPlayerJass> force = arguments.get(0)
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
+					force.clear();
 					final TriggerBooleanExpression filter = nullable(arguments, 1,
 							ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 					for (int i = 0; i < this.simulation.getGameData().getMaxPlayers(); i++) {
@@ -138,6 +136,7 @@ final class PlayerNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final List<CPlayerJass> force = arguments.get(0)
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
+					force.clear();
 					final TriggerBooleanExpression filter = nullable(arguments, 1,
 							ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
 					final Integer countLimit = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
@@ -159,6 +158,7 @@ final class PlayerNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final List<CPlayerJass> force = arguments.get(0)
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
+					force.clear();
 					final CPlayerJass player = nullable(arguments, 1,
 							ObjectJassValueVisitor.<CPlayerJass>getInstance());
 					final TriggerBooleanExpression filter = nullable(arguments, 2,
@@ -185,6 +185,7 @@ final class PlayerNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final List<CPlayerJass> force = arguments.get(0)
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
+					force.clear();
 					final CPlayerJass player = nullable(arguments, 1,
 							ObjectJassValueVisitor.<CPlayerJass>getInstance());
 					final TriggerBooleanExpression filter = nullable(arguments, 2,
@@ -212,8 +213,12 @@ final class PlayerNatives extends CommonNatives {
 					final List<CPlayerJass> force = arguments.get(0)
 							.visit(ObjectJassValueVisitor.<List<CPlayerJass>>getInstance());
 					final CodeJassValue callback = arguments.get(1).visit(CodeJassValueVisitor.getInstance());
+					if (force == null) {
+						return null;
+					}
 					try {
-						for (final CPlayerJass player : force) {
+						// The callback may add or remove players of the same force, as with ForGroup.
+						for (final CPlayerJass player : new ArrayList<>(force)) {
 							globalScope.runThreadUntilCompletion(globalScope.createThread(callback,
 									CommonTriggerExecutionScope.enumScope(triggerScope, player)));
 						}

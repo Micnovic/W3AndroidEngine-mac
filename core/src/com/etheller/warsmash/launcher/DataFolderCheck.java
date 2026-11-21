@@ -41,6 +41,7 @@ public final class DataFolderCheck {
 	private static final String PACKER_MARKER = "w3-datapacker.txt";
 	/** A text locale among the build tags, such as "enUS? enUS speech?:enUS text?". */
 	private static final Pattern LOCALE_TAG = Pattern.compile("\\b([a-z]{2}[A-Z]{2})\\b");
+	private static final Pattern VERSION = Pattern.compile("(?:^|[^0-9])([0-9]{1,4})[.]([0-9]{1,4})(?:[.]|$)");
 	private static final Pattern CONFIG_LOCALE = Pattern.compile("^\\s*LANGID\\s*=\\s*'([a-z]{2}[A-Z]{2})'\\s*$");
 	private static final int MAX_SEARCH_DEPTH = 2;
 	/** Picking the root of a full storage must not freeze the window. */
@@ -190,8 +191,7 @@ public final class DataFolderCheck {
 		lines.add("Path00=\"" + dataFolder.getAbsolutePath() + "\"");
 		if (kind == Kind.CASC) {
 			lines.add("Prefixes00=" + cascPrefixes(dataFolder));
-			// 1.31 stores its file table in the older TVFS layout.
-			if (cascVersion(dataFolder).startsWith("version 1.31")) {
+			if (usesOldCascFormat(dataFolder)) {
 				lines.add("OldFormat00=1");
 			}
 		}
@@ -332,7 +332,7 @@ public final class DataFolderCheck {
 	/**
 	 * The languages a game data folder can be read in, in the order the launchers list them: an install's build tags, or
 	 * the language folders an extracted folder or local files install keeps, each holding the game's text. A folder
-	 * that names none is read in its own language.
+	 * keeps its own language beside them.
 	 */
 	public static synchronized List<String> locales(final Kind kind, final File folder) {
 		final String key = "locales:" + kind + ":" + folder.getAbsolutePath();
@@ -355,7 +355,9 @@ public final class DataFolderCheck {
 				}
 			}
 			final String own = locale(kind, folder);
-			if (found.isEmpty() && !own.isEmpty()) {
+			// The base language is read from the game's own text, not a language folder, so it stays selectable
+			// beside the packs added to it.
+			if (!own.isEmpty() && !found.contains(own)) {
 				found.add(own);
 			}
 			cached = String.join(",", GameLanguage.sorted(found));
@@ -450,6 +452,46 @@ public final class DataFolderCheck {
 			}
 		}
 		return "";
+	}
+
+	/**
+	 * Whether an installed game keeps its file table in the older TVFS layout, which 1.30 and 1.31 use and 1.32 and
+	 * Reforged no longer do. A build info without a readable version is taken as the newer layout.
+	 */
+	public static boolean usesOldCascFormat(final File folder) {
+		return isOldCascFormat(buildInfoField(folder, "Version!"));
+	}
+
+	/**
+	 * Whether the engine cannot run an installed game: 1.30 opens with the older layout but its Classic files lie in
+	 * MPQ archives of the install ("war3.mpq"), not in the "war3.w3mod" the engine reads.
+	 */
+	public static boolean isUnsupportedCasc(final File folder) {
+		return isUnsupportedCascVersion(buildInfoField(folder, "Version!"));
+	}
+
+	static boolean isOldCascFormat(final String version) {
+		final int[] numbers = versionNumbers(version);
+		return (numbers != null) && ((numbers[0] < 1) || ((numbers[0] == 1) && (numbers[1] < 32)));
+	}
+
+	static boolean isUnsupportedCascVersion(final String version) {
+		final int[] numbers = versionNumbers(version);
+		return (numbers != null) && ((numbers[0] < 1) || ((numbers[0] == 1) && (numbers[1] < 31)));
+	}
+
+	/** Major and minor number of a version such as "1.31.1.12164" or "version 1.30.4.11274"; null when it has none. */
+	private static int[] versionNumbers(final String version) {
+		final Matcher matcher = VERSION.matcher(version == null ? "" : version);
+		if (!matcher.find()) {
+			return null;
+		}
+		try {
+			return new int[] { Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)) };
+		}
+		catch (final NumberFormatException e) {
+			return null;
+		}
 	}
 
 	private static String cascVersion(final File folder) {

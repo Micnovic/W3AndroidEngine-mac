@@ -300,12 +300,17 @@ public final class GameOptions {
 	}
 
 	public boolean isUnitShadows() {
-		return flag("unitShadows", true) && (getUnitShadowMode() != UNIT_SHADOWS_OFF);
+		// Earlier launchers set only the mode and left an older on/off at off: a chosen mode decides.
+		final int mode = getUnitShadowMode();
+		return mode >= 0 ? mode != UNIT_SHADOWS_OFF : flag("unitShadows", true);
 	}
 
 	public void setUnitShadows(final boolean value) {
 		setFlag("unitShadows", value);
-		if (value && (getUnitShadowMode() == UNIT_SHADOWS_OFF)) {
+		if (!value) {
+			this.values.put("unitShadowMode", UNIT_SHADOWS_OFF);
+		}
+		else if (getUnitShadowMode() == UNIT_SHADOWS_OFF) {
 			this.values.remove("unitShadowMode");
 		}
 	}

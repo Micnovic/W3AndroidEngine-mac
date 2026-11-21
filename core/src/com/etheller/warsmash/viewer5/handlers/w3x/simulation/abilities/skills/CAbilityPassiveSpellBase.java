@@ -9,6 +9,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitTypeRequirement;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.ScriptFieldOverlay;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbilityGenericSingleIconPassiveAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
@@ -33,7 +34,8 @@ public abstract class CAbilityPassiveSpellBase extends AbilityGenericSingleIconP
 	}
 
 	@Override
-	public final void populate(final GameObject worldEditorAbility, final int level) {
+	public final void populate(final GameObject abilityData, final int level) {
+		final GameObject worldEditorAbility = ScriptFieldOverlay.of(this, abilityData);
 		this.castRange = worldEditorAbility.getFieldAsFloat(AbilityFields.CAST_RANGE + level, 0);
 		this.areaOfEffect = worldEditorAbility.getFieldAsFloat(AbilityFields.AREA_OF_EFFECT + level, 0);
 		this.targetsAllowed = AbstractCAbilityTypeDefinition.getTargetsAllowed(worldEditorAbility, level);

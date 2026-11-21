@@ -92,7 +92,7 @@ public class MapListContainer {
 
 	private List<AbstractListItemProperty> openedMaps() {
 		final List<AbstractListItemProperty> items = new ArrayList<>();
-		for (final String file : this.dataSource.getListfile(MapListContainer::isListedMap)) {
+		for (final String file : this.dataSource.getListfile(LISTED_MAPS)) {
 			try {
 				items.add(AbstractListItemProperty.createFromType(file, ListItemEnum.ITEM_MAP, this.rootFrame,
 						this.dataSource));
@@ -157,6 +157,10 @@ public class MapListContainer {
 		return (lower.endsWith(".w3x") || lower.endsWith(".w3m"))
 				&& ((!lower.contains("\\")) || lower.startsWith("maps\\")) && !isTestMap(lower);
 	}
+
+	/** {@link #isListedMap} as a filter of listed paths. */
+	public static final DataSource.PathFilter LISTED_MAPS = (path, from) -> ((path.length() - from) >= 4)
+			&& hasMapExtension(path) && isListedMap(from == 0 ? path : path.substring(from));
 
 	/** The cheap part of {@link #isListedMap}, which every path of the game data goes through. */
 	private static boolean hasMapExtension(final String file) {

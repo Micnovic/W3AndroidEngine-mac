@@ -49,6 +49,14 @@ public abstract class CTimer {
 		return isExactTiming();
 	}
 
+	/**
+	 * A timer that only drives the display (it reads the simulation, never changes it). The determinism checksum
+	 * leaves it out, so a build that does that work somewhere else hashes the same.
+	 */
+	public boolean isRenderOnly() {
+		return false;
+	}
+
 	public boolean isRepeats() {
 		return this.repeats;
 	}

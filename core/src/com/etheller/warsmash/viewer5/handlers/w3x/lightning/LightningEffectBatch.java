@@ -5,8 +5,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.etheller.warsmash.util.RenderMathUtils;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.viewer5.*;
 import com.etheller.warsmash.viewer5.gl.ANGLEInstancedArrays;
 import com.etheller.warsmash.viewer5.gl.ClientBuffer;
@@ -250,6 +249,7 @@ public class LightningEffectBatch extends RenderBatch {
 
 			gl.glDepthMask(false);
 
+			PerfStats.draw();
 			gl.glDrawElements(GL20.GL_TRIANGLES, count * 12, GL20.GL_UNSIGNED_SHORT, 0);
 		}
 	}

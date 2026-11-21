@@ -2,6 +2,7 @@ package com.etheller.interpreter.ast.execution.instruction;
 
 import com.etheller.interpreter.ast.execution.JassStackFrame;
 import com.etheller.interpreter.ast.execution.JassThread;
+import com.etheller.interpreter.ast.util.JassProfiler;
 import com.etheller.interpreter.ast.value.JassValue;
 
 public class ReturnInstruction implements JassInstruction {
@@ -24,6 +25,9 @@ public class ReturnInstruction implements JassInstruction {
 	@Override
 	public void run(final JassThread thread) {
 		final JassStackFrame finishingStackFrame = thread.stackFrame;
+		if (JassProfiler.ENABLED) {
+			JassProfiler.exitFunction(thread, finishingStackFrame);
+		}
 		final JassValue valueToReturn = finishingStackFrame.pop();
 		finishingStackFrame.keepLocalHandleIds();
 		thread.stackFrame = finishingStackFrame.stackBase;

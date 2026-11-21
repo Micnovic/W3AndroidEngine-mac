@@ -83,6 +83,8 @@ public class DesktopLauncher {
 		CCampaignProgress.setAllMissionsOpen(Boolean.getBoolean("warsmash.allMissions"));
 		final LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
 		config.useGL30 = true;
+		// Looping ambience and the sounds of a battle share the sources; a device that gives fewer keeps what it gives.
+		config.audioDeviceSimultaneousSources = 32;
 		config.gles30ContextMajorVersion = 3;
 		config.gles30ContextMinorVersion = 3;
 //		config.samples = 16;
@@ -398,8 +400,19 @@ public class DesktopLauncher {
 			@Override
 			public void finishLoading(final long maxMillis) {
 				if (Gdx.audio instanceof OpenALAudio) {
-					((OpenALAudio) Gdx.audio).dropPrefetchedWav();
+					((OpenALAudio) Gdx.audio).dropPrefetched();
 				}
+			}
+
+			@Override
+			public boolean newSoundLater(final FileHandle file, final java.util.function.Consumer<Sound> ready) {
+				return (Gdx.audio instanceof OpenALAudio) && ((OpenALAudio) Gdx.audio).newSoundLater(file, ready);
+			}
+
+			@Override
+			public Sound newSoundIfReady(final FileHandle file) {
+				return (Gdx.audio instanceof OpenALAudio) ? ((OpenALAudio) Gdx.audio).newSoundIfReady(file)
+						: Gdx.audio.newSound(file);
 			}
 
 			@Override
@@ -408,6 +421,26 @@ public class DesktopLauncher {
 					final boolean looping) {
 				return ((OpenALSound) buffer).play(volume, pitch, x, y, z, is3dSound, maxDistance, refDistance,
 						looping);
+			}
+
+			@Override
+			public void setPosition(final Sound buffer, final long id, final float x, final float y, final float z,
+					final float maxDistance, final float refDistance) {
+				if (buffer instanceof OpenALSound) {
+					((OpenALSound) buffer).setPosition(id, x, y, z, true, maxDistance, refDistance);
+				}
+			}
+
+			@Override
+			public float duration(final Sound buffer) {
+				return buffer instanceof OpenALSound ? ((OpenALSound) buffer).duration() : 0;
+			}
+
+			@Override
+			public void seek(final Sound buffer, final long id, final float seconds) {
+				if (buffer instanceof OpenALSound) {
+					((OpenALSound) buffer).setOffset(id, seconds);
+				}
 			}
 
 			@Override

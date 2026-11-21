@@ -44,7 +44,8 @@ final class AINatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CPlayer player = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					final String filePath = nullable(arguments, 1, StringJassValueVisitor.getInstance());
-					if (filePath != null) {
+					// Measured: a second AI script for the same player does not start, whichever call began the first.
+					if ((player != null) && (filePath != null) && (player.getAiScript() == null)) {
 						Jass2.doAIScript(dataSource, uiViewport, uiScene, war3MapViewer, player, filePath, meleeUI,
 								originalFiles, jassProgramVisitor, this.simulation, "main", true);
 					}

@@ -12,11 +12,22 @@ import java.io.InputStream;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.regex.Pattern;
 
 import javax.imageio.ImageIO;
 
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Pixmap.Format;
@@ -43,16 +54,36 @@ public final class ImageUtils {
 
 	public static Texture getAnyExtensionTexture(final DataSource dataSource, final String path) {
 		BufferedImage image;
+		if ((recordedTextures != null) && (Thread.currentThread() == recordingThread)) {
+			recordedTextures.add(path);
+		}
+		final Prefetch prefetched = takePrefetched(dataSource, path);
+		if (prefetched != null) {
+			try {
+				final RgbaImage ready = prefetched.decoded;
+				cleanConsoleTileEdges(path, ready.getWidth(), ready.getHeight(), ready.getPixels());
+				return getTexture(ready.getWidth(), ready.getHeight(), ready.getPixels());
+			}
+			finally {
+				prefetched.release();
+			}
+		}
 		try {
 			final DdsDecoder ddsImage = findDdsInsteadOfBlp(dataSource, path);
 			if (ddsImage != null) {
+				cleanConsoleTileEdges(path, ddsImage.getWidth(), ddsImage.getHeight(), ddsImage.getRgba());
 				return getTexture(ddsImage.getWidth(), ddsImage.getHeight(), ddsImage.getRgba());
 			}
 			final BlpDecoder blpImage = findDecodableBlp(dataSource, path);
 			if (blpImage != null) {
 				// Raw palette colors in a plain texture match the ImageIO path, which reads
 				// them as linear and then uploads with an sRGB format.
+				cleanConsoleTileEdges(path, blpImage.getWidth(), blpImage.getHeight(), blpImage.getRgba());
 				return getTexture(blpImage.getWidth(), blpImage.getHeight(), blpImage.getRgba());
+			}
+			final ArgbImage tgaImage = findTgaInsteadOfBlp(dataSource, path);
+			if (tgaImage != null) {
+				return getTextureNoColorCorrection(tgaImage);
 			}
 			if (!IMAGE_IO_AVAILABLE && path.toLowerCase(Locale.ROOT).endsWith(".blp") && dataSource.has(path)) {
 				Log.warn("No decoder for " + path + " on this platform");
@@ -68,6 +99,231 @@ public final class ImageUtils {
 			return null;
 		}
 		return null;
+	}
+
+	private static final Pattern CONSOLE_TILE = Pattern
+			.compile("ui[\\\\/]console[\\\\/][^\\\\/]+[\\\\/][^\\\\/]*uitile0\\d\\.[a-z]+", Pattern.CASE_INSENSITIVE);
+
+	/**
+	 * The console tiles are drawn side by side, and the outermost pixel column of each carries a faint alpha even where
+	 * the picture is open (the portrait, the minimap), which shows as a dark line along the joint. The column takes the
+	 * values of its neighbour, so the tile keeps its size and the open parts stay open.
+	 */
+	private static void cleanConsoleTileEdges(final String path, final int width, final int height,
+			final ByteBuffer rgba) {
+		if ((width < 4) || rgba.isReadOnly() || !CONSOLE_TILE.matcher(path).matches()) {
+			return;
+		}
+		final int base = rgba.position();
+		for (int y = 0; y < height; y++) {
+			final int row = base + (y * width * 4);
+			for (int k = 0; k < 4; k++) {
+				rgba.put(row + k, rgba.get(row + 4 + k));
+				rgba.put(row + ((width - 1) * 4) + k, rgba.get(row + ((width - 2) * 4) + k));
+			}
+		}
+	}
+
+	private static final String UI_TEXTURE_LIST = "ui-textures.lst";
+	private static final int MAX_UI_TEXTURES = 400;
+	private static final Map<String, Prefetch> PREFETCHED = new ConcurrentHashMap<>();
+	private static ExecutorService prefetchExecutor;
+	/** The paths textured during the game screen's setup, on the thread that began it; null outside it. */
+	private static Set<String> recordedTextures;
+	private static Thread recordingThread;
+
+	private static final class Prefetch {
+		private final DataSource dataSource;
+		private Future<RgbaImage> future;
+		/** The decoded pixels; kept outside the Java heap on Android, where this holds tens of megabytes. */
+		private RgbaImage decoded;
+		private OffHeapBlock pixels;
+		private boolean released;
+
+		private Prefetch(final DataSource dataSource) {
+			this.dataSource = dataSource;
+		}
+
+		/** Keeps the decoded image, unless this prefetch is already let go. */
+		private synchronized RgbaImage keep(final RgbaImage image) {
+			if (this.released || (image == null)) {
+				return null;
+			}
+			final ByteBuffer source = image.getPixels().duplicate();
+			this.pixels = OffHeapBlock.allocate(source.remaining());
+			this.pixels.buffer().put(source).clear();
+			this.decoded = new RgbaImage(image.getWidth(), image.getHeight(), this.pixels.buffer(), false);
+			return this.decoded;
+		}
+
+		/** Waits for the decoding; false when it failed or was cancelled. */
+		private boolean await() {
+			try {
+				return this.future.get() != null;
+			}
+			catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+			catch (final Exception e) {
+				return false;
+			}
+		}
+
+		private synchronized void release() {
+			this.released = true;
+			this.decoded = null;
+			if (this.pixels != null) {
+				this.pixels.free();
+				this.pixels = null;
+			}
+		}
+	}
+
+	/**
+	 * The paths the last game screen's setup textured, which the loading screen of the next game decodes ahead.
+	 * Empty before the first game or where the file cannot be read.
+	 */
+	public static List<String> readUiTextureList() {
+		final List<String> paths = new ArrayList<>();
+		try {
+			if ((Gdx.files != null) && Gdx.files.local(UI_TEXTURE_LIST).exists()) {
+				for (final String line : Gdx.files.local(UI_TEXTURE_LIST).readString("UTF-8").split("\n")) {
+					final String path = line.trim();
+					if (!path.isEmpty() && (paths.size() < MAX_UI_TEXTURES)) {
+						paths.add(path);
+					}
+				}
+			}
+		}
+		catch (final RuntimeException e) {
+			// Nothing is decoded ahead; the screen's setup loads them itself.
+		}
+		return paths;
+	}
+
+	/** Starts recording the texture paths loaded from here until {@link #endUiTextureRecording()}. */
+	public static void beginUiTextureRecording() {
+		recordingThread = Thread.currentThread();
+		recordedTextures = new LinkedHashSet<>();
+	}
+
+	/** Saves the recorded paths for the next game's loading screen and drops the textures decoded ahead and unused. */
+	public static void endUiTextureRecording() {
+		final Set<String> recorded = recordedTextures;
+		recordedTextures = null;
+		dropPrefetched();
+		if ((recorded == null) || recorded.isEmpty() || (Gdx.files == null)) {
+			return;
+		}
+		try {
+			final StringBuilder text = new StringBuilder();
+			int count = 0;
+			for (final String path : recorded) {
+				if (count++ == MAX_UI_TEXTURES) {
+					break;
+				}
+				text.append(path).append('\n');
+			}
+			final String content = text.toString();
+			final com.badlogic.gdx.files.FileHandle file = Gdx.files.local(UI_TEXTURE_LIST);
+			if (!file.exists() || !content.equals(file.readString("UTF-8"))) {
+				file.writeString(content, false, "UTF-8");
+			}
+		}
+		catch (final RuntimeException e) {
+			// The next game decodes nothing ahead.
+		}
+	}
+
+	/**
+	 * Reads the file on the calling thread, as data sources are not for other threads, and decodes it on another one
+	 * so that the getAnyExtensionTexture of the same path only has to upload it. Takes the same file the lookup there
+	 * does, and leaves paths that need ImageIO to it.
+	 */
+	public static void prefetchTexture(final DataSource dataSource, final String path) {
+		if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
+			return;
+		}
+		final Prefetch existing = PREFETCHED.get(path);
+		if ((existing != null) && (existing.dataSource == dataSource)) {
+			return;
+		}
+		try {
+			final String basePath = path.substring(0, path.length() - 4);
+			final String ddsPath = basePath + ".dds";
+			final String found = dataSource.findFirst(path, basePath + ".tga", ddsPath);
+			final boolean dds = ddsPath.equals(found);
+			if (!dds && !path.equals(found)) {
+				return;
+			}
+			final ByteBuffer read = readFully(dataSource, dds ? ddsPath : path);
+			if ((read == null) || (!dds && !BlpDecoder.isBlp(read))) {
+				return;
+			}
+			// The file waits for a helper outside the Java heap too; the decoded one is kept by the prefetch itself.
+			final OffHeapBlock file = OffHeapBlock.copyOf(read.array());
+			final Prefetch prefetch = new Prefetch(dataSource);
+			prefetch.future = prefetchExecutor().submit(() -> {
+				final ByteBuffer data;
+				try {
+					final byte[] bytes = new byte[file.buffer().capacity()];
+					file.buffer().duplicate().get(bytes);
+					data = ByteBuffer.wrap(bytes);
+				}
+				finally {
+					file.free();
+				}
+				if (dds) {
+					final DdsDecoder image = DdsDecoder.decode(data, 0, false);
+					return image == null ? null
+							: prefetch.keep(new RgbaImage(image.getWidth(), image.getHeight(), image.getRgba(), false));
+				}
+				final BlpDecoder image = BlpDecoder.decode(data, 0, false);
+				return prefetch.keep(new RgbaImage(image.getWidth(), image.getHeight(), image.getRgba(), false));
+			});
+			PREFETCHED.put(path, prefetch);
+		}
+		catch (final IOException | RuntimeException e) {
+			// Left to getAnyExtensionTexture, which reports it.
+		}
+	}
+
+	private static synchronized ExecutorService prefetchExecutor() {
+		if (prefetchExecutor == null) {
+			prefetchExecutor = Executors.newFixedThreadPool(2, runnable -> {
+				final Thread thread = new Thread(runnable, "Texture prefetch");
+				thread.setDaemon(true);
+				thread.setPriority(Thread.MIN_PRIORITY + 1);
+				return thread;
+			});
+		}
+		return prefetchExecutor;
+	}
+
+	private static Prefetch takePrefetched(final DataSource dataSource, final String path) {
+		if (PREFETCHED.isEmpty()) {
+			return null;
+		}
+		final Prefetch prefetch = PREFETCHED.get(path);
+		if ((prefetch == null) || (prefetch.dataSource != dataSource)) {
+			return null;
+		}
+		PREFETCHED.remove(path);
+		if (!prefetch.await()) {
+			prefetch.release();
+			return null;
+		}
+		return prefetch;
+	}
+
+	/** Lets go of what was decoded ahead and never asked for. */
+	public static void dropPrefetched() {
+		for (final Prefetch prefetch : PREFETCHED.values()) {
+			prefetch.future.cancel(false);
+			prefetch.release();
+		}
+		PREFETCHED.clear();
 	}
 
 	public static AnyExtensionImage getAnyExtensionImageFixRGB(final DataSource dataSource, final String path,
@@ -103,6 +359,23 @@ public final class ImageUtils {
 		}
 		else {
 			throw new IllegalStateException("Missing " + errorType + ": " + path);
+		}
+	}
+
+	/**
+	 * The TGA a BLP path resolves to, decoded without java.awt (a map's preview picture is often a TGA, and Android
+	 * has no BufferedImage); null when the path resolves to something else.
+	 */
+	private static ArgbImage findTgaInsteadOfBlp(final DataSource dataSource, final String path) throws IOException {
+		if (!path.toLowerCase(Locale.ROOT).endsWith(".blp")) {
+			return null;
+		}
+		final String tgaPath = path.substring(0, path.length() - 4) + ".tga";
+		if (!tgaPath.equals(dataSource.findFirst(path, tgaPath))) {
+			return null;
+		}
+		try (InputStream stream = dataSource.getResourceAsStream(tgaPath)) {
+			return stream == null ? null : TgaFile.readTGAPixels(tgaPath, stream);
 		}
 	}
 

@@ -174,6 +174,15 @@ public class BinaryReader {
 		return readUInt16Array(new int[count]);
 	}
 
+	/** Unsigned 16 bit values kept in their own width: the value is the short's bits, read back with & 0xFFFF. */
+	public short[] readUInt16ShortArray(final int count) {
+		final short[] out = new short[count];
+		for (int i = 0; i < count; i++) {
+			out[i] = this.buffer.getShort();
+		}
+		return out;
+	}
+
 	public long[] readUInt32Array(final long[] out) {
 		for (int i = 0, l = out.length; i < l; i++) {
 			out[i] = readUInt32();

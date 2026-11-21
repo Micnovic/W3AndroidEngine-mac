@@ -427,6 +427,64 @@ public enum RenderMathUtils {
 		return out;
 	}
 
+	/** Size of what {@link #slerpSetup} keeps for a pair of quaternions. */
+	public static final int SLERP_SETUP_SIZE = 3;
+	private static final float SLERP = 1;
+	private static final float SLERP_FLIPPED = 2;
+	private static final float LERP = 3;
+	private static final float LERP_FLIPPED = 4;
+
+	/**
+	 * The part of {@link #slerp} that depends only on the two quaternions (the angle between them and its sine, with
+	 * the way they are combined), kept at offset in setup; the keys of an animation are fixed, so it is worked out
+	 * once for each pair of them.
+	 */
+	public static void slerpSetup(final float[] a, final float[] b, final float[] setup, final int offset) {
+		float cosom = (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]) + (a[3] * b[3]);
+		final boolean flipped = cosom < 0.0;
+		if (flipped) {
+			cosom = -cosom;
+		}
+		if ((1.0 - cosom) > EPSILON) {
+			final float omega = (float) Math.acos(cosom);
+			setup[offset] = omega;
+			setup[offset + 1] = (float) Math.sin(omega);
+			setup[offset + 2] = flipped ? SLERP_FLIPPED : SLERP;
+		}
+		else {
+			setup[offset + 2] = flipped ? LERP_FLIPPED : LERP;
+		}
+	}
+
+	/** The same as {@link #slerp}, with the part of it that depends only on a and b taken from {@link #slerpSetup}. */
+	public static float[] slerp(final float[] out, final float[] a, final float[] b, final float t, final float[] setup,
+			final int offset) {
+		final float kind = setup[offset + 2];
+		float bx = b[0], by = b[1], bz = b[2], bw = b[3];
+		if ((kind == SLERP_FLIPPED) || (kind == LERP_FLIPPED)) {
+			bx = -bx;
+			by = -by;
+			bz = -bz;
+			bw = -bw;
+		}
+		final float scale0, scale1;
+		if ((kind == SLERP) || (kind == SLERP_FLIPPED)) {
+			final float omega = setup[offset];
+			final float sinom = setup[offset + 1];
+			scale0 = (float) (Math.sin((1.0 - t) * omega) / sinom);
+			scale1 = (float) (Math.sin(t * omega) / sinom);
+		}
+		else {
+			scale0 = 1.0f - t;
+			scale1 = t;
+		}
+		out[0] = (scale0 * a[0]) + (scale1 * bx);
+		out[1] = (scale0 * a[1]) + (scale1 * by);
+		out[2] = (scale0 * a[2]) + (scale1 * bz);
+		out[3] = (scale0 * a[3]) + (scale1 * bw);
+		return out;
+	}
+
 	private static final float[] sqlerpHeap1 = new float[4];
 	private static final float[] sqlerpHeap2 = new float[4];
 
@@ -434,6 +492,18 @@ public enum RenderMathUtils {
 			final float t) {
 		slerp(sqlerpHeap1, a, d, t);
 		slerp(sqlerpHeap2, b, c, t);
+		slerp(out, sqlerpHeap1, sqlerpHeap2, 2 * t * (1 - t));
+		return out;
+	}
+
+	/**
+	 * The same as {@link #sqlerp}, with the setups of the pairs (a, d) at offset and (b, c) after it in setup, both
+	 * from {@link #slerpSetup}.
+	 */
+	public static float[] sqlerp(final float[] out, final float[] a, final float[] b, final float[] c, final float[] d,
+			final float t, final float[] setup, final int offset) {
+		slerp(sqlerpHeap1, a, d, t, setup, offset);
+		slerp(sqlerpHeap2, b, c, t, setup, offset + SLERP_SETUP_SIZE);
 		slerp(out, sqlerpHeap1, sqlerpHeap2, 2 * t * (1 - t));
 		return out;
 	}
@@ -507,6 +577,40 @@ public enum RenderMathUtils {
 			}
 			return true;
 		}
+	}
+
+	/** The same for the triangles whose first corners are listed in faces, from start to end (exclusive). */
+	public static boolean intersectRayTriangles(final Ray ray, final FloatBuffer vertices, final CharBuffer indices,
+			final int vertexSize, final int[] faces, final int start, final int end, final Vector3 intersection) {
+		float min_dist = Float.MAX_VALUE;
+		boolean hit = false;
+		for (int f = start; f < end; f++) {
+			final int i = faces[f];
+			final int i1 = indices.get(i) * vertexSize;
+			final int i2 = indices.get(i + 1) * vertexSize;
+			final int i3 = indices.get(i + 2) * vertexSize;
+
+			final boolean result = FixedIntersector.intersectRayTriangle(ray,
+					tmp1.set(vertices.get(i1), vertices.get(i1 + 1), vertices.get(i1 + 2)),
+					tmp2.set(vertices.get(i2), vertices.get(i2 + 1), vertices.get(i2 + 2)),
+					tmp3.set(vertices.get(i3), vertices.get(i3 + 1), vertices.get(i3 + 2)), tmp);
+
+			if (result) {
+				final float dist = ray.origin.dst2(tmp);
+				if (dist < min_dist) {
+					min_dist = dist;
+					best.set(tmp);
+					hit = true;
+				}
+			}
+		}
+		if (!hit) {
+			return false;
+		}
+		if (intersection != null) {
+			intersection.set(best);
+		}
+		return true;
 	}
 
 	private static boolean intersectRayTriangles(final Ray ray, final float[] vertices, final int[] intIndices,
@@ -618,12 +722,10 @@ public enum RenderMathUtils {
 	// Until that happens, be sure to only call them during setup and not while the
 	// simulation is live. Otherwise you'll probably get some
 	// bad lag (and memory leaks?).
-	public static ShortBuffer wrapFaces(final int[] faces) {
+	public static ShortBuffer wrapFaces(final short[] faces) {
 		final ShortBuffer wrapper = ByteBuffer.allocateDirect(faces.length * 2).order(ByteOrder.nativeOrder())
 				.asShortBuffer();
-		for (final int face : faces) {
-			wrapper.put((short) face);
-		}
+		wrapper.put(faces);
 		wrapper.clear();
 		return wrapper;
 	}

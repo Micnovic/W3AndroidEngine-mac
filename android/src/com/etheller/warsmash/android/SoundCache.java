@@ -26,6 +26,9 @@ final class SoundCache {
 	private static final long TOUCH_AFTER_MILLIS = 60 * 1000;
 	// Trimming again during a session waits until this much was copied in, so a long campaign cannot fill the storage.
 	private static final long TRIM_AFTER_COPIED_BYTES = 48L * 1024 * 1024;
+	// Changed whenever what a copy holds changes (a copy is not converted the same way), so that copies made before
+	// are never used again and are deleted by the next trim.
+	private static final String COPY_PREFIX = "v2_";
 
 	private static final Set<String> IN_USE = ConcurrentHashMap.newKeySet();
 	private static final AtomicLong COPIED_SINCE_TRIM = new AtomicLong();
@@ -36,6 +39,11 @@ final class SoundCache {
 
 	static long limitBytes() {
 		return Math.max(32, Long.getLong("warsmash.soundCacheMb", DEFAULT_LIMIT_MB)) * 1024 * 1024;
+	}
+
+	/** The name of the copy of a game file, which holds the file as the current version of the app prepares it. */
+	static String copyName(final String gamePath) {
+		return COPY_PREFIX + gamePath.replaceAll("[^A-Za-z0-9._-]", "_");
 	}
 
 	/** Marks a copy as used by this session, before it is looked for, so that no trimming removes it. */
@@ -88,6 +96,10 @@ final class SoundCache {
 		long total = 0;
 		for (final File file : files) {
 			if (!file.isFile()) {
+				continue;
+			}
+			if (!file.getName().startsWith(COPY_PREFIX)) {
+				file.delete();
 				continue;
 			}
 			if (file.getName().endsWith(".part")) {

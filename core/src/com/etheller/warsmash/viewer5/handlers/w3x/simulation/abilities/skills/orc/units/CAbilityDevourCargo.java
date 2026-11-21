@@ -4,20 +4,15 @@ import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractCAbilityPassiveNoOrders;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilitySpell;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CSpellDamageFlags;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CUnitVisionFogModifier;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CDamageType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CWeaponSoundTypeJass;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityActivationReceiver;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 
 /**
  * Cargo Hold (Devour): holds the devoured unit, digests it every second, frees it when the holder dies, and lets

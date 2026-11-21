@@ -6,7 +6,13 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -120,15 +126,34 @@ public final class CSaveStorage {
 		void read(DataInputStream in) throws IOException;
 	}
 
+	/** Fills in what the writer could not know when it passed it: lengths of parts that were streamed. */
+	public interface Patcher {
+		void patch(RandomAccessFile file) throws IOException;
+	}
+
 	/** Written beside the target first: a crash or a full disk must not take the previous file with it. */
 	public static boolean writeAtomically(final FileHandle file, final Writer writer) {
+		return writeAtomically(file, writer, null);
+	}
+
+	public static boolean writeAtomically(final FileHandle file, final Writer writer, final Patcher patcher) {
 		final FileHandle temporary = file.sibling(file.name() + ".tmp");
 		try {
 			file.parent().mkdirs();
-			try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(temporary.write(false)))) {
+			// The bytes must be on the disk before the rename, or a power cut leaves an empty file under the real name.
+			try (FileOutputStream stream = new FileOutputStream(temporary.file())) {
+				final DataOutputStream out = new DataOutputStream(new BufferedOutputStream(stream));
 				writer.write(out);
+				out.flush();
+				stream.getFD().sync();
 			}
-			temporary.moveTo(file);
+			if (patcher != null) {
+				try (RandomAccessFile patched = new RandomAccessFile(temporary.file(), "rw")) {
+					patcher.patch(patched);
+					patched.getFD().sync();
+				}
+			}
+			replaceFile(temporary.file(), file.file());
 			return true;
 		}
 		catch (final Exception exc) {
@@ -140,13 +165,29 @@ public final class CSaveStorage {
 		}
 	}
 
+	/** The target is either the old file or the new one, never a half-copied mix, where the file system can do that. */
+	static void replaceFile(final File from, final File to) throws IOException {
+		try {
+			Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING,
+					StandardCopyOption.ATOMIC_MOVE);
+		}
+		catch (final AtomicMoveNotSupportedException exc) {
+			Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING);
+		}
+	}
+
 	/**
 	 * Campaign scripts save checkpoints in the middle of play, and compressing and storing a save held the frame for
 	 * as long as it took; that part runs beside the game. Writes still happen one after another, in the order asked.
 	 */
 	public static synchronized void writeInBackground(final FileHandle file, final Writer writer) {
+		writeInBackground(file, writer, null);
+	}
+
+	public static synchronized void writeInBackground(final FileHandle file, final Writer writer,
+			final Patcher patcher) {
 		lastBackgroundWrite = BACKGROUND_WRITER.submit(() -> {
-			writeAtomically(file, writer);
+			writeAtomically(file, writer, patcher);
 		});
 	}
 

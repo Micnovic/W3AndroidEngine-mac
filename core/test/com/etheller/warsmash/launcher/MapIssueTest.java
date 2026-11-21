@@ -43,6 +43,47 @@ class MapIssueTest {
 		assertEquals(MapIssue.NONE, MapIssue.ofData(data, "Doodads\\Cinematic\\X\\X.MDX"));
 	}
 
+	private File mapFolder(final String name, final String... scripts) throws Exception {
+		final File folder = new File(this.temp, "maps/" + name);
+		Files.createDirectories(folder.toPath());
+		for (final String script : scripts) {
+			final File file = new File(folder, script);
+			Files.createDirectories(file.getParentFile().toPath());
+			Files.write(file.toPath(), new byte[] { 1 });
+		}
+		return folder;
+	}
+
+	@Test
+	void aMapAboutToStartIsToldByItsScript() throws Exception {
+		final FolderDataSource data = new FolderDataSource(Files.createDirectories(new File(this.temp, "data").toPath()));
+		final String jass = mapFolder("Jass.w3x", "war3map.j").getAbsolutePath();
+		final String scripted = mapFolder("Folder.w3x", "Scripts/war3map.j").getAbsolutePath();
+		final String lua = mapFolder("Lua.w3x", "war3map.lua").getAbsolutePath();
+		final String bare = mapFolder("Bare.w3x", "war3map.w3i").getAbsolutePath();
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, jass));
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, scripted));
+		assertEquals(MapIssue.LUA, MapIssue.ofFile(data, lua));
+		assertEquals(MapIssue.NO_SCRIPT, MapIssue.ofFile(data, bare));
+	}
+
+	@Test
+	void aMapAboutToStartIsToldByItsNameBeforeItIsOpened() throws Exception {
+		final FolderDataSource data = new FolderDataSource(Files.createDirectories(new File(this.temp, "data").toPath()));
+		final File sealed = new File(this.temp, "Sealed.w3xd");
+		Files.write(sealed.toPath(), new byte[] { 1, 2, 3 });
+		assertEquals(MapIssue.PROTECTED, MapIssue.ofFile(data, sealed.getAbsolutePath()));
+	}
+
+	@Test
+	void aMapThatCannotBeOpenedIsLeftToTheEngine() throws Exception {
+		final FolderDataSource data = new FolderDataSource(Files.createDirectories(new File(this.temp, "data").toPath()));
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, new File(this.temp, "Gone.w3x").getAbsolutePath()));
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, null));
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, ""));
+		assertEquals(MapIssue.NONE, MapIssue.ofFile(data, "Doodads/Cinematic/X/X.mdl"));
+	}
+
 	@Test
 	void aMissionEntryThatNamesAModelIsNotAMap() {
 		assertTrue(CampaignMission.isModelEntry("Doodads/Cinematic/X/X.mdl"));
@@ -76,8 +117,53 @@ class MapIssueTest {
 			}
 			assertNotEquals(issue.message, strings.get(issue.message));
 			assertNotEquals(issue.tag, strings.get(issue.tag));
+			assertEquals(issue.english, strings.get(issue.message));
 		}
 		assertEquals("This map uses a Lua script, which is not supported yet.", strings.get(MapIssue.LUA.message));
 		assertEquals("This map is protected and cannot be opened.", strings.get(MapIssue.PROTECTED.message));
+	}
+
+	@Test
+	void aMapNamedByAReplayOrASaveIsMissingWhenItIsNowhere() throws Exception {
+		final FolderDataSource data = new FolderDataSource(Files.createDirectories(new File(this.temp, "data").toPath()));
+		Files.createDirectories(new File(this.temp, "data/Maps").toPath());
+		Files.write(new File(this.temp, "data/Maps/Kept.w3x").toPath(), new byte[] { 1 });
+		final String lua = mapFolder("Lua.w3x", "war3map.lua").getAbsolutePath();
+		final String jass = mapFolder("Jass.w3x", "war3map.j").getAbsolutePath();
+		assertEquals(MapIssue.MISSING, MapIssue.ofRecordedMap(data, "Maps\\Gone.w3x"));
+		assertEquals(MapIssue.MISSING, MapIssue.ofRecordedMap(data, new File(this.temp, "Gone.w3x").getAbsolutePath()));
+		assertEquals(MapIssue.LUA, MapIssue.ofRecordedMap(data, lua));
+		assertEquals(MapIssue.NONE, MapIssue.ofRecordedMap(data, jass));
+		assertEquals(MapIssue.PROTECTED, MapIssue.ofRecordedMap(data, "Campaign\\ForsakenKingdom\\HumanRE01.w3xd"));
+		assertEquals(MapIssue.NONE, MapIssue.ofRecordedMap(data, null));
+		assertEquals(MapIssue.NONE, MapIssue.ofRecordedMap(data, "Doodads/Cinematic/X/X.mdl"));
+	}
+
+	@Test
+	void aRefusedStartKeepsItsIssueThroughTheCauseChain() {
+		for (final MapIssue issue : MapIssue.values()) {
+			if (issue == MapIssue.NONE) {
+				continue;
+			}
+			final MapIssueException refused = new MapIssueException(issue, "Maps\\a.w3x");
+			assertEquals(issue, MapIssue.ofFailure(refused));
+			assertEquals(issue, MapIssue.ofFailure(new RuntimeException("wrapped", refused)));
+			assertEquals(issue.english + " (Maps\\a.w3x)", GameResult.describeFailure(refused));
+		}
+		assertEquals(MapIssue.NONE, MapIssue.ofFailure(new java.io.IOException("other")));
+		assertEquals(MapIssue.NONE, MapIssue.ofFailure(null));
+	}
+
+	@Test
+	void theResultOfARefusedStartCarriesTheIssueToTheLauncher() {
+		final GameResult failed = new GameResult();
+		failed.result = "error";
+		failed.map = "Maps\\a.w3x";
+		failed.issue = MapIssue.LUA;
+		assertEquals(MapIssue.LUA, GameResult.fromJson(failed.toJson()).issue);
+		failed.issue = MapIssue.NONE;
+		assertEquals(MapIssue.NONE, GameResult.fromJson(failed.toJson()).issue);
+		assertFalse(failed.toJson().contains("\"issue\""));
+		assertEquals(MapIssue.NONE, GameResult.fromJson("{\"result\":\"error\",\"issue\":\"Gone\"}").issue);
 	}
 }

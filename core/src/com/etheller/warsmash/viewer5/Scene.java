@@ -134,32 +134,44 @@ public abstract class Scene {
 
 			instance.scene = this;
 
-			// Only allow instances that are actually ok to be added the scene.
-			if (instance.model.ok) {
-				// predict x and y of model
-				float x, y;
-				if (instance.dirty) {
-					// TODO this is an incorrect, predicted location for dirty case
-					if ((instance.parent != null) && !instance.dontInheritTranslation) {
-						x = instance.parent.localLocation.x + instance.localLocation.x;
-						y = instance.parent.localLocation.y + instance.localLocation.y;
-					}
-					else {
-						x = instance.localLocation.x;
-						y = instance.localLocation.y;
-					}
-				}
-				else {
-					x = instance.worldLocation.x;
-					y = instance.worldLocation.y;
-				}
-				instanceMoved(instance, x, y);
-				instanceAdded(instance);
+			// Only allow instances that are actually ok to be added the scene. One made before its model was built
+			// may still be waiting for its turn to load after the model is ok; it is placed when it loads.
+			if (instance.model.ok && !instance.isWaiting()) {
+				place(instance);
 				return true;
 			}
 		}
 
 		return false;
+	}
+
+	/** Adds an instance that was given this scene before its model was built, as {@link #addInstance} would have. */
+	void instanceLoaded(final ModelInstance instance) {
+		if (instance.model.ok) {
+			place(instance);
+		}
+	}
+
+	private void place(final ModelInstance instance) {
+		// predict x and y of model
+		float x, y;
+		if (instance.dirty) {
+			// TODO this is an incorrect, predicted location for dirty case
+			if ((instance.parent != null) && !instance.dontInheritTranslation) {
+				x = instance.parent.localLocation.x + instance.localLocation.x;
+				y = instance.parent.localLocation.y + instance.localLocation.y;
+			}
+			else {
+				x = instance.localLocation.x;
+				y = instance.localLocation.y;
+			}
+		}
+		else {
+			x = instance.worldLocation.x;
+			y = instance.worldLocation.y;
+		}
+		instanceMoved(instance, x, y);
+		instanceAdded(instance);
 	}
 
 	public abstract void instanceMoved(ModelInstance instance, float x, float y);

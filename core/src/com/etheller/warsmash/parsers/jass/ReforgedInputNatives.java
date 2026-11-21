@@ -24,6 +24,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.WarsmashUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCacheSync;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderListener;
 
@@ -122,6 +123,7 @@ final class ReforgedInputNatives {
 			final String data = string(arguments, 1);
 			final CPlayerUnitOrderListener sink = commandSink();
 			if ((sink == null) || (prefix == null) || (data == null) || prefix.isEmpty()
+					|| CGameCacheSync.isCacheSync(prefix)
 					|| (prefix.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_SYNC_BYTES)
 					|| (data.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_SYNC_BYTES)) {
 				return BooleanJassValue.FALSE;
@@ -218,8 +220,11 @@ final class ReforgedInputNatives {
 				.of(Gdx.graphics == null ? 0 : Gdx.graphics.getWidth()));
 		add("BlzGetLocalClientHeight", (arguments, globalScope, triggerScope) -> IntegerJassValue
 				.of(Gdx.graphics == null ? 0 : Gdx.graphics.getHeight()));
-		// The window of this engine always takes input while the game runs; nothing reports a lost focus.
-		add("BlzIsLocalClientActive", (arguments, globalScope, triggerScope) -> BooleanJassValue.TRUE);
+		// This machine's own focus, as the backend reports it: a script must keep it out of the game state.
+		add("BlzIsLocalClientActive", (arguments, globalScope, triggerScope) -> BooleanJassValue
+				.of(this.viewer.scriptUiState.isClientActive()));
+		add("BlzIsSelectionEnabled", (arguments, globalScope, triggerScope) -> BooleanJassValue
+				.of(this.viewer.scriptUiState.isSelectionEnabled()));
 		add("BlzEnableSelections", (arguments, globalScope, triggerScope) -> {
 			this.viewer.scriptUiState.setSelectionEnabled(bool(arguments, 0));
 			this.viewer.scriptUiState.setSelectionCircleEnabled(bool(arguments, 1));

@@ -17,6 +17,12 @@ public interface AbilityBuilderAbility extends CLevelingAbility, Aliased {
 	public AbilityBuilderConfiguration getConfig();
 
 	public Map<String, Object> getLocalStore();
+
+	/** Reads the level data from the given list from now on, for the ability and its callbacks. */
+	void setLevelData(List<CAbilityTypeAbilityBuilderLevelData> levelData);
+
+	/** Fills the numbers taken from the level data (cost, cooldown, range, area, cast time) again. */
+	void refreshSpellFields(CSimulation game, CUnit unit);
 	
 	public float getArea();
 	

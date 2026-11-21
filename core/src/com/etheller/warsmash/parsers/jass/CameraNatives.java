@@ -56,8 +56,7 @@ final class CameraNatives extends CommonNatives {
 						return RealJassValue
 								.of(war3MapViewer.terrain.getDefaultCameraBounds()[1] - playableMapArea.y);
 					default:
-						throw new IllegalArgumentException(
-								"Must input one of these constants: [CAMERA_MARGIN_LEFT, CAMERA_MARGIN_RIGHT, CAMERA_MARGIN_TOP, CAMERA_MARGIN_BOTTOM]");
+						return RealJassValue.ZERO;
 					}
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetCameraBoundMinX",

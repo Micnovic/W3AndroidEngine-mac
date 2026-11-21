@@ -114,7 +114,7 @@ public final class LanLoop {
 					this.listener.onAccept(c);
 					c.start(null);
 				}
-				catch (final IOException e) {
+				catch (final IOException | RuntimeException e) {
 					LanLog.warn("accept failed", e);
 					if (c != null) {
 						c.close("accept failed");
@@ -364,13 +364,26 @@ public final class LanLoop {
 			if (this.done) {
 				return;
 			}
+			final LanConnection c;
+			try {
+				c = new LanConnection(LanLoop.this, this.channel);
+			}
+			catch (final IOException e) {
+				fail(e);
+				return;
+			}
 			this.done = true;
 			if (this.timeout != null) {
 				this.timeout.cancel();
 			}
-			final LanConnection c = new LanConnection(LanLoop.this, this.channel);
 			this.callback.onConnected(c);
-			c.start(key);
+			try {
+				c.start(key);
+			}
+			catch (final IOException e) {
+				// the caller holds the connection now: it hears of the failure as a close
+				c.close("connect failed: " + e.getMessage());
+			}
 		}
 
 		@Override
@@ -522,10 +535,11 @@ public final class LanLoop {
 				LanLog.warn("shutdown hook failed", e);
 			}
 		}
-		closeAllConnections("loop shut down");
 		for (final ServerHandle s : new ArrayList<ServerHandle>(this.servers)) {
 			s.closeQuietly();
 		}
+		drainConnections();
+		closeAllConnections("loop shut down");
 		for (final SelectionKey k : this.selector.keys()) {
 			try {
 				k.channel().close();
@@ -542,6 +556,38 @@ public final class LanLoop {
 		}
 		this.timers.clear();
 	}
+
+	/**
+	 * Closing a socket right after the last write can reset it before the peer has read that write (a LEAVE). Every
+	 * connection gets its queue flushed and its output shut down, then the peer a short, bounded time to close.
+	 * Runs on the loop thread, a daemon, so it never holds the application back.
+	 */
+	private void drainConnections() {
+		if (this.connections.isEmpty()) {
+			return;
+		}
+		for (final LanConnection c : new ArrayList<LanConnection>(this.connections)) {
+			c.drainAndClose("loop shut down");
+		}
+		final long end = nowMs() + SHUTDOWN_DRAIN_MS;
+		try {
+			while (!this.connections.isEmpty()) {
+				final long left = end - nowMs();
+				if (left <= 0) {
+					return;
+				}
+				this.selector.select(Math.min(left, 20));
+				dispatchKeys();
+				runTasks();
+			}
+		}
+		catch (final IOException | RuntimeException e) {
+			LanLog.warn(this.name + " drain failed", e);
+		}
+	}
+
+	/** The longest {@link #drainConnections} waits for the peers. */
+	static final long SHUTDOWN_DRAIN_MS = 500;
 
 	/** How long a caller that must stay responsive (a screen's thread) waits for the loop to close everything. */
 	public static final long RESPONSIVE_WAIT_MS = 400;

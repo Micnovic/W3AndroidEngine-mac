@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -376,11 +377,11 @@ public abstract class CUnitAttack {
 		final int dice = getTotalDamageDice();
 		final int sidesPerDie = getDamageSidesPerDie();
 		if ( dice > 1000 ) {
-			final int singleRoll = sidesPerDie == 0 ? 0 : seededRandom.nextInt(sidesPerDie);
+			final int singleRoll = sidesPerDie <= 0 ? 0 : seededRandom.nextInt(sidesPerDie);
 			damage += (singleRoll + 1) * dice;
 		} else {
 			for (int i = 0; i < dice; i++) {
-				final int singleRoll = sidesPerDie == 0 ? 0 : seededRandom.nextInt(sidesPerDie);
+				final int singleRoll = sidesPerDie <= 0 ? 0 : seededRandom.nextInt(sidesPerDie);
 				damage += singleRoll + 1;
 			}
 		}
@@ -398,7 +399,7 @@ public abstract class CUnitAttack {
 			if (allowContinue.isAllowStacking()) {
 				if (priority == CUnitAttackPreDamageListenerPriority.ATTACKREPLACEMENT && settings != null
 						&& settings.getPreDamageListeners() != null) {
-					for (CUnitAttackPreDamageListener listener : settings.getPreDamageListeners()) {
+					for (final CUnitAttackPreDamageListener listener : new ArrayList<>(settings.getPreDamageListeners())) {
 						if (allowContinue.isAllowSamePriorityStacking()) {
 							allowContinue = listener.onAttack(simulation, attacker, target, attackImpactLocation, this,
 									settings, result);
@@ -406,8 +407,8 @@ public abstract class CUnitAttack {
 					}
 				}
 				else {
-					for (final CUnitAttackPreDamageListener listener : attacker
-							.getPreDamageListenersForPriority(priority)) {
+					for (final CUnitAttackPreDamageListener listener : new ArrayList<>(attacker
+							.getPreDamageListenersForPriority(priority))) {
 						if (allowContinue.isAllowSamePriorityStacking()) {
 							allowContinue = listener.onAttack(simulation, attacker, target, attackImpactLocation, this,
 									settings, result);

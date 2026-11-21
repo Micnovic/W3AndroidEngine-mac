@@ -7,6 +7,7 @@ import com.etheller.interpreter.ast.debug.JassException;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
 import com.etheller.interpreter.ast.util.JassSettings;
+import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.JassType;
 import com.etheller.interpreter.ast.value.JassValue;
@@ -53,13 +54,25 @@ public class NativeJassFunction {
 		}
 		for (int i = 0; i < this.parameters.size(); i++) {
 			final JassParameter parameter = this.parameters.get(i);
-			final JassValue argument = arguments.get(i);
+			JassValue argument = arguments.get(i);
+			if ((argument == null) && (parameter.getType() instanceof HandleJassType)) {
+				// An element of a handle array that was never written reads as a raw null; the natives test for a
+				// null handle, not for a missing value.
+				argument = ((HandleJassType) parameter.getType()).getNullValue();
+				try {
+					arguments.set(i, argument);
+				}
+				catch (final UnsupportedOperationException e) {
+					// A fixed list of arguments from Java: the native still reads this copy through the list.
+					return callWithNullHandle(arguments, i, globalScope, triggerScope);
+				}
+			}
 			if (!parameter.matchesType(argument)) {
 				if ((parameter == null) || (argument == null)) {
 					Log.warn(
 							"We called some Jass function with incorrect argument types, and the types were null!!!");
 					Log.warn("This is a temporary hack for tests and showcase programming solutions");
-					return null;
+					return this.returnType.getNullValue();
 				}
 				Log.warn(
 						parameter.getType() + " != " + argument.visit(JassTypeGettingValueVisitor.getInstance()));
@@ -75,14 +88,15 @@ public class NativeJassFunction {
 		try {
 			return this.implementation.call(arguments, globalScope, triggerScope);
 		}
-		catch (final NullPointerException e) {
+		catch (final NullPointerException | IndexOutOfBoundsException e) {
 			if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR) {
 				throw e;
 			}
-			// The original's natives ignore a null handle; one that this engine does not check must not end the
-			// whole script thread (a cinematic would stop halfway).
+			// The original's natives ignore a null handle or an index out of range; one that this engine does not
+			// check must not end the whole script thread (a cinematic would stop halfway).
 			if (this.reportedNullFailure.compareAndSet(false, true)) {
-				Log.error("Native " + this.name + " failed on a null value; ignored like the original:");
+				Log.error("Native " + this.name
+						+ " failed on a null value or an index out of range; ignored like the original:");
 				Log.error(e);
 			}
 			return this.returnType.getNullValue();
@@ -103,6 +117,17 @@ public class NativeJassFunction {
 			}
 			return this.returnType.getNullValue();
 		}
+	}
+
+	private JassValue callWithNullHandle(final List<JassValue> arguments, final int nullIndex,
+			final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
+		final List<JassValue> copy = new java.util.ArrayList<>(arguments);
+		for (int i = nullIndex; i < copy.size(); i++) {
+			if ((copy.get(i) == null) && (this.parameters.get(i).getType() instanceof HandleJassType)) {
+				copy.set(i, ((HandleJassType) this.parameters.get(i).getType()).getNullValue());
+			}
+		}
+		return call(copy, globalScope, triggerScope);
 	}
 
 	private static boolean hasHandle(final List<JassValue> arguments) {

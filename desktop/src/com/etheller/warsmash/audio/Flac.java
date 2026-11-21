@@ -81,24 +81,35 @@ public class Flac {
 				return;
 			}
 
-			try (PcmStream input = new PcmStream(file.readBytes())) {
-				final byte[] pcm = new byte[(int) input.dataLength];
-				int total = 0;
-				while (total < pcm.length) {
-					final int count = input.read(pcm, total, pcm.length - total);
-					if (count < 0) {
-						break;
-					}
-					total += count;
+			OggPcm pcm = audio.takePrefetched(file);
+			if (pcm == null) {
+				try {
+					pcm = decode(file.readBytes());
 				}
-				if (total == pcm.length) {
-					input.read(new byte[1], 0, 1);
+				catch (final IOException ex) {
+					throw new GdxRuntimeException("Error reading FLAC file: " + file, ex);
 				}
-				setup(total == pcm.length ? pcm : Arrays.copyOf(pcm, total), input.channels, input.sampleRate);
 			}
-			catch (final IOException ex) {
-				throw new GdxRuntimeException("Error reading FLAC file: " + file, ex);
+			setup(pcm);
+		}
+	}
+
+	static OggPcm decode(final byte[] fileBytes) throws IOException {
+		try (PcmStream input = new PcmStream(fileBytes)) {
+			final byte[] pcm = new byte[(int) input.dataLength];
+			int total = 0;
+			while (total < pcm.length) {
+				final int count = input.read(pcm, total, pcm.length - total);
+				if (count < 0) {
+					break;
+				}
+				total += count;
 			}
+			if (total == pcm.length) {
+				input.read(new byte[1], 0, 1);
+			}
+			return new OggPcm(total == pcm.length ? pcm : Arrays.copyOf(pcm, total), input.channels,
+					input.sampleRate);
 		}
 	}
 

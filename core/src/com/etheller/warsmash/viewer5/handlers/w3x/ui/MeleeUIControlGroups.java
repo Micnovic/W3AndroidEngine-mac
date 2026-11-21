@@ -373,7 +373,7 @@ final class MeleeUIControlGroups {
 			if (used) {
 				final CUnit hero = this.heroBarUnits.get(i);
 				final IconUI unitUI = this.ui.war3MapViewer.getAbilityDataUI().getUnitUI(hero.getTypeId());
-				icon.setTexture(hero.isDead() ? unitUI.getIconDisabled() : unitUI.getIcon());
+				icon.setTexture(unitUI == null ? null : hero.isDead() ? unitUI.getIconDisabled() : unitUI.getIcon());
 				if (isHeroAlertButtonShown(hero, now)) {
 					icon.setIconColor(1f, HERO_ALERT_TINT, HERO_ALERT_TINT, 1f);
 				}

@@ -73,6 +73,13 @@ public class MapsFolderDataSource implements DataSource {
 	}
 
 	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		final String path = inside(filepath);
+		final FolderDataSource maps = this.maps;
+		return (path == null) || (maps == null) ? null : maps.opener(path);
+	}
+
+	@Override
 	public boolean has(final String filepath) {
 		final String path = inside(filepath);
 		final FolderDataSource maps = this.maps;

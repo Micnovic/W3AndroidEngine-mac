@@ -89,6 +89,9 @@ public class RandomTypeHandler {
 		if (randomItems == null) {
 			loadItemLists(game);
 		}
+		if (randomItems.isEmpty()) {
+			return null;
+		}
 		int i = game.getSeededRandom().nextInt(randomItems.size());
 		return randomItems.get(i);
 	}

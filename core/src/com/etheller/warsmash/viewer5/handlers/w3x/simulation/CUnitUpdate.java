@@ -473,12 +473,17 @@ final class CUnitUpdate {
 					if (!self.hidden && game.castsSpellsByItself(self.playerIndex)) {
 						self.tryCreepCast(game);
 					}
-					// Autocast spells (Heal, Slow, Spell Steal) are also cast in the middle of a fight, not only
-					// by idle units.
-					if ((self.orders.currentBehavior instanceof CBehaviorAttack) && self.auto.autoCast
-							&& (self.autocastAbility != null)
-							&& ((game.getGameTurnTick() % CUnitAcquisition.AUTOCAST_COMBAT_SCAN_TICKS) == 0)) {
-						self.autoAcquireAutocastTargets(game, self.movement.moveDisabled);
+					// Autocast spells (Heal, Slow) are also cast in the middle of a fight, not only by idle units. Spell
+					// Steal is not when the unit was only called into the fight by a neighbour.
+					if (self.orders.currentBehavior instanceof CBehaviorAttack) {
+						if (self.auto.autoCast && (self.autocastAbility != null)
+								&& (self.autocastAbility.autocastsWhenCalledIntoFight() || !self.aggro.fightFromHelpCall)
+								&& ((game.getGameTurnTick() % CUnitAcquisition.AUTOCAST_COMBAT_SCAN_TICKS) == 0)) {
+							self.autoAcquireAutocastTargets(game, self.movement.moveDisabled);
+						}
+					}
+					else {
+						self.aggro.fightFromHelpCall = false;
 					}
 					if (self.orders.currentBehavior != null) {
 						final CUnit target = self.orders.currentBehavior.visit(BehaviorTargetUnitVisitor.INSTANCE);

@@ -8,6 +8,8 @@ import java.nio.ByteBuffer;
 
 import javax.imageio.ImageIO;
 
+import com.etheller.warsmash.datasources.IndependentStream;
+import com.etheller.warsmash.util.OffHeapBlock;
 import com.etheller.warsmash.util.StreamBytes;
 
 import com.etheller.warsmash.util.ImageUtils;
@@ -33,17 +35,90 @@ public class BlpTexture extends RawOpenGLTextureResource {
 	private CompressedMips preparedBlocks;
 	private MipLevels preparedLevels;
 	private Exception prepareError;
+	/** The file, kept for the game thread only while the helper thread has not prepared it. */
+	private byte[] fileBytes;
+	/** The file of a texture that is queued before its helper has read it, outside the Java heap. */
+	private OffHeapBlock queuedFile;
+
+	/** The queued file as an array for the helper thread; it stays in {@link #fileBytes} for what the helper cannot do. */
+	private byte[] queuedBytes() {
+		final OffHeapBlock block = this.queuedFile;
+		if (block == null) {
+			return this.fileBytes;
+		}
+		final byte[] bytes = new byte[block.buffer().capacity()];
+		block.buffer().duplicate().get(bytes);
+		this.queuedFile = null;
+		block.free();
+		this.fileBytes = bytes;
+		return bytes;
+	}
 
 	@Override
 	protected void load(final InputStream src, final Object options) {
 		try {
-			final byte[] bytes = StreamBytes.readAll(src);
-			if (!isShadowTexture()) {
-				final int limit = this.viewer.getTextureSizeLimit();
+			final boolean shadow = isShadowTexture();
+			if (!shadow && (src instanceof IndependentStream)) {
+				// the helper reads the file too, which is most of what a texture costs on the game thread
+				final int limit = this.viewer.getTextureSizeRule();
 				final boolean compress = this.viewer.isTextureCompression();
-				if (this.viewer.deferTextureLoad(() -> prepare(bytes, limit, compress), () -> finishLoad(bytes))) {
+				final boolean blocks = this.viewer.isBlockTextures();
+				if (this.viewer.deferTextureLoad(() -> {
+					try (InputStream stream = src) {
+						if (blocks) {
+							// A .dds that a .blp name resolved to is uploaded as it is stored, from a block of its own.
+							final OffHeapBlock file = OffHeapBlock.readAll(stream);
+							this.preparedBlocks = DdsDecoder.isDds(file.buffer()) ? DdsDecoder.blocks(file, limit) : null;
+							if (this.preparedBlocks == null) {
+								this.fileBytes = new byte[file.buffer().capacity()];
+								file.buffer().duplicate().get(this.fileBytes);
+								file.free();
+							}
+						}
+						else {
+							this.fileBytes = StreamBytes.readAll(stream);
+						}
+						if (this.preparedBlocks == null) {
+							prepare(this.fileBytes, limit, compress, false);
+						}
+					}
+					catch (final IOException | RuntimeException e) {
+						this.prepareError = e;
+					}
+					catch (final OutOfMemoryError e) {
+						this.fileBytes = null;
+						this.prepareError = new RuntimeException("Out of memory reading " + this.fetchUrl, e);
+					}
+					return heldBytes();
+				}, () -> finishLoad(null))) {
+					setPending(true);
 					return;
 				}
+			}
+			final byte[] bytes = StreamBytes.readAll(src);
+			if (!shadow) {
+				final int limit = this.viewer.getTextureSizeRule();
+				final boolean compress = this.viewer.isTextureCompression();
+				final boolean blocks = this.viewer.isBlockTextures();
+				// Queued files wait for a helper until it starts them: on Android that is kept outside the Java heap.
+				if (OffHeapBlock.directBuffersInHeap()) {
+					this.queuedFile = OffHeapBlock.copyOf(bytes);
+				}
+				else {
+					this.fileBytes = bytes;
+				}
+				if (this.viewer.deferTextureLoad(() -> {
+					prepare(queuedBytes(), limit, compress, blocks);
+					return heldBytes();
+				}, () -> finishLoad(null))) {
+					setPending(true);
+					return;
+				}
+				if (this.queuedFile != null) {
+					this.queuedFile.free();
+					this.queuedFile = null;
+				}
+				this.fileBytes = null;
 			}
 			decodeAndUpload(bytes);
 		}
@@ -53,12 +128,20 @@ public class BlpTexture extends RawOpenGLTextureResource {
 	}
 
 	/** Decodes and compresses the file on a helper thread; what is not a BLP or DDS is left to the game thread. */
-	private void prepare(final byte[] bytes, final int limit, final boolean compress) {
+	private void prepare(final byte[] bytes, final int limit, final boolean compress, final boolean blockFormats) {
 		try {
 			final ByteBuffer data = ByteBuffer.wrap(bytes);
 			final boolean dds = DdsDecoder.isDds(data);
 			if (!dds && !BlpDecoder.isBlp(data)) {
 				return;
+			}
+			if (blockFormats && dds) {
+				final OffHeapBlock block = OffHeapBlock.copyOf(bytes);
+				this.preparedBlocks = DdsDecoder.blocks(block, limit);
+				if (this.preparedBlocks != null) {
+					return;
+				}
+				block.free();
 			}
 			final MipLevels[] decoded = new MipLevels[1];
 			final TextureTranscoder.Decoder decoder = () -> {
@@ -78,16 +161,48 @@ public class BlpTexture extends RawOpenGLTextureResource {
 		catch (final IOException | RuntimeException e) {
 			this.prepareError = e;
 		}
+		catch (final OutOfMemoryError e) {
+			// the helper thread dies otherwise, and the texture would stay unfinished
+			this.preparedBlocks = null;
+			this.preparedLevels = null;
+			this.prepareError = new RuntimeException("Out of memory preparing " + this.fetchUrl, e);
+		}
 	}
 
-	private void finishLoad(final byte[] bytes) {
+	/**
+	 * The bytes the helper thread's result holds until the game thread uploads it. Once prepared (or failed) the file
+	 * itself is let go: dozens of textures wait for their upload when units of new types appear, and their files
+	 * kept beside the results filled a phone's heap.
+	 */
+	private long heldBytes() {
+		if ((this.preparedBlocks != null) || (this.preparedLevels != null) || (this.prepareError != null)) {
+			this.fileBytes = null;
+		}
+		return preparedBytes() + (this.fileBytes != null ? this.fileBytes.length : 0);
+	}
+
+	private long preparedBytes() {
+		return this.preparedBlocks != null ? this.preparedBlocks.byteCount()
+				: this.preparedLevels != null ? this.preparedLevels.byteCount() : 0;
+	}
+
+	private void finishLoad(final byte[] readBytes) {
+		final byte[] bytes = readBytes != null ? readBytes : this.fileBytes;
+		this.fileBytes = null;
 		final CompressedMips blocks = this.preparedBlocks;
 		final MipLevels levels = this.preparedLevels;
 		final Exception failure = this.prepareError;
 		this.preparedBlocks = null;
 		this.preparedLevels = null;
 		this.prepareError = null;
+		setPending(false);
 		if (isDisposed()) {
+			if (levels != null) {
+				levels.free();
+			}
+			if (blocks != null) {
+				blocks.free();
+			}
 			return;
 		}
 		try {
@@ -115,8 +230,17 @@ public class BlpTexture extends RawOpenGLTextureResource {
 		BufferedImage img;
 		final ByteBuffer data = ByteBuffer.wrap(bytes);
 		final boolean shadow = isShadowTexture();
-		final int limit = shadow ? 0 : this.viewer.getTextureSizeLimit();
+		final int limit = shadow ? 0 : this.viewer.getTextureSizeRule();
 		final boolean dds = DdsDecoder.isDds(data);
+		if (dds && !shadow && this.viewer.isBlockTextures()) {
+			final OffHeapBlock block = OffHeapBlock.copyOf(bytes);
+			final CompressedMips blocks = DdsDecoder.blocks(block, limit);
+			if (blocks != null) {
+				update(blocks);
+				return;
+			}
+			block.free();
+		}
 		if (this.viewer.isTextureCompression() && !shadow && (dds || BlpDecoder.isBlp(data))) {
 			final CompressedMips blocks = TextureTranscoder.transcode(this.fetchUrl, bytes, limit,
 					() -> dds ? DdsDecoder.decode(data, limit, true).getLevels()

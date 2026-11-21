@@ -62,11 +62,12 @@ public class PlayerSlotPane {
 				"WITHCHILDREN", index);
 		container.add(this.playerSlotFrame);
 
+		// Only the download column can be missing from a slot's layout; the others every slot needs.
 		this.downloadValue = (StringFrame) rootFrame.getFrameByName("DownloadValue", index);
-		this.nameMenu = (PopupMenuFrame) rootFrame.getFrameByName("NameMenu", index);
-		this.raceMenu = (PopupMenuFrame) rootFrame.getFrameByName("RaceMenu", index);
-		this.teamButtonFrame = (GlueButtonFrame) rootFrame.getFrameByName("TeamButton", index);
-		this.colorButtonFrame = (GlueButtonFrame) rootFrame.getFrameByName("ColorButton", index);
+		this.nameMenu = (PopupMenuFrame) requireFrame(rootFrame, "NameMenu", index);
+		this.raceMenu = (PopupMenuFrame) requireFrame(rootFrame, "RaceMenu", index);
+		this.teamButtonFrame = (GlueButtonFrame) requireFrame(rootFrame, "TeamButton", index);
+		this.colorButtonFrame = (GlueButtonFrame) requireFrame(rootFrame, "ColorButton", index);
 
 		// TODO this is a hole in my API to need to do this -- instead it should
 		// probably inflate all frames within a frame by default
@@ -110,9 +111,20 @@ public class PlayerSlotPane {
 			}
 			this.colorMenu.setVisible(!this.colorMenu.isVisible());
 		});
-		this.handicapMenu = (PopupMenuFrame) rootFrame.getFrameByName("HandicapMenu", index);
+		this.handicapMenu = (PopupMenuFrame) requireFrame(rootFrame, "HandicapMenu", index);
 		// Ping is measured only in network games.
-		rootFrame.getFrameByName("PingValue", index).setVisible(false);
+		final UIFrame pingValue = rootFrame.getFrameByName("PingValue", index);
+		if (pingValue != null) {
+			pingValue.setVisible(false);
+		}
+	}
+
+	private static UIFrame requireFrame(final GameUI rootFrame, final String name, final int index) {
+		final UIFrame frame = rootFrame.getFrameByName(name, index);
+		if (frame == null) {
+			throw new IllegalStateException("The player slot layout has no " + name + " frame");
+		}
+		return frame;
 	}
 
 	public void setTeamCount(final GameUI rootFrame, final Viewport uiViewport, final int teamCount) {
@@ -164,16 +176,18 @@ public class PlayerSlotPane {
 	}
 
 	public void setForPlayer(final GameUI rootFrame, final Viewport uiViewport, final CPlayerJass player,
-			boolean fixedPlayerSettings) {
+			boolean lockedComputer) {
 		final List<MenuItem> nameMenuItems = new ArrayList<>();
 		nameMenuItems.add(new MenuItem(rootFrame.getTemplates().getDecoratedString("OPEN"), -2));
 		nameMenuItems.add(new MenuItem(rootFrame.getTemplates().getDecoratedString("CLOSED"), -2));
 		nameMenuItems.add(new MenuItem(rootFrame.getTemplates().getDecoratedString("COMPUTER_NEWBIE"), -2));
 		nameMenuItems.add(new MenuItem(rootFrame.getTemplates().getDecoratedString("COMPUTER_NORMAL"), -2));
 		nameMenuItems.add(new MenuItem(rootFrame.getTemplates().getDecoratedString("COMPUTER_INSANE"), -2));
-		setNameMenuTextByPlayer(rootFrame, player, nameMenuItems, fixedPlayerSettings);
-		rootFrame.setText(this.downloadValue, "");
-		this.downloadValue.setVisible(false);
+		setNameMenuTextByPlayer(rootFrame, player, nameMenuItems, lockedComputer);
+		if (this.downloadValue != null) {
+			rootFrame.setText(this.downloadValue, "");
+			this.downloadValue.setVisible(false);
+		}
 		setTextFromRacePreference(rootFrame, player);
 		this.color = player.getColor();
 		this.colorButtonValueFrame.setBackground(rootFrame.loadTexture("ReplaceableTextures\\"
@@ -244,7 +258,7 @@ public class PlayerSlotPane {
 	}
 
 	public void setNameMenuTextByPlayer(final GameUI rootFrame, final CPlayerJass player,
-			final List<MenuItem> nameMenuItems, boolean fixedPlayerSettings) {
+			final List<MenuItem> nameMenuItems, boolean lockedComputer) {
 		String name = player.getName();
 		final CPlayerSlotState slotState = player.getSlotState();
 		final CMapControl controller = player.getController();
@@ -277,7 +291,8 @@ public class PlayerSlotPane {
 				default:
 					break;
 				}
-				if (fixedPlayerSettings) {
+				// Only a computer the map itself sets is locked; one the host picks stays changeable.
+				if (lockedComputer) {
 					this.nameMenu.setEnabled(false);
 				}
 			}

@@ -114,7 +114,7 @@ public class CAbilityAnimateDead extends CAbilityNoTargetSpellBase implements CC
 			}
 			corpse.add(simulation, new CBuffTimedLife(simulation.getHandleIdAllocator().createId(), this.buffId,
 					getDuration(), false));
-			simulation.createTemporarySpellEffectOnUnit(corpse, getAlias(), CEffectType.TARGET);
+			simulation.createTemporarySpellEffectOnUnit(corpse, getAlias(), CEffectType.SPECIAL);
 		}
 		simulation.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.CASTER);
 		return false;

@@ -153,6 +153,9 @@ final class AbilityNatives extends CommonNatives {
 					final int newLevel = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
 					final War3ID war3id = new War3ID(rawcode);
 					final CAbility found = findAbility(whichUnit, war3id);
+					if (whichUnit == null) {
+						return IntegerJassValue.ZERO;
+					}
 					if (found == null) {
 						// Measured: a missing alarm reads 0, it cannot be added by script.
 						return IntegerJassValue.of(war3id.equals(CUnitData.ALARM_ABILITY_ID) ? 0 : newLevel);
@@ -462,6 +465,9 @@ final class AbilityNatives extends CommonNatives {
 
 	/** The unit's ability by rawcode; a unit inventory (alias Aihn) answers to the plain inventory code too. */
 	private static CAbility findAbility(final CUnit unit, final War3ID rawcode) {
+		if (unit == null) {
+			return null;
+		}
 		final CAbility found = unit.getAbilityByRawcode(rawcode);
 		if ((found == null) && rawcode.equals(INVENTORY_CODE)) {
 			return unit.getInventoryData();

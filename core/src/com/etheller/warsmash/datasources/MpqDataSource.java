@@ -97,17 +97,18 @@ public class MpqDataSource implements DataSource {
 				throw new IOException(exc);
 			}
 		}
-		final ArchivedFileStream stream = new ArchivedFileStream(this.inputChannel, this.extractor, file);
-		final InputStream newInputStream = Channels.newInputStream(stream);
-		String tmpdir = System.getProperty("java.io.tmpdir");
-		if (!tmpdir.endsWith(File.separator)) {
-			tmpdir += File.separator;
+		final File tempDir = new File(System.getProperty("java.io.tmpdir"), "RMSExtract");
+		final File tempProduct = new File(tempDir, filepath.replace('\\', '/'));
+		// Archive names come from the map: one with ".." must not write beside the extraction folder.
+		if (!tempProduct.getCanonicalPath().startsWith(tempDir.getCanonicalPath() + File.separator)) {
+			throw new IOException("Archive path outside the extraction folder: " + filepath);
 		}
-		final String tempDir = tmpdir + "RMSExtract/";
-		final File tempProduct = new File(tempDir + filepath.replace('\\', File.separatorChar));
 		tempProduct.delete();
 		tempProduct.getParentFile().mkdirs();
-		Files.copy(newInputStream, tempProduct.toPath());
+		try (InputStream newInputStream = Channels
+				.newInputStream(new ArchivedFileStream(this.inputChannel, this.extractor, file))) {
+			Files.copy(newInputStream, tempProduct.toPath());
+		}
 		tempProduct.deleteOnExit();
 		return tempProduct;
 	}

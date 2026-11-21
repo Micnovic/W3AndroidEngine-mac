@@ -141,18 +141,26 @@ final class CustomContentActions {
 			final boolean done = added;
 			final String shown = message;
 			this.activity.runOnUiThread(() -> {
+				// A window closed during the copy keeps the map and its folder, but shows nothing more.
+				final boolean gone = this.activity.isDestroyed();
 				if (done) {
 					if (chosen == null) {
 						new EngineSettings(this.activity).setCustomFolder(root);
-						this.activity.reloadContent();
+						if (!gone) {
+							this.activity.reloadContent();
+						}
 					}
 					// The list opens with the new map chosen.
 					final String file = CustomContent.mapFileName(name);
 					this.activity.preferences.edit().putString(KEY_MAP, "Maps\\Custom\\" + file).apply();
-					this.activity.customPage.forget();
-					this.activity.customPage.showCustom();
+					if (!gone) {
+						this.activity.customPage.forget();
+						this.activity.customPage.showCustom();
+					}
 				}
-				this.activity.dialogs.showMessage(getString(R.string.game_import_title), shown);
+				if (!gone) {
+					this.activity.dialogs.showMessage(getString(R.string.game_import_title), shown);
+				}
 			});
 		}, "MapImport").start();
 	}

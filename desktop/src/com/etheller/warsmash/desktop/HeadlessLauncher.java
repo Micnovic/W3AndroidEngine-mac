@@ -9,10 +9,10 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.badlogic.gdx.Application;
@@ -22,7 +22,6 @@ import com.badlogic.gdx.Files;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.LifecycleListener;
 import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.audio.Music;
 import com.badlogic.gdx.audio.Sound;
@@ -30,7 +29,6 @@ import com.badlogic.gdx.backends.lwjgl.LwjglFileHandle;
 import com.badlogic.gdx.backends.lwjgl.LwjglFiles;
 import com.badlogic.gdx.backends.lwjgl.LwjglNativesLoader;
 import com.badlogic.gdx.backends.lwjgl.LwjglPreferences;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
@@ -55,6 +53,7 @@ import com.etheller.warsmash.viewer5.gl.WireframeExtension;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.SimulationChecksum;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerGameResult;
 
 /**
  * Plays a map or a replay with no window, graphics driver or sound device, as fast as the game steps: the same
@@ -67,7 +66,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.SimulationChecksum;
  * <li>-steps N: stop when the game reaches step N and print its checksum there;</li>
  * <li>-frametime S: game seconds a frame passes on to the game (default 1, so 20 steps a frame).</li>
  * </ul>
- * The program ends with the game (EndGame, the end of a replay with -Dwarsmash.replay.exit=true) or at -steps.
+ * The program ends with the game (EndGame, the end of a replay with -Dwarsmash.replay.exit=true) or at -steps. A game
+ * its script has paused (a victory or defeat dialog that waits for a click, as in a custom map's end) never goes on,
+ * as nobody answers the dialog: it ends too, with status 0 when the local player was removed with a result and 6 when
+ * it was not.
  * A map or replay that cannot be loaded ends it with status 5.
  *
  * -Dwarsmash.test.games=<map>;<map>;...;<steps> plays the maps one after another in this one process, each from the
@@ -82,8 +84,11 @@ public final class HeadlessLauncher {
 	private static final String RESULT_PROPERTY = "warsmash.test.result";
 	private static final long GAME_TIMEOUT_NANOS = 15L * 60L * 1_000_000_000L;
 	private static final long LOAD_TIMEOUT_NANOS = 3L * 60L * 1_000_000_000L;
+	/** Frames a game paused by its script may stand at one step before nothing is left to unpause it. */
+	private static final int STALL_FRAMES = 200;
 
-	private final ArrayDeque<Runnable> runnables = new ArrayDeque<>();
+	// Posted from other threads as well as the game loop.
+	private final ConcurrentLinkedQueue<Runnable> runnables = new ConcurrentLinkedQueue<>();
 	private final Map<String, Preferences> preferences = new HashMap<>();
 	private final String preferencesDirectory;
 	private ApplicationListener listener;
@@ -203,6 +208,8 @@ public final class HeadlessLauncher {
 		int firstTick = 0;
 		CSimulation last = null;
 		int lastTick = -1;
+		final Stall stall = new Stall();
+		int stalledStatus = 0;
 		while (!this.exitRequested) {
 			runPostedRunnables();
 			final CSimulation simulation = runningGame(game);
@@ -234,6 +241,10 @@ public final class HeadlessLauncher {
 				}
 				last = simulation;
 				if ((steps >= 0) && (tick >= steps)) {
+					break;
+				}
+				if (!LanHeadless.isActive() && stall.standing(game.getRunningMapScreen().getViewer(), tick)) {
+					stalledStatus = stall.report();
 					break;
 				}
 				if (steps >= 0) {
@@ -273,7 +284,49 @@ public final class HeadlessLauncher {
 		if (loadFailed) {
 			return 5;
 		}
+		if (stalledStatus != 0) {
+			return stalledStatus;
+		}
 		return LanHeadless.hasFailed() ? 4 : 0;
+	}
+
+	/**
+	 * Tells a game its script paused for good: the game stands at one step, paused, for {@link #STALL_FRAMES} frames,
+	 * and only a player's answer (a click on a dialog) could go on.
+	 */
+	private static final class Stall {
+		private int tick = -1;
+		private int frames;
+		private int step;
+		private CPlayerGameResult result;
+		private int player;
+
+		boolean standing(final War3MapViewer viewer, final int currentTick) {
+			if ((viewer == null) || !viewer.isGamePaused() || (currentTick != this.tick)) {
+				this.tick = currentTick;
+				this.frames = 0;
+				return false;
+			}
+			if (++this.frames < STALL_FRAMES) {
+				return false;
+			}
+			this.step = currentTick;
+			this.player = viewer.getLocalPlayerIndex();
+			this.result = viewer.simulation.getPlayer(this.player).getRemovedResult();
+			return true;
+		}
+
+		/** Logs why the game ends and returns the program's status for it. */
+		int report() {
+			if (this.result == null) {
+				Log.warn("Headless: the game is paused by its script at step " + this.step
+						+ " and nothing can go on, ending");
+				return 6;
+			}
+			Log.warn("Headless: game over at step " + this.step + ", player " + this.player + " "
+					+ this.result.name().toLowerCase(Locale.ROOT));
+			return 0;
+		}
 	}
 
 	/**
@@ -298,6 +351,7 @@ public final class HeadlessLauncher {
 			String checksum = "none";
 			String how = "steps";
 			boolean quit = false;
+			final Stall stall = new Stall();
 			while (true) {
 				runPostedRunnables();
 				final CSimulation running = runningGame(game);
@@ -310,6 +364,12 @@ public final class HeadlessLauncher {
 					lastTick = running.getGameTurnTick();
 					if (lastTick >= steps) {
 						checksum = String.format(Locale.ROOT, "%08x", SimulationChecksum.compute(running));
+						game.getRunningMapScreen().quitMission();
+						quit = true;
+					}
+					else if (stall.standing(game.getRunningMapScreen().getViewer(), lastTick)) {
+						checksum = String.format(Locale.ROOT, "%08x", SimulationChecksum.compute(running));
+						how = stall.report() == 0 ? "over" : "stalled";
 						game.getRunningMapScreen().quitMission();
 						quit = true;
 					}
@@ -345,7 +405,7 @@ public final class HeadlessLauncher {
 				game.render();
 			}
 			final int throwables = Log.getLoggedThrowableCount() - throwablesBefore;
-			if ((simulation == null) || "timeout".equals(how) || (throwables != 0)) {
+			if ((simulation == null) || "timeout".equals(how) || "stalled".equals(how) || (throwables != 0)) {
 				status = simulation == null ? 3 : Math.max(status, 1);
 			}
 			report.append(String.format(Locale.ROOT, "game %d map %s from %d to %d checksum %s exceptions %d end %s%n",
@@ -380,7 +440,7 @@ public final class HeadlessLauncher {
 
 	private void runPostedRunnables() {
 		Runnable runnable;
-		while ((runnable = this.runnables.pollFirst()) != null) {
+		while ((runnable = this.runnables.poll()) != null) {
 			runnable.run();
 		}
 	}

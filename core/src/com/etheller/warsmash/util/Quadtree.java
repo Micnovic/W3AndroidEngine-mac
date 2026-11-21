@@ -128,6 +128,10 @@ public class Quadtree<T> {
 	}
 
 	private void add(final Node<T> node, final int depth) {
+		if ((depth == 0) && !this.bounds.overlaps(node.bounds)) {
+			// Outside the world (a unit moved off the map edge): it takes no part in collision until it is back.
+			return;
+		}
 		if (this.leaf) {
 			if ((this.nodes.size >= SPLIT_THRESHOLD) && (depth < MAX_DEPTH)) {
 				split(depth);

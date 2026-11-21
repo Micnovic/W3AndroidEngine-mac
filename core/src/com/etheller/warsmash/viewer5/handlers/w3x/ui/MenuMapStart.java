@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.function.Predicate;
-import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.Application.ApplicationType;
 import com.badlogic.gdx.Gdx;
@@ -22,6 +21,8 @@ import com.etheller.warsmash.datasources.GraphicsSet;
 import com.etheller.warsmash.datasources.GpuMemory;
 import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.launcher.GameResult;
+import com.etheller.warsmash.launcher.MapIssue;
+import com.etheller.warsmash.launcher.MapIssueException;
 import com.etheller.warsmash.lan.LanGameStart;
 import com.etheller.warsmash.lan.LockstepTurnManager;
 import com.etheller.warsmash.networking.GameTurnManager;
@@ -37,14 +38,14 @@ import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.custom.WTS;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.WarsmashConstants;
+import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.MapLoader;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.GameReplays;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayPlayback;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayRecording;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedGame;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.SimulationChecksum;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ai.AIDifficulty;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CSaveStorage;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.CBasePlayer;
@@ -72,6 +73,11 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.mapsetup.CurrentNetGameMapL
  */
 final class MenuMapStart {
 	/** The game shows its error dialog without any text for a map it cannot open. */
+	/**
+	 * System property (true or false) that says whether a map started without the menus (-loadfile) is a campaign's;
+	 * without it the map's folder tells.
+	 */
+	static final String CAMPAIGN_GAME_PROPERTY = "warsmash.campaignGame";
 	private static final String MAP_LOAD_ERROR = "";
 	private final MenuUI menu;
 	/** The map being loaded, for the error when it cannot be. */
@@ -90,6 +96,12 @@ final class MenuMapStart {
 	private boolean reforgedCampaign;
 	/** The campaign of the mission started last, by the number scripts know it by; -1 for none. */
 	private int campaign = -1;
+	/**
+	 * Whether the game started next is a campaign's: told by the campaign screens, a saved game or a replay, or by the
+	 * {@link #CAMPAIGN_GAME_PROPERTY} of a game started from the command line; null when nothing told, which leaves it
+	 * to the map's folder.
+	 */
+	private Boolean campaignGame;
 	/** The map prepared last when it is made for the Reforged graphics alone, else null. */
 	private String reforgedGraphicsMap;
 	/** The start locations of a LAN game come from its shared seed, so every player's game has the same ones. */
@@ -101,6 +113,7 @@ final class MenuMapStart {
 
 	private int mapLoadErrorCount;
 	private String mapLoadFailureReason;
+	private MapIssue mapLoadFailureIssue = MapIssue.NONE;
 
 	void setMapLoadFailureListener(final Predicate<String> listener) {
 		this.mapLoadFailureListener = listener;
@@ -114,6 +127,7 @@ final class MenuMapStart {
 		Log.error("Unable to load the map " + mapFilename + ":");
 		Log.error(cause);
 		this.mapLoadFailureReason = GameResult.describeFailure(cause);
+		this.mapLoadFailureIssue = MapIssue.ofFailure(cause);
 		if (this.loadingMap != null) {
 			try {
 				this.loadingMap.viewer.dispose();
@@ -142,15 +156,23 @@ final class MenuMapStart {
 		return this.mapLoadFailureReason;
 	}
 
+	/** The known cause of the last failed start, or {@link MapIssue#NONE}. */
+	MapIssue mapLoadFailureIssue() {
+		return this.mapLoadFailureIssue;
+	}
+
 	void showMapLoadError() {
 		this.mapLoadErrorCount++;
+		// A start refused before any loading began leaves the startup preview of the map's loading screen up.
+		this.menu.loadingScreen.abandon();
 		this.menu.restoreMainMenuBackground();
 		this.menu.campaigns.getFade().setVisible(false);
 		this.menu.glueSpriteLayerTopLeft.setVisible(true);
 		this.menu.glueSpriteLayerTopRight.setVisible(true);
 		this.menu.setGlueLayersSequence("Death");
 		this.menu.menuState = MenuState.GOING_TO_MAIN_MENU;
-		this.menu.dialog.showError(MAP_LOAD_ERROR, null);
+		this.menu.dialog.showError(
+				this.mapLoadFailureIssue != MapIssue.NONE ? this.mapLoadFailureIssue.english : MAP_LOAD_ERROR, null);
 	}
 
 	/**
@@ -160,6 +182,7 @@ final class MenuMapStart {
 	 */
 	void setCampaign(final int campaign, final boolean reforged) {
 		this.campaign = campaign;
+		this.campaignGame = campaign >= 0;
 		this.reforgedCampaign = reforged;
 		this.menu.campaigns.setStartedCampaign(campaign);
 	}
@@ -179,6 +202,9 @@ final class MenuMapStart {
 			return;
 		}
 		int savedCampaign = header.campaign;
+		if (header.formatVersion >= SavedGame.CAMPAIGN_GAME_FORMAT_VERSION) {
+			this.campaignGame = header.campaignGame;
+		}
 		if (header.formatVersion < SavedGame.CAMPAIGN_FORMAT_VERSION) {
 			savedCampaign = this.menu.campaigns.campaignOfMap(header.mapFile);
 			if ((savedCampaign < 0) && byScript) {
@@ -193,11 +219,38 @@ final class MenuMapStart {
 			}
 		}
 		this.campaign = savedCampaign;
+		if (header.formatVersion < SavedGame.CAMPAIGN_GAME_FORMAT_VERSION) {
+			// A save from before the mark is a campaign's when its campaign is known or its map is kept like one's.
+			this.campaignGame = (savedCampaign >= 0) || header.campaignGame;
+		}
 		this.menu.campaigns.setStartedCampaign(savedCampaign);
 	}
 
+	/**
+	 * Whether the GPU reads ETC2 blocks as they are. Desktop drivers decode them to four bytes a pixel in system memory
+	 * for the whole mip chain, which is several times what the game's own S3TC blocks take, so a desktop that reads
+	 * those never gets ETC2, whatever the setting says.
+	 */
+	private static boolean gpuReadsEtc2() {
+		if (!Gdx.graphics.isGL30Available()) {
+			return false;
+		}
+		return (Gdx.app.getType() == ApplicationType.Android)
+				|| !Gdx.graphics.supportsExtension("GL_EXT_texture_compression_s3tc");
+	}
+
+	/** Whether the game of this map is a campaign's, which the game's start fixes for everything that asks later. */
+	private boolean isCampaignGame(final String mapFilename) {
+		if (this.campaignGame != null) {
+			return this.campaignGame;
+		}
+		final String forced = System.getProperty(CAMPAIGN_GAME_PROPERTY);
+		return (forced != null) && !forced.isEmpty() ? Boolean.parseBoolean(forced)
+				: CampaignMaps.isCampaignMap(mapFilename);
+	}
+
 	private GraphicsSet gameGraphics(final String mapFilename) {
-		return GraphicsSettings.gameGraphics(this.menu.warsmashIni, mapFilename, this.reforgedCampaign,
+		return GraphicsSettings.gameGraphics(this.menu.warsmashIni, isCampaignGame(mapFilename), this.reforgedCampaign,
 				mapFilename.equals(this.reforgedGraphicsMap));
 	}
 
@@ -215,17 +268,28 @@ final class MenuMapStart {
 		final War3MapViewer viewer = new War3MapViewer(codebase, this.menu.screenManager, this.menu.currentMapConfig,
 				turnManager);
 		viewer.setTextureSizeLimit(GraphicsSettings.textureSize(this.menu.warsmashIni, gameGraphics(mapFilename),
-				GpuMemory::desktopDefaultTextureSize));
+				GpuMemory::desktopDefaultTextureSize, gpuReadsEtc2()));
+		final GraphicsSettings.MemoryTier memoryTier = GraphicsSettings.memoryTier();
+		viewer.setTextureSkippedLevels(memoryTier.skippedLevels());
+		viewer.setTextureBudget(memoryTier.textureBudget());
+		if (memoryTier != GraphicsSettings.MemoryTier.UNLIMITED) {
+			Log.info("Memory tier " + memoryTier + ": texture size " + viewer.getTextureSizeLimit() + ", levels skipped "
+					+ memoryTier.skippedLevels() + ", texture budget " + (memoryTier.textureBudget() >> 20) + " MB");
+		}
 		viewer.setRenderScale(GraphicsSettings.renderScale(this.menu.warsmashIni));
 		final int shadowMode = GameOptions.get().getUnitShadowMode();
 		viewer.getDynamicShadowManager().setModelShadows(shadowMode >= 0
 				? shadowMode == GameOptions.UNIT_SHADOWS_FULL
 				: GraphicsSettings.modelUnitShadows(this.menu.warsmashIni, gameGraphics(mapFilename),
 						Gdx.app.getType() == ApplicationType.Android));
+		viewer.getDynamicShadowManager().setSceneShadows(gameGraphics(mapFilename) != GraphicsSet.CLASSIC);
 		viewer.setTextureCompression(GraphicsSettings.textureCompression(this.menu.warsmashIni,
-				gameGraphics(mapFilename), Gdx.app.getType() == ApplicationType.Android,
-				Gdx.graphics.isGL30Available()));
+				gameGraphics(mapFilename), Gdx.app.getType() == ApplicationType.Android, gpuReadsEtc2()));
+		viewer.setBlockTextures((Gdx.app.getType() != ApplicationType.Android)
+				&& Gdx.graphics.supportsExtension("GL_EXT_texture_compression_s3tc")
+				&& (Gdx.graphics.isGL30Available() || Gdx.graphics.supportsExtension("GL_ARB_texture_compression_rgtc")));
 		viewer.setCampaign(this.campaign, this.reforgedCampaign);
+		viewer.setCampaignGame(isCampaignGame(mapFilename));
 		final boolean loadingSavedGame = this.pendingSavedGame != null;
 		viewer.setSavedGameToLoad(this.pendingSavedGame, this.pendingSavedGameByScript);
 		setPendingLoad(null, false);
@@ -239,7 +303,7 @@ final class MenuMapStart {
 			viewer.setGameSeed((int) lan.setup().seed);
 		}
 		if ((replay == null) && !loadingSavedGame
-				&& GameReplays.isRecorded(mapFilename, this.menu.beginGameInformation.hostInetAddress != null)) {
+				&& GameReplays.isRecorded(isCampaignGame(mapFilename), this.menu.beginGameInformation.hostInetAddress != null)) {
 			try {
 				this.loadingReplayHeader = lan != null
 						? GameReplays.header(codebase, mapFilename, viewer, this.menu.currentMapConfig,
@@ -313,7 +377,7 @@ final class MenuMapStart {
 		final int localPlayerIndex = beginGameInformation.localPlayerIndex;
 		try {
 			if (this.loadingMap.activeMapLoader != null) {
-				if (loadingScreen.isMapDone() || this.loadingMap.activeMapLoader.process()) {
+				if (loadingScreen.isMapDone() || this.loadingMap.activeMapLoader.processFor(MapLoader.FRAME_NANOS)) {
 					loadingScreen.markMapDone();
 					if (beginGameInformation.lan != null) {
 						// Every player's game starts together, when the host says so.
@@ -356,7 +420,7 @@ final class MenuMapStart {
 					else if (beginGameInformation.lan != null) {
 						final War3MapViewer mapViewer = this.loadingMap.viewer;
 						final LockstepTurnManager turns = beginGameInformation.lan.createTurnManager(mapViewer);
-						turns.setRecording(startRecording(mapViewer, turns.checksumFunction()));
+						turns.setRecording(startRecording(mapViewer, turns.checksumSteps()));
 						mapViewer.setGameTurnManager(turns);
 						uiOrderListener = beginGameInformation.lan.commandSender();
 						warsmashClient = null;
@@ -600,10 +664,10 @@ final class MenuMapStart {
 	}
 
 	private ReplayRecording startRecording(final War3MapViewer viewer) {
-		return startRecording(viewer, SimulationChecksum::compute);
+		return startRecording(viewer, null);
 	}
 
-	private ReplayRecording startRecording(final War3MapViewer viewer, final ToIntFunction<CSimulation> checksum) {
+	private ReplayRecording startRecording(final War3MapViewer viewer, final ChecksumSteps checksum) {
 		final CReplayHeader header = this.loadingReplayHeader;
 		this.loadingReplayHeader = null;
 		if (header == null) {
@@ -620,8 +684,14 @@ final class MenuMapStart {
 
 	boolean startReplay(final FileHandle file, final int startTick, final boolean forced) {
 		final CReplay replay;
+		this.mapLoadFailureReason = null;
+		this.mapLoadFailureIssue = MapIssue.NONE;
 		try {
 			replay = GameReplays.load(file);
+			final MapIssue issue = MapIssue.ofRecordedMap(this.menu.dataSource, replay.getHeader().getMapPath());
+			if (issue != MapIssue.NONE) {
+				throw new MapIssueException(issue, replay.getHeader().getMapPath());
+			}
 			final String reason = GameReplays.unplayableReason(replay,
 					this.menu.gameData != null ? this.menu.gameData : this.menu.dataSource, this.menu.warsmashIni);
 			if (reason != null) {
@@ -633,6 +703,8 @@ final class MenuMapStart {
 		}
 		catch (final IOException e) {
 			GameReplays.report("result=REJECTED reason=" + e.getMessage());
+			this.mapLoadFailureReason = GameResult.describeFailure(e);
+			this.mapLoadFailureIssue = MapIssue.ofFailure(e);
 			return false;
 		}
 		final CReplayHeader header = replay.getHeader();
@@ -641,6 +713,7 @@ final class MenuMapStart {
 			Log.warn("Replay: " + buildWarning);
 		}
 		setCampaign(-1, false);
+		this.campaignGame = header.isCampaignGame();
 		if (!startMap(header.getMapPath(), null)) {
 			return false;
 		}
@@ -657,8 +730,17 @@ final class MenuMapStart {
 		CSaveStorage.finishBackgroundWrites();
 		try {
 			final SavedGame.Header header = SavedGame.readHeader(file);
+			final MapIssue issue = MapIssue.ofRecordedMap(this.menu.dataSource, header.mapFile);
+			if (issue != MapIssue.NONE) {
+				this.mapLoadFailureReason = issue.english;
+				this.mapLoadFailureIssue = issue;
+				this.menu.singlePlayerMenu.setVisible(true);
+				return false;
+			}
 			setPendingLoad(file, false);
 			this.reforgedCampaign = false;
+			// The save's own mark (or its map's folder, before the mark) decides when the game starts.
+			this.campaignGame = null;
 			if (!startMap(header.mapFile, null)) {
 				setPendingLoad(null, false);
 				return false;
@@ -674,7 +756,17 @@ final class MenuMapStart {
 	}
 
 	private void loadAndCacheMapConfigs(final String mapFilename) throws IOException {
-		final War3Map map = War3MapViewer.beginLoadingMap(this.menu.dataSource, mapFilename);
+		final MapIssue named = MapIssue.ofName(mapFilename);
+		if (named != MapIssue.NONE) {
+			throw new MapIssueException(named, mapFilename);
+		}
+		final War3Map map;
+		try {
+			map = War3MapViewer.beginLoadingMap(this.menu.dataSource, mapFilename);
+		}
+		catch (final IllegalArgumentException e) {
+			throw new MapIssueException(MapIssue.MISSING, mapFilename);
+		}
 		final War3MapW3i mapInfo = map.readMapInformation();
 		this.reforgedGraphicsMap = War3MapViewer.isReforgedGraphicsMap(mapInfo) ? mapFilename : null;
 		requireJassScript(map, mapFilename);
@@ -683,18 +775,27 @@ final class MenuMapStart {
 		final War3MapConfig war3MapConfig = new War3MapConfig(WarsmashConstants.MAX_PLAYERS);
 		war3MapConfig.applyPlayerNames(mapInfo, this.menu.rootFrame::getTrigStr);
 		war3MapConfig.applyMapInformation(mapInfo);
-		Jass2.loadConfig(map, this.menu.uiViewport, this.menu.uiScene, this.menu.rootFrame, war3MapConfig,
-				WarsmashConstants.JASS_FILE_LIST).config();
+		final Jass2.ConfigEnvironment configEnvironment = Jass2.loadConfig(map, this.menu.uiViewport,
+				this.menu.uiScene, this.menu.rootFrame, war3MapConfig, WarsmashConstants.JASS_FILE_LIST);
+		// Loading the config already parsed and compiled the whole script; a map that does not compile is refused here
+		// rather than after the menu has been left.
+		requireCompiledScript(configEnvironment.getScriptError());
+		configEnvironment.config();
 		shuffleStartLocations(war3MapConfig, prepareMeleeLobby(war3MapConfig, mapInfo),
 				this.startLocationRandomOverride != null ? this.startLocationRandomOverride : startLocationRandom());
 		this.loadedFixedPlayerSettings = mapInfo.hasFlag(War3MapW3iFlags.FIXED_PLAYER_SETTINGS_FOR_CUSTOM_FORCES);
 		this.menu.currentMapConfig = war3MapConfig;
 	}
 
+	static void requireCompiledScript(final Exception scriptError) throws IOException {
+		if (scriptError != null) {
+			throw new IOException("The map's script does not compile: " + scriptError.getMessage());
+		}
+	}
+
 	static void requireJassScript(final War3Map map, final String mapFilename) throws IOException {
 		if (!map.hasJassScript()) {
-			throw new IOException((map.hasLuaScript() ? "This map uses a Lua script, which is not supported yet: "
-					: "The map has no script: ") + mapFilename);
+			throw new MapIssueException(map.hasLuaScript() ? MapIssue.LUA : MapIssue.NO_SCRIPT, mapFilename);
 		}
 	}
 
@@ -705,6 +806,7 @@ final class MenuMapStart {
 	 */
 	boolean prepareMapConfigs(final String mapFilename) {
 		this.mapLoadFailureReason = null;
+		this.mapLoadFailureIssue = MapIssue.NONE;
 		try {
 			loadAndCacheMapConfigs(mapFilename);
 			return true;
@@ -713,6 +815,7 @@ final class MenuMapStart {
 			Log.error("Unable to read the map " + mapFilename + ":");
 			Log.error(e);
 			this.mapLoadFailureReason = GameResult.describeFailure(e);
+			this.mapLoadFailureIssue = MapIssue.ofFailure(e);
 			return false;
 		}
 	}

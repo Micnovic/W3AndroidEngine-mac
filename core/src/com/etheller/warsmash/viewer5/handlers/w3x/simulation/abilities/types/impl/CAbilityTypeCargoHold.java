@@ -26,7 +26,7 @@ public class CAbilityTypeCargoHold extends CAbilityType<CAbilityTypeCargoHoldLev
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeCargoHoldLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeCargoHoldLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityCargoHold heroAbility = ((CAbilityCargoHold) existingAbility);
 
 		heroAbility.setDuration(levelData.getDuration());

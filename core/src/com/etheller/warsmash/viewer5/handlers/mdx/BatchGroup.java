@@ -5,6 +5,7 @@ import java.util.List;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Camera;
 import com.etheller.warsmash.viewer5.ModelViewer;
@@ -100,7 +101,8 @@ public class BatchGroup extends GenericGroup {
 			shader.setUniformi("u_teamColorMap", 4);
 			shader.setUniformi("u_environmentMap", 5);
 			scene.fogSettings.uploadUniforms(shader);
-			shader.setUniformf("u_iblParams", HD_IBL_STRENGTH, HD_NIGHT_AMBIENT);
+			shader.setUniformf("u_iblParams", HD_IBL_STRENGTH * lightManager.getHdIblScale(), HD_NIGHT_AMBIENT,
+					lightManager.getHdSpecularScale());
 			shader.setUniform4fv("u_vertexColor", instance.vertexColor, 0, instance.vertexColor.length);
 
 			gl.glEnable(GL20.GL_BLEND);
@@ -190,6 +192,9 @@ public class BatchGroup extends GenericGroup {
 						teamColorTexture = textures.get(teamColorId);
 					}
 
+					if (isPending(diffuseTexture) || isPending(normalsTexture) || isPending(ormTexture)) {
+						continue;
+					}
 					webGL.bindTexture(diffuseTexture, 0);
 					webGL.bindTexture(normalsTexture, 1);
 					webGL.bindTexture(ormTexture, 2);
@@ -223,7 +228,8 @@ public class BatchGroup extends GenericGroup {
 				final float[] geosetColor = instance.geosetColors[geosetIndex];
 				final float layerAlpha = instance.layerAlphas[layerIndex];
 
-				if ((geosetColor[3] > 0.01) && (layerAlpha > 0.01)) {
+				if ((geosetColor[3] > 0.01) && (layerAlpha > 0.01) && !(instance.teamGlowHidden
+						&& (replaceables.get(Math.max(0, instance.layerTextures[layerIndex])) == 2))) {
 					// BELOW: I updated it to "Math.max(0," because MDL and MDX parser for PRSCMOD
 					// menu screen behaved differently,
 					// the MDL case was getting "no data" for default value when unanimated, and "no
@@ -271,6 +277,9 @@ public class BatchGroup extends GenericGroup {
 						texture = textureLookup;
 					}
 
+					if (isPending(texture)) {
+						continue;
+					}
 					viewer.webGL.bindTexture(texture, 0);
 
 					if (skinningType == SkinningType.ExtendedVertexGroups) {
@@ -287,6 +296,11 @@ public class BatchGroup extends GenericGroup {
 
 	}
 
+	/** A texture still waiting for its upload draws as nothing rather than as black. */
+	private static boolean isPending(final Texture texture) {
+		return (texture != null) && texture.isPending();
+	}
+
 	/**
 	 * Draws the opaque and cut-out layers of this group into a ground shadow mask with the bound shader: no lighting,
 	 * only the shape of the model.
@@ -296,11 +310,8 @@ public class BatchGroup extends GenericGroup {
 			return;
 		}
 		final MdxModel model = this.model;
-		final List<Texture> textures = model.getTextures();
 		final List<Batch> batches = model.batches;
-		final List<Integer> replaceables = model.replaceables;
-		final ModelViewer viewer = model.viewer;
-		final GL20 gl = viewer.gl;
+		final GL20 gl = model.viewer.gl;
 		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, model.arrayBuffer);
 		gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, model.elementBuffer);
 		for (final int index : getObjectArray()) {
@@ -317,29 +328,7 @@ public class BatchGroup extends GenericGroup {
 			final boolean cutout = layer.filterMode != 0;
 			shader.setUniformi("u_cutout", cutout ? 1 : 0);
 			if (cutout) {
-				final int textureId = Math.max(0, instance.layerTextures[layer.index]);
-				final Integer replaceable = replaceables.get(textureId);
-				Texture texture = null;
-				if ((replaceable > 0) && (replaceable < WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT)) {
-					if (this.hd) {
-						if (instance.replaceableTextures_diffuse != null) {
-							texture = instance.replaceableTextures_diffuse[replaceable];
-						}
-					}
-					else {
-						texture = instance.replaceableTextures[replaceable];
-					}
-				}
-				if (texture == null) {
-					texture = textures.get(textureId);
-					if (!this.hd) {
-						final Texture mapped = instance.textureMapper.get(texture);
-						if (mapped != null) {
-							texture = mapped;
-						}
-					}
-				}
-				viewer.webGL.bindTexture(texture, 0);
+				bindCutoutTexture(instance, layer);
 			}
 			if (this.hd) {
 				geoset.bindHd(shader, batch.skinningType, layer.coordId);
@@ -352,5 +341,89 @@ public class BatchGroup extends GenericGroup {
 			}
 			geoset.render();
 		}
+	}
+
+	/**
+	 * Draws the shadow of an instance from the model's {@link ShadowMesh}: a run of visible batches without an alpha test
+	 * is one draw. The bones are bound by the caller, and what the caller's state says is already set is not set again.
+	 */
+	void renderShadowMesh(final MdxComplexInstance instance, final ShaderProgram shader, final ShadowMesh mesh,
+			final MdxShadowCaster.ProgramState state) {
+		final MdxModel model = this.model;
+		final List<Batch> batches = model.batches;
+		final GL20 gl = model.viewer.gl;
+		if (state.mesh != mesh) {
+			state.mesh = mesh;
+			gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, mesh.vertexBuffer);
+			gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
+			mesh.bind(shader);
+		}
+		int runStart = 0;
+		int runEnd = 0;
+		for (final int index : getObjectArray()) {
+			final int first = mesh.first[index];
+			final int count = mesh.count[index];
+			if ((first < 0) || (count == 0)) {
+				continue;
+			}
+			final Batch batch = batches.get(index);
+			final Layer layer = batch.layer;
+			if ((instance.geosetColors[batch.geoset.index][3] <= 0.01f)
+					|| (instance.layerAlphas[layer.index] <= 0.01f)) {
+				continue;
+			}
+			if (mesh.cutout[index]) {
+				state.setCutout(shader, true);
+				bindCutoutTexture(instance, layer);
+				PerfStats.draw();
+				gl.glDrawElements(GL20.GL_TRIANGLES, count, GL20.GL_UNSIGNED_SHORT, first * 2);
+				continue;
+			}
+			if ((runEnd > runStart) && (first == runEnd)) {
+				runEnd += count;
+				continue;
+			}
+			if (runEnd > runStart) {
+				state.setCutout(shader, false);
+				PerfStats.draw();
+				gl.glDrawElements(GL20.GL_TRIANGLES, runEnd - runStart, GL20.GL_UNSIGNED_SHORT, runStart * 2);
+			}
+			runStart = first;
+			runEnd = first + count;
+		}
+		if (runEnd > runStart) {
+			state.setCutout(shader, false);
+			PerfStats.draw();
+			gl.glDrawElements(GL20.GL_TRIANGLES, runEnd - runStart, GL20.GL_UNSIGNED_SHORT, runStart * 2);
+		}
+	}
+
+	private void bindCutoutTexture(final MdxComplexInstance instance, final Layer layer) {
+		final MdxModel model = this.model;
+		final List<Texture> textures = model.getTextures();
+		final List<Integer> replaceables = model.replaceables;
+		final int textureId = Math.max(0, instance.layerTextures[layer.index]);
+		final Integer replaceable = replaceables.get(textureId);
+		Texture texture = null;
+		if ((replaceable > 0) && (replaceable < WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT)) {
+			if (this.hd) {
+				if (instance.replaceableTextures_diffuse != null) {
+					texture = instance.replaceableTextures_diffuse[replaceable];
+				}
+			}
+			else {
+				texture = instance.replaceableTextures[replaceable];
+			}
+		}
+		if (texture == null) {
+			texture = textures.get(textureId);
+			if (!this.hd) {
+				final Texture mapped = instance.textureMapper.get(texture);
+				if (mapped != null) {
+					texture = mapped;
+				}
+			}
+		}
+		model.viewer.webGL.bindTexture(texture, 0);
 	}
 }

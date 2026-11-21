@@ -1,6 +1,7 @@
 package com.etheller.warsmash.parsers.fdf;
 
 import java.io.BufferedReader;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -22,6 +23,7 @@ import com.badlogic.gdx.utils.viewport.ExtendViewport;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.fdfparser.FrameDefinitionVisitor;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
 import com.etheller.warsmash.parsers.fdf.datamodel.BackdropCornerFlags;
@@ -94,7 +96,10 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 	private final AbstractMdxModelViewer modelViewer;
 	private final int racialCommandIndex;
 	private final FrameTemplateEnvironment templates;
+	private final List<String> loadedTocs = new ArrayList<>();
 	private final Map<String, Texture> pathToTexture = new HashMap<>();
+	/** Paths with no texture in the data, each with the file name to report for it or null. */
+	private final Map<String, String> missingTextures = new HashMap<>();
 	private boolean autoPosition = true;
 	private final FontGeneratorHolder fontGenerator;
 	private final FreeTypeFontParameter fontParam;
@@ -178,6 +183,21 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 		}
 	}
 
+	/** A skin's entry with the chosen language after a colon ("MasterFont:zhCN") replaces the plain entry. */
+	private static void useLanguageEntries(final Element skin) {
+		final String language = GameLanguage.skinLanguage();
+		if (language.isEmpty()) {
+			return;
+		}
+		final String suffix = ":" + language;
+		for (final String key : new ArrayList<>(skin.keySet())) {
+			if ((key.length() > suffix.length())
+					&& key.regionMatches(true, key.length() - suffix.length(), suffix, 0, suffix.length())) {
+				skin.setField(key.substring(0, key.length() - suffix.length()), skin.getField(key));
+			}
+		}
+	}
+
 	public static GameSkin loadSkin(final DataSource dataSource, final String skin) {
 		final DataTable skinsTable = new DataTable(StringBundle.EMPTY);
 		try (InputStream stream = dataSource.getResourceAsStream("UI\\war3skins.txt")) {
@@ -209,6 +229,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				userSkin.setField(key, defaultSkin.getField(key));
 			}
 		}
+		useLanguageEntries(userSkin);
 		if (customSkin != null) {
 			for (final String key : customSkin.keySet()) {
 				userSkin.setField(key, customSkin.getField(key));
@@ -251,6 +272,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				userSkin.setField(key, defaultSkin.getField(key));
 			}
 		}
+		useLanguageEntries(userSkin);
 		if (customSkin != null) {
 			for (final String key : customSkin.keySet()) {
 				userSkin.setField(key, customSkin.getField(key));
@@ -260,15 +282,58 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 	}
 
 	public void loadTOCFile(final String tocFilePath) throws IOException {
-		final DataSourceFDFParserBuilder dataSourceFDFParserBuilder = new DataSourceFDFParserBuilder(this.dataSource);
-		final FrameDefinitionVisitor fdfVisitor = new FrameDefinitionVisitor(this.templates,
-				dataSourceFDFParserBuilder);
+		readTOCFile(this.dataSource, this.templates, tocFilePath);
+		this.loadedTocs.add(tocFilePath);
+	}
+
+	/**
+	 * Takes the templates of TOC files that were read ahead, on another thread, from this interface's data source
+	 * instead of reading them here.
+	 */
+	public void adoptTemplates(final FrameTemplateEnvironment ready, final List<String> tocFilePaths) {
+		this.templates.addAll(ready);
+		this.loadedTocs.addAll(tocFilePaths);
+	}
+
+	/**
+	 * Lets go of the frame templates while this interface is not on screen (the menu during a game). They are read
+	 * again from the same files when something asks for one, or at {@link #restoreTemplates()}.
+	 */
+	public void releaseTemplates() {
+		this.templates.release(() -> {
+			try {
+				for (final String tocFilePath : this.loadedTocs) {
+					readTOCFile(this.dataSource, this.templates, tocFilePath);
+				}
+			}
+			catch (final IOException e) {
+				throw new IllegalStateException("Unable to load " + this.loadedTocs, e);
+			}
+		});
+	}
+
+	public void restoreTemplates() {
+		this.templates.restore();
+	}
+
+	public static void readTOCFile(final DataSource dataSource, final FrameTemplateEnvironment templates,
+			final String tocFilePath) throws IOException {
+		final DataSourceFDFParserBuilder dataSourceFDFParserBuilder = new DataSourceFDFParserBuilder(dataSource);
+		final FrameDefinitionVisitor fdfVisitor = new FrameDefinitionVisitor(templates, dataSourceFDFParserBuilder);
 		Log.warn("Loading TOC file: " + tocFilePath);
-		try (BufferedReader reader = new BufferedReader(
-				new InputStreamReader(this.dataSource.getResourceAsStream(tocFilePath)))) {
+		final InputStream tocStream = dataSource.getResourceAsStream(tocFilePath);
+		if (tocStream == null) {
+			throw new FileNotFoundException(tocFilePath);
+		}
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(tocStream))) {
 			String line;
 			int tocLines = 0;
 			while ((line = reader.readLine()) != null) {
+				line = line.trim();
+				// A TOC file ends with an empty line, which names no file.
+				if (line.isEmpty()) {
+					continue;
+				}
 				fdfVisitor.visit(dataSourceFDFParserBuilder.buildProgram(line));
 				tocLines++;
 			}
@@ -370,6 +435,10 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 
 	public UIFrame createFrame(final String name, final UIFrame owner, final int priority, final int createContext) {
 		final FrameDefinition frameDefinition = this.templates.getFrame(name);
+		if (frameDefinition == null) {
+			// A map's script may ask for a frame its own files never defined; the game gives it no frame.
+			return null;
+		}
 		final UIFrame inflatedFrame = inflate(frameDefinition, owner, null, frameDefinition.has("DecorateFileNames"));
 		if (owner == this) {
 			add(inflatedFrame);
@@ -1787,6 +1856,14 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 	public Texture loadTexture(String path, final boolean reportMissing) {
 		Texture texture = this.pathToTexture.get(path);
 		if (texture == null) {
+			if (this.missingTextures.containsKey(path)) {
+				// Some textures are asked for every frame; the data is not read again for one known to be missing.
+				final String reportedPath = this.missingTextures.get(path);
+				if (reportMissing && (reportedPath != null)) {
+					DataErrors.record(DataErrors.MISSING_ASSET, reportedPath);
+				}
+				return null;
+			}
 			final String originalPath = path;
 			final int lastDotIndex = path.lastIndexOf('.');
 			if (lastDotIndex == -1) {
@@ -1799,8 +1876,12 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				texture = ImageUtils.getAnyExtensionTexture(this.dataSource, path);
 				this.pathToTexture.put(path, texture);
 				this.pathToTexture.put(originalPath, texture);
+				if (texture == null) {
+					this.missingTextures.put(originalPath, null);
+				}
 			}
 			catch (final Exception exc) {
+				this.missingTextures.put(originalPath, path);
 				// Callers fall back when there is no texture; the report lists the missing file once.
 				if (reportMissing) {
 					DataErrors.record(DataErrors.MISSING_ASSET, path);

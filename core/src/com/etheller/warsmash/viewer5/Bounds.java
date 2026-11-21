@@ -37,6 +37,9 @@ public class Bounds {
 	}
 
 	public float getEstimatedMaxZ() {
+		if (this.boundingBox == null) {
+			return 0;
+		}
 		this.boundingBox.getMax(tempVec);
 		return tempVec.z;
 	}

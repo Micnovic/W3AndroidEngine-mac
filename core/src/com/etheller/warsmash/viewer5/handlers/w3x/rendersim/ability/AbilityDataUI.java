@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.function.UnaryOperator;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.Texture;
 import com.etheller.warsmash.launcher.CustomKeys;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.w3x.objectdata.Warcraft3MapRuntimeObjectData;
@@ -46,7 +45,7 @@ public class AbilityDataUI {
 	private static final String ABILITY_HOTKEY_TURNOFF = "Unhotkey"; // replaced from 'auhk'
 	private static final String ABILITY_HOTKEY_LEARN = "Researchhotkey"; // replaced from 'arhk'
 
-	private static final String CASTER_ART = "CasterArt"; // replaced from 'acat'
+	public static final String CASTER_ART = "CasterArt"; // replaced from 'acat'
 	private static final String[] CASTER_ART_ATTACHMENT_POINT = { "Casterattach", // replaced from 'acap'
 			"Casterattach1" }; // replaced from 'aca1'
 	private static final String CASTER_ART_ATTACHMENT_COUNT = "Casterattachcount"; // replaced from 'acac'
@@ -81,7 +80,6 @@ public class AbilityDataUI {
 	private static final String BUFF_SPECIAL_ART = "SpecialArt"; // replaced from 'fsat'
 	private static final String BUFF_SPECIAL_ART_ATTACHMENT_POINT = "Specialattach"; // replaced from 'fspt'
 	private static final String BUFF_EFFECT_ART = "EffectArt"; // replaced from 'feat'
-	private static final String BUFF_EFFECT_ART_ATTACHMENT_POINT = "Effectattach"; // replaced from 'feft'
 	private static final String BUFF_MISSILE_ART = "Missileart"; // replaced from 'fmat'
 
 	private static final String UNIT_ICON_NORMAL_XY = "Buttonpos"; // replaced from 'ubpx'
@@ -501,8 +499,14 @@ public class AbilityDataUI {
 		}
 	}
 
+	/** A map can bring its own, older command strings file, which lacks the sections of newer commands. */
+	private static Element builtInSection(final GameUI gameUI, final String key, final Element fallback) {
+		final Element section = gameUI.getSkinData().get(key);
+		return section != null ? section : fallback != null ? fallback : new Element(key, gameUI.getSkinData());
+	}
+
 	private IconUI createBuiltInIconUI(final GameUI gameUI, final String key, final String disabledPrefix) {
-		final Element builtInAbility = gameUI.getSkinData().get(key);
+		final Element builtInAbility = builtInSection(gameUI, key, null);
 		final String iconPath = gameUI.trySkinField(builtInAbility.getField("Art"));
 		final IconTexture icon = new IconTexture(gameUI, iconPath);
 		final IconTexture iconDisabled = new IconTexture(gameUI, disable(iconPath, disabledPrefix));
@@ -519,8 +523,8 @@ public class AbilityDataUI {
 
 	private IconUI createBuiltInIconUISplit(final GameUI gameUI, final String key, final String funckey,
 			final GameObject worldEditorObject, final String disabledPrefix) {
-		final Element builtInAbility = gameUI.getSkinData().get(key);
-		final Element builtInAbilityFunc = gameUI.getSkinData().get(funckey);
+		final Element builtInAbilityFunc = builtInSection(gameUI, funckey, null);
+		final Element builtInAbility = builtInSection(gameUI, key, builtInAbilityFunc);
 		String iconPath = gameUI.trySkinField(builtInAbilityFunc.getField("Art"));
 		final String worldEditorValue = worldEditorObject.getField("Art");
 		if (worldEditorValue.length() > 0) {
@@ -548,7 +552,13 @@ public class AbilityDataUI {
 				}
 			}
 			if (!anyNonDigit) {
-				final int hotkeyInt = Integer.parseInt(hotkeyString);
+				final int hotkeyInt;
+				try {
+					hotkeyInt = Integer.parseInt(hotkeyString);
+				}
+				catch (final NumberFormatException e) {
+					return '\0';
+				}
 				if (hotkeyInt == 512) {
 					return WarsmashConstants.SPECIAL_ESCAPE_KEYCODE;
 				}

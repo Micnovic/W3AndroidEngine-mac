@@ -41,7 +41,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.etheller.warsmash.parsers.jass.CommonNatives.enumValue;
 import static com.etheller.warsmash.parsers.jass.CommonNatives.intArg;
 import static com.etheller.warsmash.parsers.jass.CommonNatives.nullable;
 

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.datasources;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -32,7 +33,35 @@ public final class GameLanguage {
 	private static final Pattern MODULE_LAYER = Pattern.compile("(?i)(.*\\\\_locales\\\\)([a-z]{4})(\\.w3mod)");
 	private static final Pattern MPQ_LAYER = Pattern.compile("(?i)([a-z]{4})(-war3local\\.mpq)");
 
+	/** The language the skin's locale entries ("MasterFont:zhCN") are read for; empty for none. */
+	private static volatile String skinLanguage = "";
+
+	/** The language the running game reads its data in; what a map script asks for as the locale of this machine. */
+	private static volatile String gameLanguage = "";
+
 	private GameLanguage() {
+	}
+
+	/** Chooses the language whose entries of the skin file (fonts) replace the plain ones; empty for none. */
+	public static void useForSkin(final String locale) {
+		skinLanguage = canonical(locale);
+	}
+
+	/** Notes the language a game data configuration is read in: the chosen one, else the one its data is made for. */
+	public static void useInGame(final DataTable ini) {
+		final String chosen = configured(ini);
+		gameLanguage = chosen.isEmpty() ? canonical(GraphicsSettings.locale(ini)) : chosen;
+	}
+
+	/** The language the game reads its text and speech in; "enUS" until a configuration says otherwise. */
+	public static String inGame() {
+		final String language = gameLanguage;
+		return language.isEmpty() ? "enUS" : language;
+	}
+
+	/** The language chosen for the skin file's entries, or empty. */
+	public static String skinLanguage() {
+		return skinLanguage;
 	}
 
 	/** The code in its usual spelling ("eses" and "ESES" give "esES"), or "" when the text is no language code. */
@@ -135,5 +164,14 @@ public final class GameLanguage {
 			return null;
 		}
 		return module.group(1) + code.toLowerCase(Locale.ROOT) + module.group(3);
+	}
+
+	/** The language folder a flat game data folder keeps its other languages in, or null for no language. */
+	public static String childFolder(final String path, final String locale) {
+		final String code = canonical(locale);
+		if (code.isEmpty() || path.trim().isEmpty() || MODULE_LAYER.matcher(path.replace('/', '\\')).matches()) {
+			return null;
+		}
+		return new File(new File(path, "_locales"), code.toLowerCase(Locale.ROOT) + ".w3mod").getPath();
 	}
 }

@@ -16,7 +16,8 @@ public class BoolExprOr extends AllocatedHandle implements TriggerBooleanExpress
 
 	@Override
 	public boolean evaluate(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		return this.operandA.evaluate(globalScope, triggerScope) || this.operandB.evaluate(globalScope, triggerScope);
+		return BoolExprAnd.evaluate(this.operandA, globalScope, triggerScope)
+				|| BoolExprAnd.evaluate(this.operandB, globalScope, triggerScope);
 	}
 
 }

@@ -21,7 +21,14 @@ public abstract class AbstractCAbilityTypeDefinition<TYPE_LEVEL_DATA extends CAb
 		for (int level = 1; level <= levels; level++) {
 			levelData.add(createLevelData(abilityEditorData, level));
 		}
-		return innerCreateAbilityType(alias, abilityEditorData, levelData);
+		final CAbilityType<?> abilityType = innerCreateAbilityType(alias, abilityEditorData, levelData);
+		attachLevelDataSource(abilityType, abilityEditorData);
+		return abilityType;
+	}
+
+	@SuppressWarnings("unchecked")
+	protected final void attachLevelDataSource(final CAbilityType<?> abilityType, final GameObject abilityEditorData) {
+		((CAbilityType<TYPE_LEVEL_DATA>) abilityType).setLevelDataSource(abilityEditorData, this::createLevelData);
 	}
 
 	protected abstract TYPE_LEVEL_DATA createLevelData(GameObject abilityEditorData, int level);

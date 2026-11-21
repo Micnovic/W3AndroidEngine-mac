@@ -95,7 +95,8 @@ final class WorldNatives extends CommonNatives {
 					case TIME_OF_DAY:
 						return RealJassValue.of(this.simulation.getScriptTimeOfDay());
 					}
-					throw new IllegalArgumentException("Not a float game state: " + gameState);
+					// A state of the other kind reads as 0, as natives do with a value they have no use for.
+					return RealJassValue.ZERO;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("GetIntegerGameState",
 				(arguments, globalScope, triggerScope) -> {
@@ -107,7 +108,7 @@ final class WorldNatives extends CommonNatives {
 						return IntegerJassValue
 								.of(this.simulation.getDivineInterventionGameState());
 					}
-					throw new IllegalArgumentException("Not an integer game state: " + gameState);
+					return IntegerJassValue.ZERO;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("SetIntegerGameState",
 				(arguments, globalScope, triggerScope) -> {
@@ -130,7 +131,7 @@ final class WorldNatives extends CommonNatives {
 						this.simulation.setGameTimeOfDay(value);
 						return null;
 					}
-					throw new IllegalArgumentException("Not a float game state: " + gameState);
+					return null;
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("PauseGame",
 				(arguments, globalScope, triggerScope) -> {

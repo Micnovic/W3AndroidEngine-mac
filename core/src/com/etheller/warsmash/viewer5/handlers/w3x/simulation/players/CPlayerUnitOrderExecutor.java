@@ -4,10 +4,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCacheSync;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CReleaseCheats;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.shop.CAbilityNeutralBuilding;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CTrackable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorHoldPosition;
@@ -24,6 +26,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 	private final CSimulation game;
 	private final int playerIndex;
+	private final CGameCacheSync.Receiver syncedValues = new CGameCacheSync.Receiver();
 
 	public CPlayerUnitOrderExecutor(final CSimulation game, final int playerIndex) {
 		this.game = game;
@@ -45,6 +48,17 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 		return controlShared;
 	}
 
+	/** The command card's buttons: a script may have registered for this ability and order. */
+	private void noteCommand(final CUnit unit, final int abilityHandleId, final int orderId) {
+		if ((abilityHandleId == 0) || this.game.getCommandEvents().isEmpty()) {
+			return;
+		}
+		final CAbility ability = this.game.getAbility(abilityHandleId);
+		if (ability != null) {
+			this.game.getCommandEvents().fire(this.game.getGlobalScope(), unit, ability.getAlias(), orderId);
+		}
+	}
+
 	@Override
 	public void issueTargetOrder(final int unitHandleId, final int abilityHandleId, final int orderId,
 			final int targetHandleId, final boolean queue) {
@@ -53,6 +67,7 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 			return;
 		}
 		if ((this.playerIndex == unit.getPlayerIndex()) || sharedControl(unit)) {
+			noteCommand(unit, abilityHandleId, orderId);
 			unit.order(this.game,
 					new COrderTargetWidget(this.playerIndex, abilityHandleId, orderId, targetHandleId, queue), queue);
 		}
@@ -66,6 +81,7 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 			return;
 		}
 		if ((this.playerIndex == unit.getPlayerIndex()) || sharedControl(unit)) {
+			noteCommand(unit, abilityHandleId, orderId);
 			unit.order(this.game, new COrderDropItemAtPoint(this.playerIndex, abilityHandleId, orderId, targetHandleId,
 					new AbilityPointTarget(x, y), queue), queue);
 		}
@@ -79,6 +95,7 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 			return;
 		}
 		if ((this.playerIndex == unit.getPlayerIndex()) || sharedControl(unit)) {
+			noteCommand(unit, abilityHandleId, orderId);
 			unit.order(this.game, new COrderDropItemAtTargetWidget(this.playerIndex, abilityHandleId, orderId,
 					targetItemHandleId, targetHeroHandleId, queue), queue);
 		}
@@ -92,6 +109,7 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 			return;
 		}
 		if ((this.playerIndex == unit.getPlayerIndex()) || sharedControl(unit)) {
+			noteCommand(unit, abilityHandleId, orderId);
 			unit.order(this.game, new COrderTargetPoint(this.playerIndex, abilityHandleId, orderId,
 					new AbilityPointTarget(x, y), queue), queue);
 		}
@@ -120,6 +138,7 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 			return;
 		}
 		if ((this.playerIndex == unit.getPlayerIndex()) || sharedControl(unit)) {
+			noteCommand(unit, abilityHandleId, orderId);
 			if (abilityHandleId == 0) {
 				if (orderId == OrderIds.stop) {
 					unit.order(this.game, null, queue);
@@ -305,6 +324,10 @@ public class CPlayerUnitOrderExecutor implements CPlayerUnitOrderListener {
 
 	@Override
 	public void syncData(final String prefix, final String data) {
+		if (CGameCacheSync.isCacheSync(prefix)) {
+			this.syncedValues.accept(data);
+			return;
+		}
 		this.game.getPlayer(this.playerIndex).fireSyncEvents(prefix, data);
 	}
 

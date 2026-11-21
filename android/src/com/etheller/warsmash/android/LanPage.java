@@ -424,6 +424,7 @@ final class LanPage extends LauncherViews {
 			settings.map = shared.info;
 			settings.maxSlots = shared.playerSlots;
 			settings.syncWarning = shared.usesSync;
+			settings.issue = shared.issue;
 			final String problem = this.activity.lan().changeMap(settings);
 			if (problem != null) {
 				this.activity.dialogs.showMessage(LanText.changeMap(), problem);
@@ -665,6 +666,7 @@ final class LanPage extends LauncherViews {
 			settings.map = shared.info;
 			settings.maxSlots = shared.playerSlots;
 			settings.syncWarning = shared.usesSync;
+			settings.issue = shared.issue;
 			settings.gameName = this.gameName;
 			settings.speed = this.speed;
 			settings.observers = this.observers;

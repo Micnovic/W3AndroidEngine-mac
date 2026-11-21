@@ -3,14 +3,9 @@ package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.combat;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractCAbilityPassiveNoOrders;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.StateModBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.StateModBuffType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityActivationReceiver;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 
 public class CAbilityInvulnerable extends AbstractCAbilityPassiveNoOrders {
 	private final StateModBuff invulnerableBuff = new StateModBuff(StateModBuffType.INVULNERABLE, 1);

@@ -20,9 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.zip.CRC32;
 
 import com.etheller.interpreter.ast.function.ConvertedConstant;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.GlobalScopeAssignable;
 import com.etheller.interpreter.ast.util.CHandle;
@@ -36,6 +38,7 @@ import com.etheller.interpreter.ast.value.StringJassValue;
 import com.etheller.warsmash.parsers.jass.JassAIEnvironment;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.AbstractCAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility;
@@ -308,6 +311,189 @@ public final class SimulationChecksum {
 		flush();
 	}
 
+	/**
+	 * Parts of the state a sliced checksum hashes one after the other: players, destructables, projectiles, timers,
+	 * the random generators, the ids and pathing, the script globals, the AI scripts' globals by player (in
+	 * {@link #AI_GROUPS} groups of two halves each) and the units in chunks.
+	 */
+	static final int UNIT_CHUNKS = 8;
+	static final int AI_GROUPS = 4;
+	static final int NON_UNIT_PHASES = 7 + (AI_GROUPS * 2);
+	static final int PHASES = NON_UNIT_PHASES + UNIT_CHUNKS;
+
+	private CUnit[] sliceUnits;
+	private RowCache sliceRows;
+	private boolean sliceRowsKept;
+	private RowEmitter sliceEmitter;
+
+	/**
+	 * One part of the checksum of a sliced run, see {@link ChecksumSteps}. The state is read as the game has it at the
+	 * step the part is hashed in; the units are the ones of the step the first unit part ran in.
+	 */
+	void hashPhase(final CSimulation simulation, final int phase) throws IOException {
+		switch (phase) {
+		case 0:
+			hashPlayers(simulation);
+			hashItems(simulation);
+			break;
+		case 1:
+			hashDestructables(simulation);
+			break;
+		case 2:
+			hashProjectiles(simulation);
+			break;
+		case 3:
+			hashTimers(simulation);
+			break;
+		case 4:
+			hashRandom(simulation);
+			break;
+		case 5:
+			final HandleIdAllocator handles = simulation.getHandleIdAllocator();
+			begin(8, "handles", "next").i("next", handles.getNextId()).i("handle", handles.getNextHandleId())
+					.i("free", handles.getFreeHandleIdCount()).end();
+			hashPathing(simulation);
+			begin(12, "tick", "tick").i("tick", simulation.getGameTurnTick()).end();
+			break;
+		case 6:
+			hashJass(10, "jass", simulation, simulation.getGlobalScope());
+			break;
+		default:
+			if (phase < NON_UNIT_PHASES) {
+				hashAi(simulation, (phase - 7) / 2, (phase - 7) % 2);
+			}
+			else {
+				hashUnitChunk(simulation, phase - NON_UNIT_PHASES);
+			}
+			break;
+		}
+		flush();
+	}
+
+	/** The globals of the AI scripts of the players of that group, in two halves. */
+	private void hashAi(final CSimulation simulation, final int group, final int half) throws IOException {
+		for (final CPlayer player : simulation.getPlayers()) {
+			final JassAIEnvironment ai = player.getAiScript();
+			if ((ai != null) && ((player.getId() % AI_GROUPS) == group)) {
+				hashJass(11, "ai" + player.getId(), simulation, ai.getGlobalScope(), half, 2);
+			}
+		}
+	}
+
+	private void hashUnitChunk(final CSimulation simulation, final int chunk) throws IOException {
+		if (chunk == 0) {
+			final List<CUnit> units = simulation.getUnits();
+			begin(1, "order", "units").i("count", units.size());
+			for (final CUnit unit : units) {
+				this.line.append(unit.getHandleId()).append(',');
+			}
+			end();
+			this.sliceUnits = units.toArray(new CUnit[0]);
+			Arrays.sort(this.sliceUnits, Comparator.comparingInt(CUnit::getHandleId));
+			this.sliceEmitter = (checksum, key) -> checksum.unitRow(simulation, (CUnit) key);
+			final GameLines game = gameLines(simulation);
+			synchronized (game) {
+				if (game.units == null) {
+					game.units = new RowCache();
+				}
+				this.sliceRows = game.units;
+			}
+			synchronized (this.sliceRows) {
+				this.sliceRowsKept = this.sliceRows.start();
+			}
+		}
+		final int count = this.sliceUnits.length;
+		final int from = (int) ((long) count * chunk / UNIT_CHUNKS);
+		final int to = (int) ((long) count * (chunk + 1) / UNIT_CHUNKS);
+		synchronized (this.sliceRows) {
+			for (int i = from; i < to; i++) {
+				if (this.sliceRowsKept) {
+					hashRow(this.sliceRows, this.sliceUnits[i], this.sliceEmitter);
+				}
+				else {
+					plainRow(this.sliceUnits[i], this.sliceEmitter);
+				}
+			}
+			if ((chunk == (UNIT_CHUNKS - 1)) && this.sliceRowsKept) {
+				this.sliceRows.finish(count);
+			}
+		}
+		if (chunk == (UNIT_CHUNKS - 1)) {
+			this.sliceUnits = null;
+			this.sliceRows = null;
+			this.sliceEmitter = null;
+		}
+	}
+
+	/** A checksum spread over several steps: the parts of the state it hashes in each, and the step it ends at. */
+	static final class Sliced implements ChecksumSteps {
+		private final int interval;
+		private final int slices;
+		private SimulationChecksum checksum;
+		private int startTick = -1;
+		private int next;
+		private int lastTick = -1;
+		private boolean lastFinished;
+		private int value;
+		private int finishedStart;
+
+		Sliced(final int interval) {
+			this.interval = interval;
+			this.slices = Math.max(1, Math.min(interval, PHASES));
+		}
+
+		@Override
+		public boolean afterStep(final CSimulation game) {
+			final int tick = game.getGameTurnTick();
+			if (tick == this.lastTick) {
+				return this.lastFinished;
+			}
+			this.lastTick = tick;
+			this.lastFinished = false;
+			if ((tick % this.interval) == 0) {
+				this.checksum = new SimulationChecksum();
+				this.startTick = tick;
+				this.next = 0;
+			}
+			if ((this.checksum == null) || (tick != (this.startTick + this.next))) {
+				this.checksum = null;
+				return false;
+			}
+			try {
+				final int first = this.next * PHASES / this.slices;
+				final int last = (this.next + 1) * PHASES / this.slices;
+				for (int phase = first; phase < last; phase++) {
+					this.checksum.hashPhase(game, phase);
+				}
+			}
+			catch (final IOException e) {
+				throw new UncheckedIOException(e);
+			}
+			if (++this.next == this.slices) {
+				this.value = this.checksum.total;
+				this.finishedStart = this.startTick;
+				this.checksum = null;
+				this.lastFinished = true;
+			}
+			return this.lastFinished;
+		}
+
+		@Override
+		public int startTick() {
+			return this.finishedStart;
+		}
+
+		@Override
+		public int value() {
+			return this.value;
+		}
+	}
+
+	/** A checksum that spreads its work over {@code interval} or fewer steps; see {@link ChecksumSteps}. */
+	public static ChecksumSteps sliced(final int interval) {
+		return new Sliced(interval);
+	}
+
 	private void hashUnits(final CSimulation simulation) throws IOException {
 		final List<CUnit> units = simulation.getUnits();
 		begin(1, "order", "units").i("count", units.size());
@@ -493,6 +679,12 @@ public final class SimulationChecksum {
 				final CItem item = inventory.getItemInSlot(slot);
 				name("slot", slot, "").value(item == null ? 0 : item.getHandleId());
 			}
+			for (int slot = 0; slot < CEquipmentType.LOADOUT_SLOTS; slot++) {
+				final CItem worn = inventory.getItemInLoadoutSlot(slot);
+				if (worn != null) {
+					name("worn", slot, "").value(worn.getHandleId());
+				}
+			}
 		}
 		for (final CAbility ability : unit.getAbilities()) {
 			final int handleId = ability.getHandleId();
@@ -508,6 +700,13 @@ public final class SimulationChecksum {
 				name("a", handleId, ".cooldown").value(cooldown);
 			}
 			name("a", handleId, ".disabled").value(ability.isDisabled());
+			if ((ability instanceof AbstractCAbility) && !((AbstractCAbility) ability).getScriptFields().isEmpty()) {
+				// Only abilities a script set fields on add lines, so checksums of other games stay as they were.
+				for (final Map.Entry<String, String> field : new TreeMap<>(
+						((AbstractCAbility) ability).getScriptFields()).entrySet()) {
+					name("a", handleId, ".field." + field.getKey()).value(field.getValue());
+				}
+			}
 		}
 	}
 
@@ -518,7 +717,7 @@ public final class SimulationChecksum {
 					.i("foodCap", player.getFoodCap()).i("foodUsed", player.getFoodUsed());
 			for (int other = 0; other < players.size(); other++) {
 				int bits = 0;
-				for (final CAllianceType type : CAllianceType.values()) {
+				for (final CAllianceType type : CAllianceType.VALUES) {
 					if (player.hasAlliance(other, type)) {
 						bits |= 1 << type.ordinal();
 					}
@@ -802,10 +1001,24 @@ public final class SimulationChecksum {
 	}
 
 	private void hashTimers(final CSimulation simulation) throws IOException {
-		final List<CTimer> active = simulation.getActiveTimers();
-		begin(6, "timers", "count").i("active", active.size()).i("added", simulation.getAddedTimers().size()).end();
+		int activeCount = 0;
+		for (final CTimer timer : simulation.getActiveTimers()) {
+			if (!timer.isRenderOnly()) {
+				activeCount++;
+			}
+		}
+		int addedCount = 0;
+		for (final CTimer timer : simulation.getAddedTimers()) {
+			if (!timer.isRenderOnly()) {
+				addedCount++;
+			}
+		}
+		begin(6, "timers", "count").i("active", activeCount).i("added", addedCount).end();
 		int index = 0;
-		for (final CTimer timer : active) {
+		for (final CTimer timer : simulation.getActiveTimers()) {
+			if (timer.isRenderOnly()) {
+				continue;
+			}
 			begin(6, "timer", index++).s("class", SimulationTypeCodes.of(timer, "?")).i("fire", timer.getEngineFireTick())
 					.f("timeout", timer.getTimeoutTime()).b("repeats", timer.isRepeats()).end();
 		}
@@ -848,6 +1061,12 @@ public final class SimulationChecksum {
 
 	private void hashJass(final int category, final String scope, final CSimulation simulation,
 			final GlobalScope globalScope) throws IOException {
+		hashJass(category, scope, simulation, globalScope, 0, 1);
+	}
+
+	/** The part-th of that many parts of the globals' blocks. */
+	private void hashJass(final int category, final String scope, final CSimulation simulation,
+			final GlobalScope globalScope, final int part, final int parts) throws IOException {
 		if (globalScope == null) {
 			return;
 		}
@@ -865,7 +1084,7 @@ public final class SimulationChecksum {
 			}
 		}
 		synchronized (lines) {
-			hashJass(category, scope, globals, lines);
+			hashJass(category, scope, globals, lines, part, parts);
 		}
 	}
 
@@ -924,9 +1143,11 @@ public final class SimulationChecksum {
 	}
 
 	private void hashJass(final int category, final String scope, final List<GlobalScopeAssignable> globals,
-			final ScopeLines lines) throws IOException {
+			final ScopeLines lines, final int part, final int parts) throws IOException {
 		this.category = category;
-		for (int block = 0; block < (lines.starts.length - 1); block++) {
+		final int blockCount = lines.starts.length - 1;
+		final int lastBlock = (int) ((long) blockCount * (part + 1) / parts);
+		for (int block = (int) ((long) blockCount * part / parts); block < lastBlock; block++) {
 			final int first = lines.starts[block];
 			final int last = lines.starts[block + 1];
 			if (this.detail != null) {

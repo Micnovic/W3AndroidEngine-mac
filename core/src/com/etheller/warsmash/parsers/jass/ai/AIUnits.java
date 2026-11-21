@@ -5,7 +5,6 @@ import java.util.List;
 
 import com.etheller.warsmash.parsers.jass.triggers.UnitGroup;
 import com.etheller.warsmash.util.War3ID;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitClassification;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitTypeRequirement;
@@ -30,12 +29,18 @@ final class AIUnits {
 	}
 
 	/**
-	 * The order the computer player picks the units it claims in: that of a unit group, units made after the start
+	 * Our living units in the order the computer player picks the units it claims in (it never claims another's, so
+	 * the rest of the map is left out of the sort): that of a unit group, units made after the start
 	 * newest first. An AddAssault with spare units, a SuicideUnit, a worker for a structure and a producer with equal
 	 * queues all take the most recently made unit first.
 	 */
-	static List<CUnit> inClaimOrder(final CSimulation simulation) {
-		final List<CUnit> units = new ArrayList<>(simulation.getUnits());
+	static List<CUnit> inClaimOrder(final AIController ai) {
+		final List<CUnit> units = new ArrayList<>();
+		for (final CUnit unit : ai.simulation.getUnits()) {
+			if (ai.isOurs(unit)) {
+				units.add(unit);
+			}
+		}
 		units.sort((a, b) -> UnitGroup.precedes(a, b) ? -1 : (UnitGroup.precedes(b, a) ? 1 : 0));
 		return units;
 	}

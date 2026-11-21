@@ -258,6 +258,87 @@ class DataPackageTest {
 		assertEquals("w3-data-classic.zip", packages.get(0).getName());
 	}
 
+	private static Map<String, String> languageFiles(final String code, final String marker) {
+		final Map<String, String> files = new LinkedHashMap<>();
+		final String folder = "_locales/" + code.toLowerCase() + ".w3mod/";
+		files.put(folder + "ui/worldeditgamestrings.txt", "[WorldEditStrings]\nWESTRING_X=" + code + "\n");
+		files.put(folder + "sound/dialogue/line.flac", "speech " + code);
+		files.put(DataPackage.LANGUAGE_MARKER, "tool=Reforged Extractor toolkit 0.2.0\ngameVersion=3.0.1\n"
+				+ "profile=full-classic\nlocale=" + code + "\nspeech=yes\nentries=" + marker + "\n");
+		return files;
+	}
+
+	@Test
+	void recognisesLanguagePacks() throws IOException {
+		try (DataPackage dataPackage = DataPackage.open(zip("lang.zip", languageFiles("esES", "3")))) {
+			assertEquals("esES", dataPackage.language);
+			assertEquals("esES", dataPackage.locale);
+			assertEquals("3.0.1", dataPackage.gameVersion);
+			assertTrue(dataPackage.addsToClassic());
+			assertEquals(null, dataPackage.graphicsSet);
+			assertEquals(3, dataPackage.fileCount());
+		}
+		try (DataPackage dataPackage = DataPackage.open(zip("p.zip", gameFiles("", "3")))) {
+			assertEquals("", dataPackage.language);
+			assertFalse(dataPackage.addsToClassic());
+		}
+		assertEquals(DataPackage.Problem.INCOMPLETE, problem(zip("short.zip", languageFiles("esES", "9"))));
+		final Map<String, String> stray = languageFiles("esES", "4");
+		stray.put("units/UnitData.slk", "x");
+		assertEquals(DataPackage.Problem.NO_MARKER, problem(zip("stray.zip", stray)));
+		final Map<String, String> two = languageFiles("esES", "4");
+		two.put("_locales/frfr.w3mod/ui/worldeditgamestrings.txt", "x");
+		assertEquals(DataPackage.Problem.NO_MARKER, problem(zip("two.zip", two)));
+		final Map<String, String> wrong = languageFiles("esES", "3");
+		wrong.put(DataPackage.LANGUAGE_MARKER,
+				wrong.get(DataPackage.LANGUAGE_MARKER).replace("locale=esES", "locale=frFR"));
+		assertEquals(DataPackage.Problem.NO_MARKER, problem(zip("wrong.zip", wrong)));
+		final Map<String, String> empty = new LinkedHashMap<>();
+		empty.put(DataPackage.LANGUAGE_MARKER, "tool=x\nentries=1\n");
+		assertEquals(DataPackage.Problem.NO_MARKER, problem(zip("empty.zip", empty)));
+	}
+
+	@Test
+	void aLanguagePackNeedsTheClassicDataFirst() throws IOException {
+		final File target = new File(this.temp, "data");
+		try (DataPackage dataPackage = DataPackage.open(zip("lang.zip", languageFiles("esES", "3")))) {
+			final DataPackage.ImportException e = assertThrows(DataPackage.ImportException.class,
+					() -> dataPackage.importInto(target, (bytes, total, files, count) -> {
+					}, () -> false));
+			assertEquals(DataPackage.Problem.NO_CLASSIC_LANGUAGE, e.problem);
+			assertEquals("esES", e.file);
+		}
+		assertFalse(new File(target, "_locales").exists());
+		assertFalse(new File(this.temp, "data.importing").exists());
+	}
+
+	@Test
+	void aLanguagePackJoinsTheClassicDataAndSurvivesANewerClassic() throws IOException {
+		final File target = new File(this.temp, "data");
+		importZip(zip("classic.zip", gameFiles("", "3")), target);
+		importZip(zip("lang.zip", languageFiles("esES", "3")), target);
+		importZip(zip("lang2.zip", languageFiles("frFR", "3")), target);
+		final File es = new File(target, "_locales/eses.w3mod");
+		assertEquals("[WorldEditStrings]\nWESTRING_X=esES\n", read(new File(es, "ui/worldeditgamestrings.txt")));
+		assertTrue(new File(target, "_locales/frfr.w3mod/sound/dialogue/line.flac").isFile());
+		assertFalse(new File(target, DataPackage.LANGUAGE_MARKER).exists());
+		assertTrue(new File(target, DataPackage.MARKER).isFile());
+		assertEquals(java.util.Arrays.asList("enUS", "esES", "frFR"), DataFolderCheck.locales(DataFolderCheck.Kind.FOLDER, target));
+
+		importZip(zip("classic2.zip", gameFiles("", "3")), target);
+		assertEquals("[WorldEditStrings]\nWESTRING_X=esES\n", read(new File(es, "ui/worldeditgamestrings.txt")));
+		assertFalse(new File(this.temp, "data.old").exists());
+	}
+
+	@Test
+	void listsLanguagePacksAfterClassicPackages() throws IOException {
+		zip("a-lang.zip", languageFiles("esES", "3"));
+		zip("w3-data-classic.zip", gameFiles("", "3"));
+		final java.util.List<File> packages = DataPackage.packagesIn(this.temp);
+		assertEquals(2, packages.size());
+		assertEquals("w3-data-classic.zip", packages.get(0).getName());
+	}
+
 	@Test
 	void readabilityCountsFilesAndKeepsTheFirstNames() throws IOException {
 		final File folder = new File(this.temp, "data");

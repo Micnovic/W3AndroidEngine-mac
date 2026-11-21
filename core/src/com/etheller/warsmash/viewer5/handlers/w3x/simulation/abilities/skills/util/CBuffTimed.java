@@ -18,7 +18,6 @@ public abstract class CBuffTimed extends AbstractCBuff {
 	private SimulationRenderComponent fx;
 	private final float duration;
 	private final CExactExpiry expiry = new CExactExpiry();
-	private double carriedRemaining = -1;
 	private boolean timerPaused;
 
 	public CBuffTimed(final int handleId, final War3ID code, final War3ID alias, final float duration) {
@@ -34,20 +33,7 @@ public abstract class CBuffTimed extends AbstractCBuff {
 	public void onAdd(final CSimulation game, final CUnit unit) {
 		onBuffAdd(game, unit);
 		this.fx = game.createPersistentSpellEffectOnUnit(unit, getAlias(), CEffectType.TARGET);
-		if (this.carriedRemaining >= 0) {
-			this.expiry.startRemaining(game, this.carriedRemaining);
-		}
-		else {
-			this.expiry.start(game, this.duration);
-		}
-		this.carriedRemaining = -1;
-	}
-
-	/**
-	 * Keeps the time left when this buff is next added, for a buff moved to another unit (Spell Steal).
-	 */
-	public void carryRemainingTime(final CSimulation game) {
-		this.carriedRemaining = this.expiry.getRemaining(game);
+		this.expiry.start(game, this.duration);
 	}
 
 	@Override

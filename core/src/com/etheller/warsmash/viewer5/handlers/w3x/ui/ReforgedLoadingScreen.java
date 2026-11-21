@@ -183,7 +183,7 @@ final class ReforgedLoadingScreen {
 
 	private final Texture background;
 	private final ReforgedLoadingBar bar;
-	private final FontGeneratorHolder fonts;
+	private final FontGeneratorHolder.Lease fonts;
 
 	// A campaign map's screen.
 	private Texture crest;
@@ -235,7 +235,7 @@ final class ReforgedLoadingScreen {
 			final FontGeneratorHolder fonts) {
 		this.background = background;
 		this.bar = bar;
-		this.fonts = fonts;
+		this.fonts = fonts.lease();
 	}
 
 	/**
@@ -1095,6 +1095,7 @@ final class ReforgedLoadingScreen {
 
 	void dispose() {
 		this.detailsCaches.clear();
+		this.fonts.dispose();
 		this.teamCaches.clear();
 		this.barTextCaches.clear();
 		this.bar.dispose();

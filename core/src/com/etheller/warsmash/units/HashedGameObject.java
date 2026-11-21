@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.etheller.warsmash.util.SafeParse;
+
 public abstract class HashedGameObject implements GameObject {
 	FieldMap fields = new FieldMap();
 	String id;
@@ -221,26 +223,12 @@ public abstract class HashedGameObject implements GameObject {
 
 	@Override
 	public int getFieldValue(final String field) {
-		int i = 0;
-		try {
-			i = Integer.parseInt(getField(field).trim());
-		}
-		catch (final NumberFormatException e) {
-			// Blank and "-" entries are common in the data; they read as 0.
-		}
-		return i;
+		return SafeParse.parseInt(getField(field));
 	}
 
 	@Override
 	public float getFieldFloatValue(final String field) {
-		float i = 0;
-		try {
-			i = Float.parseFloat(getField(field).trim());
-		}
-		catch (final NumberFormatException e) {
-			// Blank and "-" entries are common in the data; they read as 0.
-		}
-		return i;
+		return SafeParse.parseFloat(getField(field));
 	}
 
 	@Override

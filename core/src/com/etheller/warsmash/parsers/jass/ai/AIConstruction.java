@@ -36,9 +36,9 @@ final class AIConstruction {
 			final int preferredTown, final boolean byDistance) {
 		CUnit best = null;
 		float bestScore = Float.MAX_VALUE;
-		for (final CUnit unit : AIUnits.inClaimOrder(ai.simulation)) {
+		for (final CUnit unit : AIUnits.inClaimOrder(ai)) {
 			if (!ai.isOurs(unit) || unit.isHidden() || ai.isBuildJobWorker(unit) || AIUnits.isBuilding(unit)
-					|| ai.attackCaptain.getMembers().contains(unit)) {
+					|| ai.attackCaptain.isMember(unit)) {
 				continue;
 			}
 			final AbstractCAbilityBuild build = AIUnits.getBuildAbility(unit);

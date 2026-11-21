@@ -25,7 +25,7 @@ public class CAbilityTypeItemHeal extends CAbilityType<CAbilityTypeItemHealLevel
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeItemHealLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeItemHealLevelData levelData = getLevelData(existingAbility, level - 1);
 		if (existingAbility instanceof CAbilityItemHeal) {
 			((CAbilityItemHeal) existingAbility).setLevelValues(levelData.getLifeToRegain(), levelData.getCooldown());
 		}

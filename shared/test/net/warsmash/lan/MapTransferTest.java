@@ -11,7 +11,6 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -371,21 +370,17 @@ class MapTransferTest {
 	}
 
 	@Test
-	void requestAtTheEndGetsAnEmptyChunk() throws Exception {
+	void requestAtTheEndIsRefusedWithoutAChunk() throws Exception {
 		final File map = MapTestFiles.writeMap(new File(dir("host"), "End.w3x"), 100000, 29);
 		this.env.startHost(hostConfig(map));
 		final List<LanMessage> inbox = new CopyOnWriteArrayList<LanMessage>();
 		final List<String> closed = new CopyOnWriteArrayList<String>();
 		final LanConnection c = rawConnect(inbox, closed);
 		c.send(new LanMessages.MapRequest(100000));
-		waitFor("empty chunk", () -> {
-			for (final LanMessage m : inbox) {
-				if (m instanceof LanMessages.MapChunk) {
-					return ((LanMessages.MapChunk) m).data.length == 0 && ((LanMessages.MapChunk) m).offset == 100000;
-				}
-			}
-			return false;
-		});
+		waitFor("closed", () -> !closed.isEmpty());
+		for (final LanMessage m : inbox) {
+			assertFalse(m instanceof LanMessages.MapChunk);
+		}
 	}
 
 	@Test

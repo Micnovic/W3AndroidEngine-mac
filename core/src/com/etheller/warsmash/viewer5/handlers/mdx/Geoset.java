@@ -6,8 +6,12 @@ import java.nio.CharBuffer;
 import java.nio.FloatBuffer;
 import java.util.Arrays;
 
+import com.badlogic.gdx.Application.ApplicationType;
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.BufferUtils;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.viewer5.gl.ANGLEInstancedArrays;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxGeoset;
 
@@ -42,17 +46,21 @@ public class Geoset {
 	 * Only what picking and sorting read stays once the geometry is in the GPU buffers: the normals, tangents, skin
 	 * and texture coordinates of HD models are several times larger and do not fit a phone's heap. The positions and
 	 * faces of the models of a map are tens of megabytes, which only a ray test reads: they are kept in native
-	 * memory, outside the Java heap.
+	 * memory, outside the Java heap. On Android a direct buffer is an array in the Java heap, so there they are
+	 * allocated outside the runtime and freed with the model. A geoset that is never picked keeps none (null).
 	 */
-	public final FloatBuffer pickVertices;
-	public final CharBuffer pickFaces;
+	public FloatBuffer pickVertices;
+	public CharBuffer pickFaces;
+	private PickGrid pickGrid;
+	private ByteBuffer unsafePickVertices;
+	private ByteBuffer unsafePickFaces;
 	public final float centerZ;
 
 	public Geoset(final MdxModel model, final int index, final int fileIndex, final int positionOffset,
 			final int normalOffset, final int uvOffset, final int tangentOffset, final int skinOffset,
 			final int faceOffset, final int vertices, final int elements, final int openGLSkinType,
 			final int skinStride, final int boneCountOffsetBytes, final boolean unselectable,
-			final MdlxGeoset mdlxGeoset) {
+			final MdlxGeoset mdlxGeoset, final PickData preparedPick) {
 		this.model = model;
 		this.index = index;
 		this.fileIndex = fileIndex;
@@ -68,17 +76,13 @@ public class Geoset {
 		this.skinStride = skinStride;
 		this.boneCountOffsetBytes = boneCountOffsetBytes;
 		this.unselectable = unselectable;
-		final float[] allVertices = mdlxGeoset.getVertices();
-		final int[] faces = mdlxGeoset.getFaces();
-		final char[] pickFaces = new char[faces.length];
-		for (int i = 0; i < faces.length; i++) {
-			pickFaces[i] = (char) faces[i];
+		if (!unselectable) {
+			final PickData pick = (preparedPick != null) ? preparedPick : PickData.prepare(mdlxGeoset);
+			this.unsafePickFaces = pick.unsafe ? pick.faceBytes : null;
+			this.unsafePickVertices = pick.unsafe ? pick.vertexBytes : null;
+			this.pickFaces = pick.faceView;
+			this.pickVertices = pick.vertexView;
 		}
-		final float[] pickVertices = uniquePositions(allVertices, pickFaces);
-		this.pickFaces = ByteBuffer.allocateDirect(pickFaces.length * 2).order(ByteOrder.nativeOrder()).asCharBuffer()
-				.put(pickFaces);
-		this.pickVertices = ByteBuffer.allocateDirect(pickVertices.length * 4).order(ByteOrder.nativeOrder())
-				.asFloatBuffer().put(pickVertices);
 		this.centerZ = (mdlxGeoset.extent.max[2] + mdlxGeoset.extent.min[2]) / 2;
 
 		for (final GeosetAnimation geosetAnimation : model.getGeosetAnimations()) {
@@ -118,6 +122,74 @@ public class Geoset {
 		this.hasAlphaAnim = hasAlphaAnim;
 		this.hasColorAnim = hasColorAnim;
 		this.hasObjectAnim = hasAlphaAnim || hasColorAnim;
+	}
+
+	/**
+	 * What a geoset's ray test reads, made from the parsed geoset alone, so that it can be made on a helper thread
+	 * before the model is built.
+	 */
+	public static final class PickData {
+		final ByteBuffer faceBytes;
+		final ByteBuffer vertexBytes;
+		final CharBuffer faceView;
+		final FloatBuffer vertexView;
+		final boolean unsafe;
+
+		private PickData(final char[] faces, final float[] vertices, final boolean unsafe) {
+			this.unsafe = unsafe;
+			this.faceBytes = pickBuffer(faces.length * 2, unsafe);
+			this.vertexBytes = pickBuffer(vertices.length * 4, unsafe);
+			this.faceView = this.faceBytes.asCharBuffer().put(faces);
+			this.vertexView = this.vertexBytes.asFloatBuffer().put(vertices);
+		}
+
+		/** Frees the native memory of a pick buffer set that no geoset took over. */
+		public void dispose() {
+			if (this.unsafe) {
+				BufferUtils.disposeUnsafeByteBuffer(this.faceBytes);
+				BufferUtils.disposeUnsafeByteBuffer(this.vertexBytes);
+			}
+		}
+
+		public static PickData prepare(final MdlxGeoset mdlxGeoset) {
+			final float[] allVertices = mdlxGeoset.getVertices();
+			final short[] faces = mdlxGeoset.getFaces();
+			final char[] pickFaces = new char[faces.length];
+			for (int i = 0; i < faces.length; i++) {
+				pickFaces[i] = (char) faces[i];
+			}
+			final float[] pickVertices = uniquePositions(allVertices, pickFaces);
+			final boolean unsafe = (Gdx.app != null) && (Gdx.app.getType() == ApplicationType.Android);
+			return new PickData(pickFaces, pickVertices, unsafe);
+		}
+	}
+
+	private static ByteBuffer pickBuffer(final int bytes, final boolean unsafe) {
+		final ByteBuffer buffer = unsafe ? BufferUtils.newUnsafeByteBuffer(bytes) : ByteBuffer.allocateDirect(bytes);
+		return buffer.order(ByteOrder.nativeOrder());
+	}
+
+	/** The triangles sorted by ground position, made when the first vertical ray asks; null without pick data. */
+	PickGrid pickGrid() {
+		if ((this.pickGrid == null) && (this.pickVertices != null) && (this.pickFaces != null)) {
+			this.pickGrid = new PickGrid(this.pickVertices, this.pickFaces, 3);
+		}
+		return this.pickGrid;
+	}
+
+	/** Frees what picking reads; the geoset is not picked any more. */
+	void disposePickData() {
+		this.pickGrid = null;
+		this.pickVertices = null;
+		this.pickFaces = null;
+		if (this.unsafePickVertices != null) {
+			BufferUtils.disposeUnsafeByteBuffer(this.unsafePickVertices);
+			this.unsafePickVertices = null;
+		}
+		if (this.unsafePickFaces != null) {
+			BufferUtils.disposeUnsafeByteBuffer(this.unsafePickFaces);
+			this.unsafePickFaces = null;
+		}
 	}
 
 	/**
@@ -218,6 +290,7 @@ public class Geoset {
 	public void render() {
 		final GL20 gl = this.model.viewer.gl;
 
+		PerfStats.draw();
 		gl.glDrawElements(GL20.GL_TRIANGLES, this.elements, GL20.GL_UNSIGNED_SHORT, this.faceOffset);
 	}
 
@@ -228,6 +301,7 @@ public class Geoset {
 
 	public void renderSimple(final int instances) {
 		final ANGLEInstancedArrays instancedArrays = this.model.viewer.webGL.instancedArrays;
+		PerfStats.draw();
 		instancedArrays.glDrawElementsInstancedANGLE(GL20.GL_TRIANGLES, this.elements, GL20.GL_UNSIGNED_SHORT,
 				this.faceOffset, instances);
 	}

@@ -25,7 +25,7 @@ public class CAbilityTypeItemManaRegain extends CAbilityType<CAbilityTypeItemMan
 
 	@Override
 	public void setLevel(final CSimulation game, CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeItemManaRegainLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeItemManaRegainLevelData levelData = getLevelData(existingAbility, level - 1);
 		if (existingAbility instanceof CAbilityItemManaRegain) {
 			((CAbilityItemManaRegain) existingAbility).setLevelValues(levelData.getManaToRegain(), levelData.getCooldown());
 		}

@@ -26,7 +26,7 @@ public class CAbilityTypeCarrionSwarmDummy extends CAbilityType<CAbilityTypeCarr
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeCarrionSwarmDummyLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeCarrionSwarmDummyLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityCarrionSwarmDummy heroAbility = ((CAbilityCarrionSwarmDummy) existingAbility);
 		heroAbility.setCastRange(levelData.getCastRange());
 		heroAbility.setTargetsAllowed(levelData.getTargetsAllowed());

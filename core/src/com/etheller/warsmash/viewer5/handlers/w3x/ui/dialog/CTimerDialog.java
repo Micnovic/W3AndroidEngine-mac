@@ -5,6 +5,7 @@ import com.etheller.interpreter.ast.util.AllocatedHandle;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.frames.StringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 
@@ -23,6 +24,9 @@ public class CTimerDialog extends AllocatedHandle {
 	private float realTimeBase;
 	private double realTimeStart;
 	private float speed = 1f;
+	/** The whole seconds the value frame shows, so that the text is made only when they change. */
+	@SavedTransient
+	private int shownSeconds = Integer.MIN_VALUE;
 
 	public CTimerDialog(final GameUI rootFrame, final CTimer timer, final UIFrame timerDialogFrame,
 			final StringFrame valueFrame, final StringFrame titleFrame) {
@@ -40,6 +44,7 @@ public class CTimerDialog extends AllocatedHandle {
 		this.timerDialogFrame = timerDialogFrame;
 		this.valueFrame = valueFrame;
 		this.titleFrame = titleFrame;
+		this.shownSeconds = Integer.MIN_VALUE;
 		if (this.title != null) {
 			setTitle(this.title);
 		}
@@ -80,6 +85,7 @@ public class CTimerDialog extends AllocatedHandle {
 	}
 
 	public void setValue(final GameUI rootFrame, final String value) {
+		this.shownSeconds = Integer.MIN_VALUE;
 		rootFrame.setText(this.valueFrame, value);
 	}
 
@@ -126,6 +132,10 @@ public class CTimerDialog extends AllocatedHandle {
 				return;
 			}
 			final int secondsRemaining = (int) remaining;
+			if (secondsRemaining == this.shownSeconds) {
+				return;
+			}
+			this.shownSeconds = secondsRemaining;
 			final int minutes = secondsRemaining / 60;
 			final int seconds = secondsRemaining % 60;
 

@@ -27,9 +27,20 @@ public class StaticSceneLightInstance implements SceneLightInstance {
 	}
 
 	public static StaticSceneLightInstance createDefault(final Vector3 lightDirection) {
+		return createDefault(lightDirection, 1, 0.3f);
+	}
+
+	public static StaticSceneLightInstance createDefault(final Vector3 lightDirection, final float intensity,
+			final float ambientIntensity) {
+		return createDefault(lightDirection, new float[] { 1, 1, 1 }, intensity, new float[] { 1, 1, 1 },
+				ambientIntensity);
+	}
+
+	public static StaticSceneLightInstance createDefault(final Vector3 lightDirection, final float[] color,
+			final float intensity, final float[] ambientColor, final float ambientIntensity) {
 		final Vector3 usedDirection = new Vector3(lightDirection.y, -lightDirection.x, -lightDirection.z);
-		return new StaticSceneLightInstance(Type.DIRECTIONAL, new float[] { 1, 2 }, new float[] { 1, 1, 1 }, 1,
-				new float[] { 1, 1, 1 }, 0.3f, usedDirection);
+		return new StaticSceneLightInstance(Type.DIRECTIONAL, new float[] { 1, 2 }, color, intensity, ambientColor,
+				ambientIntensity, usedDirection);
 	}
 
 	@Override

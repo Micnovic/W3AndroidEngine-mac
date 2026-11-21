@@ -16,7 +16,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbstractCAbilityTypeDefinition;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CSpellDamageFlags;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CTargetType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;

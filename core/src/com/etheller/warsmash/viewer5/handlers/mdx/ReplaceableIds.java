@@ -1,7 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.mdx;
 
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 
 import com.etheller.warsmash.util.Log;
@@ -30,7 +29,11 @@ public class ReplaceableIds {
 
 	public static String getIdString(final long replaceableId) {
 		// The team color number is a player slot, which the game's player count (a per-game constant) bounds.
-		return (replaceableId >= 0) ? String.format(Locale.ROOT, "%2d", replaceableId).replace(' ', '0') : null;
+		// Two digits at least; asked for each team colour texture of every unit and effect made.
+		if (replaceableId < 0) {
+			return null;
+		}
+		return replaceableId < 10 ? "0" + replaceableId : Long.toString(replaceableId);
 	}
 
 	public static String getPathString(final long replaceableId) {

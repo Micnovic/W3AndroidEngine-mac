@@ -173,7 +173,7 @@ public final class VirtualFileSystem {
 				}
 				final long logicalOffset = fileReference.getOffset();
 
-				final BankStream bankStream = storage.getBanks(fileReference.getEncodingKey());
+				final BankStream bankStream = storage.getBanks(fileReference.getEncodingKey(), true);
 				// TODO test if compressed and logical sizes match stored sizes.
 
 				fileBuffer.limit((int) (logicalOffset + logicalSize));
@@ -431,7 +431,7 @@ public final class VirtualFileSystem {
 			throw new MalformedCASCStructureException("stored data too large to process");
 		}
 
-		final BankStream bankStream = storage.getBanks(storageReference.getEncodingKey());
+		final BankStream bankStream = storage.getBanks(storageReference.getEncodingKey(), true);
 		final ByteBuffer storedBuffer = ByteBuffer.allocate((int) size);
 		try {
 			while (bankStream.hasNextBank()) {

@@ -92,47 +92,55 @@ public final class LanMapIndex {
 	}
 
 	/** The file that is exactly this map, or null. */
-	public synchronized File find(final LanData.MapInfo info) throws IOException {
+	public File find(final LanData.MapInfo info) throws IOException {
 		if (info.sha256.length == 0 || info.size <= 0) {
 			return null;
 		}
-		final List<File> candidates = new ArrayList<File>();
-		final int[] visited = new int[1];
-		for (final File root : this.roots) {
-			collect(root, 0, info.size, candidates, visited);
-		}
-		collect(this.downloadDir, 0, info.size, candidates, visited);
-		Collections.sort(candidates, new Comparator<File>() {
-			@Override
-			public int compare(final File a, final File b) {
-				final boolean an = a.getName().equalsIgnoreCase(info.name);
-				final boolean bn = b.getName().equalsIgnoreCase(info.name);
-				return an == bn ? 0 : an ? -1 : 1;
+		final VirtualMaps maps;
+		synchronized (this) {
+			final List<File> candidates = new ArrayList<File>();
+			final int[] visited = new int[1];
+			for (final File root : this.roots) {
+				collect(root, 0, info.size, candidates, visited);
 			}
-		});
-		File found = null;
-		for (final File f : candidates) {
-			final Entry e = hashOf(f);
-			if (e != null && Arrays.equals(e.sha256, info.sha256) && e.crc32 == info.crc32) {
-				found = f;
-				break;
+			collect(this.downloadDir, 0, info.size, candidates, visited);
+			Collections.sort(candidates, new Comparator<File>() {
+				@Override
+				public int compare(final File a, final File b) {
+					final boolean an = a.getName().equalsIgnoreCase(info.name);
+					final boolean bn = b.getName().equalsIgnoreCase(info.name);
+					return an == bn ? 0 : an ? -1 : 1;
+				}
+			});
+			for (final File f : candidates) {
+				final Entry e = hashOf(f);
+				if (e != null && Arrays.equals(e.sha256, info.sha256) && e.crc32 == info.crc32) {
+					save();
+					return f;
+				}
 			}
+			save();
+			maps = this.virtualMaps;
 		}
-		if (found == null) {
-			found = findVirtual(info);
+		// Not under the lock: the game data's maps are read by the launcher's catalog thread, which may itself be
+		// waiting for this index (describing the host's map).
+		final File found = findVirtual(maps, info);
+		synchronized (this) {
+			save();
 		}
-		save();
 		return found;
 	}
 
-	private File findVirtual(final LanData.MapInfo info) throws IOException {
-		final VirtualMaps maps = this.virtualMaps;
+	private File findVirtual(final VirtualMaps maps, final LanData.MapInfo info) throws IOException {
 		if (maps == null || info.name.isEmpty()) {
 			return null;
 		}
 		for (final String path : maps.pathsNamed(info.name)) {
 			final String key = VIRTUAL_KEY + path;
-			Entry e = this.cache.get(key);
+			Entry e;
+			synchronized (this) {
+				e = this.cache.get(key);
+			}
 			if (e != null && e.modified == maps.stamp() && e.size != info.size) {
 				continue;
 			}
@@ -143,14 +151,16 @@ public final class LanMapIndex {
 					continue;
 				}
 				final MapHash.Result r = MapHash.compute(file);
-				this.hashed++;
 				e = new Entry();
 				e.size = r.size;
 				e.modified = maps.stamp();
 				e.sha256 = r.sha256;
 				e.crc32 = r.crc32;
-				this.cache.put(key, e);
-				this.dirty = true;
+				synchronized (this) {
+					this.hashed++;
+					this.cache.put(key, e);
+					this.dirty = true;
+				}
 			}
 			if (e.size == info.size && Arrays.equals(e.sha256, info.sha256) && e.crc32 == info.crc32) {
 				return file != null ? file : maps.extract(path);

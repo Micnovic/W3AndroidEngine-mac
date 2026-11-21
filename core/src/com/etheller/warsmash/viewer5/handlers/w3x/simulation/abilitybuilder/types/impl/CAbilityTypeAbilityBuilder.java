@@ -57,6 +57,12 @@ public class CAbilityTypeAbilityBuilder extends CAbilityType<CAbilityTypeAbility
 		}
 	}
 
+	/** The level data an ability reads: its own copy built from the values a script set on it, else the shared one. */
+	public List<CAbilityTypeAbilityBuilderLevelData> levelDataFor(final CAbility ability) {
+		final List<CAbilityTypeAbilityBuilderLevelData> own = getScriptLevelData(ability);
+		return own != null ? own : getLevelData();
+	}
+
 	public void setLevel(CSimulation game, CUnit unit, CAbilitySpell existingAbility, int level) {
 		existingAbility.setLevel(game, unit, level);
 		existingAbility.populate(abilityEditorData, level);

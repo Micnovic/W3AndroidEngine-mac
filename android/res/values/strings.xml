@@ -68,6 +68,7 @@
     <string name="lan_map_failed_timeout">The host stopped sending the map.</string>
     <string name="lan_map_failed_other">The map could not be downloaded.</string>
     <string name="lan_map_failed_title">Map download failed</string>
+    <string name="lan_map_unplayable_title">This map cannot be played</string>
     <string name="lan_map_progress">%1$s · %2$d %% · %3$s / %4$s MB</string>
     <string name="lan_sending">Sending map · %1$d %%</string>
     <string name="lan_joined">%1$s has joined the game.</string>
@@ -125,11 +126,13 @@
     <string name="data_folder_unreadable_files_detail">%1$s – placed here by another app or a computer. Import the ZIP instead, or unzip it into another folder, such as Download.</string>
     <string name="data_folder_found_unreadable">Game data found · %1$d files cannot be read</string>
     <string name="data_folder_found_unreadable_detail">%1$s · %2$s. Missing files show as gaps in the game; import the ZIP again.</string>
+    <string name="data_content_old_version">This game version is not supported – use Warcraft III 1.31 or newer</string>
     <string name="data_content_scripts">Scripts missing in the game data (common.j or Blizzard.j)</string>
     <string name="data_content_no_campaigns">No campaign list in the game data</string>
     <string name="data_content_no_campaign_maps">No campaign maps in the game data – was it prepared with \'Melee only\'?</string>
     <string name="data_content_no_melee_maps">No melee maps in the game data</string>
     <string name="data_folder_incomplete_detail">%1$s. You can continue, but the maps may not start; prepare the data again with all options or import the full ZIP.</string>
+    <string name="data_folder_old_version_detail">%1$s. Version 1.30 and older keep the game files in MPQ archives, which the game does not read. Use 1.31 or newer, or Reforged.</string>
     <string name="data_folder_import">Import ZIP</string>
     <string name="data_folder_import_cancel">Cancel</string>
     <string name="data_folder_importing">Importing the game data…</string>
@@ -140,8 +143,9 @@
     <string name="data_folder_import_failed">The ZIP was not imported</string>
     <string name="data_folder_import_cancelled">Import cancelled; the old data is kept.</string>
     <string name="data_folder_import_not_zip">%1$s is not a ZIP file, or it is damaged. Copy it to the device again.</string>
-    <string name="data_folder_import_no_marker">%1$s is not a Reforged Extractor toolkit package: it has no w3-datapacker.txt and is not a graphics set.</string>
+    <string name="data_folder_import_no_marker">%1$s is not a Reforged Extractor toolkit package: it has no w3-datapacker.txt and is not a graphics set or a language pack.</string>
     <string name="data_folder_import_no_classic">%1$s is the %2$s graphics set, which is added to the Classic game data. Import w3-data-classic.zip first, then this set.</string>
+    <string name="data_folder_import_no_classic_language">%1$s is the %2$s language pack, which is added to the Classic game data. Import w3-data-classic.zip first, then this pack.</string>
     <string name="data_folder_import_incomplete">%1$s is incomplete (%2$s files). Copy the whole ZIP to the device again.</string>
     <string name="data_folder_import_unsafe">%1$s holds a file that would land outside the game folder (%2$s); it is not used.</string>
     <string name="data_folder_import_unsupported">%1$s packs %2$s in a way the game cannot unpack. Make the package again with the toolkit.</string>
@@ -152,6 +156,7 @@
     <string name="data_folder_import_unseekable">%1$s cannot be read where it lies. Copy it to the device storage, such as Download, and pick it there.</string>
     <string name="data_folder_import_package">%1$s · %2$s · %3$s files · %4$s</string>
     <string name="data_folder_import_set">%1$s · %2$s graphics set · %3$s files · %4$s</string>
+    <string name="data_folder_import_language">%1$s · %2$s language · %3$s files · %4$s</string>
     <string name="options_files_unreadable">%1$s · %2$d cannot be read</string>
     <string name="shortcut_game_data">Game data</string>
     <string name="launcher_preparing">Preparing</string>
@@ -194,6 +199,7 @@
     <string name="options_texture_2048">2048</string>
     <string name="options_texture_full">Full</string>
     <string name="options_texture_capped">Not enough memory on this device for this size; HD and Reforged games use %1$d.</string>
+    <string name="options_texture_limited">Saved texture size: %1$s. Limited to %2$d by this device\'s memory; HD and Reforged games use %2$d.</string>
     <string name="options_render_scale">Render scale</string>
     <string name="options_scale_100">100 %</string>
     <string name="options_scale_85">85 %</string>
@@ -213,8 +219,11 @@
     <string name="options_profiles_restart">%1$s · changes when the app restarts</string>
     <string name="options_debugging">Debugging</string>
     <string name="options_crash_logs">Save crash logs</string>
-    <string name="options_crash_share">Share last crash log</string>
-    <string name="options_crash_none">No crash log yet</string>
+    <string name="options_logs_share">Share logs</string>
+    <string name="options_logs_share_value">Tap to send the log of this run and the last crash log</string>
+    <string name="options_logs_where">Log files</string>
+    <string name="options_logs_where_value">Crash logs: %1$s</string>
+    <string name="options_logs_none">There are no logs to share yet</string>
     <string name="options_crash_cannot_share">The log could not be shared</string>
     <string name="crash_logs_title">Save crash logs?</string>
     <string name="crash_logs_line">When the game crashes, these are saved: the error and its stack trace, recent lines of the app\'s log, the app version and commit, the phone model, Android version and graphics card, the graphics settings and the map name. The file stays on this phone in %1$s and is never sent anywhere; you can attach it to a bug report yourself.</string>
@@ -229,8 +238,10 @@
     <string name="update_offer_unofficial">Version %1$s is available; this is %2$s, an unofficial build (not made by the project, for example a debug build). Download size %3$s.
 
 Android will not install the release over this copy, because it is signed with another key. After the download you remove this copy yourself (Android Settings, Apps) and then install the release. Nothing is removed for you. Removing the app deletes its own saves and settings; the game data folder you chose stays where it is, so back up anything you want to keep first.</string>
-    <string name="update_offer_page">Version %1$s is available; this is %2$s. It has no APK to install from here.</string>
-    <string name="update_offer_desktop">Version %1$s is available; this is %2$s. Open the release page to download it.</string>
+    <string name="update_offer_page">Version %1$s is available; this is %2$s. Open GitHub to download it.</string>
+    <string name="update_offer_desktop">Version %1$s is available; this is %2$s. Open GitHub to download it.</string>
+    <string name="update_unknown">A new version may be available. Open GitHub to check.</string>
+    <string name="update_github">GitHub</string>
     <string name="update_now">Update</string>
     <string name="update_later">Later</string>
     <string name="update_skip">Skip this version</string>

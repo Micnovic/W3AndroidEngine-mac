@@ -7,11 +7,12 @@ import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
-import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.files.FileHandle;
 import com.etheller.warsmash.common.FetchDataTypeName;
 import com.etheller.warsmash.common.LoadGenericCallback;
+import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.util.DataErrors;
 import com.etheller.warsmash.util.DataSourceFileHandle;
 import com.etheller.warsmash.util.Log;
@@ -29,29 +30,52 @@ import com.hiveworkshop.rms.parsers.mdlx.MdlxParticleEmitter2;
 
 public class EventObjectEmitterObject extends GenericObject implements EmitterObject {
 	private static final class LoadGenericSoundCallback implements LoadGenericCallback {
+		private final DataSource dataSource;
 		private final String filename;
 
-		public LoadGenericSoundCallback(final String filename) {
+		public LoadGenericSoundCallback(final DataSource dataSource, final String filename) {
+			this.dataSource = dataSource;
 			this.filename = filename;
 		}
 
 		@Override
 		public Object call(final InputStream data) {
-			final FileHandle temp = new FileHandle(this.filename) {
-				@Override
-				public InputStream read() {
-					return data;
-				}
-
-				;
-			};
 			if (data != null) {
-				return Extensions.audio.newSound(temp);
+				// The handle names the file as a prefetch of it does (see prefetchSounds), so that a sound decoded
+				// ahead is taken over; the stream given is then not opened.
+				return new EventObjectSound(DataSourceFileHandle.ofResolved(this.dataSource, this.filename),
+						new SoundFileHandle(this.dataSource, this.filename, data));
 			}
 			else {
 				DataErrors.report(DataErrors.MISSING_SOUND, this.filename, "Warning: missing sound file: " + this.filename);
 				return null;
 			}
+		}
+	}
+
+	/** A sound file read from the stream the viewer gave, named as {@link DataSourceFileHandle} names it. */
+	private static final class SoundFileHandle extends FileHandle {
+		private final String path;
+		private final InputStream data;
+
+		SoundFileHandle(final DataSource dataSource, final String filename, final InputStream data) {
+			this(DataSourceFileHandle.ofResolved(dataSource, filename), data);
+		}
+
+		private SoundFileHandle(final DataSourceFileHandle named, final InputStream data) {
+			super(named.file());
+			this.path = named.path();
+			this.data = data;
+		}
+
+		@Override
+		public String path() {
+			return this.path;
+		}
+
+		@Override
+		public InputStream read() {
+			return this.data;
 		}
 	}
 
@@ -105,7 +129,7 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 	public float volume;
 	public int channel;
 	public boolean footprint;
-	public List<Sound> decodedBuffers = new ArrayList<>();
+	final List<EventObjectSound> decodedBuffers = new ArrayList<>();
 	/**
 	 * If this is an SPL/UBR emitter object, ok will be set to true if the tables
 	 * are loaded.
@@ -173,19 +197,7 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 					FetchDataTypeName.SLK, mappedDataCallback));
 		}
 		else if ("SND".equals(type)) {
-			final String animLookups = pathSolver.solve("UI\\SoundInfo\\AnimLookups.slk", solverParams).finalSrc;
-			// 2.0 and later data have no AnimLookups table; their AnimSounds table is keyed by the event code, whatever
-			// the model's version.
-			this.soundsByEventCode = !viewer.dataSource.has(animLookups);
-			if (!this.soundsByEventCode) {
-				tables.add(viewer.loadGeneric(animLookups, FetchDataTypeName.SLK, mappedDataCallback));
-				tables.add(viewer.loadGeneric(pathSolver.solve("UI\\SoundInfo\\AnimSounds.slk", solverParams).finalSrc,
-						FetchDataTypeName.SLK, mappedDataCallback));
-			}
-			else {
-				tables.add(viewer.loadGeneric(pathSolver.solve("UI\\SoundInfo\\AnimSounds.slk", solverParams).finalSrc,
-						FetchDataTypeName.SLK, mappedDataCallback));
-			}
+			this.soundsByEventCode = soundTables(viewer, pathSolver, solverParams, tables);
 		}
 		else {
 			// Units\Critters\BlackStagMale\BlackStagMale.mdx has an event object named
@@ -196,6 +208,94 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 		// TODO I am scrapping some async stuff with promises here from the JS and
 		// calling load
 		load(tables);
+	}
+
+	/**
+	 * Loads the tables of the sound events into the list.
+	 *
+	 * @return whether the sounds are keyed by the event code: 2.0 and later data have no AnimLookups table, and their
+	 *         AnimSounds table is keyed by the event code, whatever the model's version
+	 */
+	private static boolean soundTables(final ModelViewer viewer, final PathSolver pathSolver, final Object solverParams,
+			final List<GenericResource> tables) {
+		final String animLookups = pathSolver.solve("UI\\SoundInfo\\AnimLookups.slk", solverParams).finalSrc;
+		final boolean byEventCode = !viewer.dataSource.has(animLookups);
+		if (!byEventCode) {
+			tables.add(viewer.loadGeneric(animLookups, FetchDataTypeName.SLK, mappedDataCallback));
+		}
+		tables.add(viewer.loadGeneric(pathSolver.solve("UI\\SoundInfo\\AnimSounds.slk", solverParams).finalSrc,
+				FetchDataTypeName.SLK, mappedDataCallback));
+		return byEventCode;
+	}
+
+	/** The files of a row of the AnimSounds table; some Reforged rows have none. */
+	private static String[] soundFileNames(final MappedDataRow animSoundsRow) {
+		final Object fileNamesValue = animSoundsRow.get("FileNames");
+		return (fileNamesValue instanceof String) && !"_".equals(fileNamesValue)
+				? ((String) fileNamesValue).split(",")
+				: new String[0];
+	}
+
+	/** The path of a file of a row of the AnimSounds table, before the path solver and the sound formats. */
+	private static String soundFilePath(final MappedDataRow animSoundsRow, final String fileName) {
+		final String directoryBase = (String) animSoundsRow.get("DirectoryBase");
+		String path;
+		if ((directoryBase != null) && !"_".equals(directoryBase)) {
+			path = (directoryBase) + fileName;
+		}
+		else {
+			path = fileName;
+		}
+		if (!DataSourceFileHandle.isSoundPath(path)) {
+			// 2.0 and later tables also give a few sounds as a bare name (PeasantDeath1).
+			path = path + ".wav";
+		}
+		return path;
+	}
+
+	/**
+	 * Starts decoding the sound files an event object of a model plays where the audio backend does that off the game
+	 * thread (see {@link com.etheller.warsmash.viewer5.gl.AudioExtension#prefetchSound}), so that making the event
+	 * object later, as the model is built, finds them decoded. Files already loaded, or already started (in the set),
+	 * are left out.
+	 */
+	static void prefetchSounds(final MdxModel model, final MdlxEventObject eventObject, final Set<String> started) {
+		final ModelViewer viewer = model.viewer;
+		final String name = eventObject.getName();
+		if (!viewer.audioEnabled || (name.length() < 4) || !"SND".equals(name.substring(0, 3))) {
+			return;
+		}
+		final String id = name.substring(4, Math.min(name.length(), 8));
+		final List<GenericResource> tables = new ArrayList<>();
+		final boolean byEventCode = soundTables(viewer, model.pathSolver, model.solverParams, tables);
+		final MappedData firstTable = (MappedData) tables.get(0).data;
+		if (firstTable == null) {
+			return;
+		}
+		final MappedDataRow row = firstTable.getRow(id.trim());
+		if (row == null) {
+			return;
+		}
+		MappedDataRow animSoundsRow = row;
+		if (!byEventCode) {
+			final MappedData animSounds = (MappedData) tables.get(1).data;
+			animSoundsRow = animSounds == null ? null : animSounds.getRow((String) row.get("SoundLabel"));
+		}
+		if (animSoundsRow == null) {
+			return;
+		}
+		for (final String fileName : soundFileNames(animSoundsRow)) {
+			try {
+				final String pathString = DataSourceFileHandle.resolveSoundPath(viewer.dataSource,
+						model.pathSolver.solve(soundFilePath(animSoundsRow, fileName), model.solverParams).finalSrc);
+				if (!viewer.has(pathString) && started.add(pathString)) {
+					Extensions.audio.prefetchSound(DataSourceFileHandle.ofResolved(viewer.dataSource, pathString));
+				}
+			}
+			catch (final RuntimeException e) {
+				// left to the event object, which reports it
+			}
+		}
 	}
 
 	private float getFloat(final MappedDataRow row, final String name) {
@@ -236,13 +336,15 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 			final PathSolver pathSolver = model.pathSolver;
 
 			if ("SPN".equals(this.type)) {
-				this.internalModel = War3MapViewer.loadModelMdx(viewer.dataSource, viewer, (String) row.get("Model"),
-						pathSolver, model.solverParams);
-
-				if (this.internalModel != null) {
-					// TODO javascript async code removed here
-//					this.internalModel.whenLoaded((model) => this.ok = model.ok)
-					this.ok = this.internalModel.ok;
+				// While the game goes on, the spawned model is read and built a few units a frame like an attachment's,
+				// before the instances of the model that spawns it load; until then nothing is spawned.
+				final boolean deferBefore = viewer.setDeferModelLoads(viewer.isDeferModelTextures());
+				try {
+					this.internalModel = War3MapViewer.loadModelMdx(viewer.dataSource, viewer, (String) row.get("Model"),
+							pathSolver, model.solverParams);
+				}
+				finally {
+					viewer.setDeferModelLoads(deferBefore);
 				}
 			}
 			else if ("SPL".equals(this.type) || "FPT".equals(this.type) || "UBR".equals(this.type)) {
@@ -281,7 +383,7 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 				}
 
 				final int[] blendModes = FilterMode
-						.emitterFilterMode(MdlxParticleEmitter2.FilterMode.fromId(getInt(row, "BlendMode")));
+						.emitterFilterMode(MdlxParticleEmitter2.FilterMode.fromId(getInt(row, "BlendMode", 0)));
 
 				this.blendSrc = blendModes[0];
 				this.blendDst = blendModes[1];
@@ -313,29 +415,16 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 						this.volume = getFloat(animSoundsRow, "Volume") / 127f;
 						this.channel = (int) getFloat(animSoundsRow, "Channel");
 
-						// Some Reforged rows have no file at all.
-						final Object fileNamesValue = animSoundsRow.get("FileNames");
-						final String[] fileNames = (fileNamesValue instanceof String)
-								&& !"_".equals(fileNamesValue) ? ((String) fileNamesValue).split(",") : new String[0];
+						final String[] fileNames = soundFileNames(animSoundsRow);
 						final GenericResource[] resources = new GenericResource[fileNames.length];
 						for (int i = 0; i < fileNames.length; i++) {
-							final String directoryBase = (String) animSoundsRow.get("DirectoryBase");
-							String path;
-							if ((directoryBase != null) && !"_".equals(directoryBase)) {
-								path = (directoryBase) + fileNames[i];
-							}
-							else {
-								path = fileNames[i];
-							}
-							if (!DataSourceFileHandle.isSoundPath(path)) {
-								// 2.0 and later tables also give a few sounds as a bare name (PeasantDeath1).
-								path = path + ".wav";
-							}
+							final String path = soundFilePath(animSoundsRow, fileNames[i]);
 							try {
 								final String pathString = DataSourceFileHandle.resolveSoundPath(viewer.dataSource,
 										pathSolver.solve(path, model.solverParams).finalSrc);
 								final GenericResource genericResource = viewer.loadGeneric(pathString,
-										FetchDataTypeName.ARRAY_BUFFER, new LoadGenericSoundCallback(pathString));
+										FetchDataTypeName.ARRAY_BUFFER,
+										new LoadGenericSoundCallback(viewer.dataSource, pathString));
 								if (genericResource == null) {
 									Log.warn("Null sound: " + fileNames[i]);
 								}
@@ -350,8 +439,8 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 
 						// TODO JS async removed
 						for (final GenericResource resource : resources) {
-							if (resource != null) {
-								this.decodedBuffers.add((Sound) resource.data);
+							if ((resource != null) && (resource.data != null)) {
+								this.decodedBuffers.add((EventObjectSound) resource.data);
 							}
 						}
 						this.ok = true;
@@ -417,7 +506,8 @@ public class EventObjectEmitterObject extends GenericObject implements EmitterOb
 
 	@Override
 	public boolean ok() {
-		return this.ok;
+		final MdxModel internalModel = this.internalModel;
+		return internalModel != null ? internalModel.ok : this.ok;
 	}
 
 	@Override

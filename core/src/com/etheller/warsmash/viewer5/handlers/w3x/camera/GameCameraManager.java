@@ -27,9 +27,11 @@ public final class GameCameraManager extends CameraManager {
 	private static final float MAX_FOV = 120f;
 	private static final float MIN_DISTANCE = 100f;
 	private static final float PAN_SPEED = 3000f;
-	private static final CameraRates INFINITE_CAMERA_RATES = new CameraRates(Float.POSITIVE_INFINITY,
-			Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
-			Float.POSITIVE_INFINITY);
+	// CameraSetSmoothingFactor: seconds the player's own camera movement takes to follow the keys per unit of the
+	// factor. Not measured.
+	private static final float SMOOTHING_SECONDS = 0.1f;
+	// SetCameraOrientController: how high above the unit's ground the eye stands. Not measured.
+	private static final float ORIENT_EYE_HEIGHT = 100f;
 	private final CameraPreset[] presets;
 	private final CameraSetup[] presetCameras;
 	private final CameraSetup[] presetCamerasInsert;
@@ -70,6 +72,21 @@ public final class GameCameraManager extends CameraManager {
 	private float localPitch;
 	private float localYaw;
 	private float localRoll;
+	private float smoothingFactor;
+	private float smoothVelocityX;
+	private float smoothVelocityY;
+	private RenderUnit orientUnit;
+	private float orientXOffset;
+	private float orientYOffset;
+	private boolean rotateModeActive;
+	private float rotatePivotX;
+	private float rotatePivotY;
+	private float rotateFrom;
+	private float rotateTo;
+	private float rotateDuration;
+	private float rotateElapsed;
+	private final Vector3 viewEye = new Vector3();
+	private final Vector3 viewTarget = new Vector3();
 	private final Vector3 viewForward = new Vector3();
 	private final Vector3 viewUp = new Vector3();
 	private final Vector3 viewRight = new Vector3();
@@ -193,6 +210,9 @@ public final class GameCameraManager extends CameraManager {
 		this.targetNoise.advance(deltaTime);
 		if (this.cinematicCamera != null) {
 			this.cinematicTime += deltaTime;
+		}
+		if (this.rotateModeActive) {
+			this.rotateElapsed += deltaTime;
 		}
 		updateView();
 	}
@@ -329,7 +349,68 @@ public final class GameCameraManager extends CameraManager {
 				(this.cinematicOnTarget ? this.target.z : 0) + modelPoint[2] + this.cinematicTemp[2]);
 	}
 
+	/**
+	 * The picture's camera. SetCameraOrientController and SetCameraRotateMode move only what is drawn: measured, the
+	 * rotation, eye and target the camera natives report stay those of the game camera.
+	 */
 	private void placeCamera(final Vector3 eye, final Vector3 lookAt) {
+		if ((this.cinematicCamera == null) && ((this.orientUnit != null) || this.rotateModeActive)) {
+			this.viewEye.set(eye);
+			this.viewTarget.set(lookAt);
+			if (this.orientUnit != null) {
+				orientView(this.viewEye, this.viewTarget);
+			}
+			if (this.rotateModeActive) {
+				rotateView(this.viewEye, this.viewTarget);
+			}
+			placeCameraView(this.viewEye, this.viewTarget);
+			return;
+		}
+		placeCameraView(eye, lookAt);
+	}
+
+	/** The eye on the unit, looking the way the unit faces, with the game camera's angle of attack. */
+	private void orientView(final Vector3 eye, final Vector3 lookAt) {
+		final boolean drawn = this.renderState.saved;
+		final float unitX = drawn ? this.orientUnit.getX() : this.orientUnit.getSimulationUnit().getX();
+		final float unitY = drawn ? this.orientUnit.getY() : this.orientUnit.getSimulationUnit().getY();
+		final double facing = Math.toRadians(this.orientUnit.getSimulationUnit().getFacing());
+		final double cosFacing = StrictMath.cos(facing);
+		final double sinFacing = StrictMath.sin(facing);
+		final float x = unitX + (float) ((this.orientXOffset * cosFacing) - (this.orientYOffset * sinFacing));
+		final float y = unitY + (float) ((this.orientXOffset * sinFacing) + (this.orientYOffset * cosFacing));
+		final float ground = this.groundHeight == null ? this.target.z : this.groundHeight.at(unitX, unitY);
+		eye.set(x, y, ground + this.targetZOffset + ORIENT_EYE_HEIGHT);
+		final double sinVertical = StrictMath.sin(this.verticalAngle);
+		final double cosVertical = StrictMath.cos(this.verticalAngle);
+		final double horizontal = facing - (Math.PI / 2);
+		lookAt.set(eye.x + (float) (-sinVertical * StrictMath.sin(horizontal) * 100),
+				eye.y + (float) (sinVertical * StrictMath.cos(horizontal) * 100),
+				eye.z + (float) (-cosVertical * 100));
+	}
+
+	/** The picture turned about the point, as far into the sweep as the time has come. */
+	private void rotateView(final Vector3 eye, final Vector3 lookAt) {
+		final double angle = currentRotateAngle();
+		final double cos = StrictMath.cos(angle);
+		final double sin = StrictMath.sin(angle);
+		turnAbout(eye, cos, sin);
+		turnAbout(lookAt, cos, sin);
+	}
+
+	private float currentRotateAngle() {
+		final float progress = this.rotateDuration > 0 ? Math.min(1f, this.rotateElapsed / this.rotateDuration) : 1f;
+		return this.rotateFrom + ((this.rotateTo - this.rotateFrom) * progress);
+	}
+
+	private void turnAbout(final Vector3 point, final double cos, final double sin) {
+		final double dx = point.x - this.rotatePivotX;
+		final double dy = point.y - this.rotatePivotY;
+		point.x = this.rotatePivotX + (float) ((dx * cos) - (dy * sin));
+		point.y = this.rotatePivotY + (float) ((dx * sin) + (dy * cos));
+	}
+
+	private void placeCameraView(final Vector3 eye, final Vector3 lookAt) {
 		if (this.cinematicCamera != null) {
 			// The model's own view, as the unit portraits show a model's camera.
 			this.camera.perspective(this.cinematicCamera.fieldOfView * 0.75f, this.camera.getAspect(),
@@ -585,6 +666,7 @@ public final class GameCameraManager extends CameraManager {
 		private boolean started;
 		private float cinematicTime;
 		private float cinematicRoll;
+		private float rotateElapsed;
 
 		private void save(final GameCameraManager camera) {
 			this.saved = true;
@@ -609,6 +691,7 @@ public final class GameCameraManager extends CameraManager {
 			this.started = camera.started;
 			this.cinematicTime = camera.cinematicTime;
 			this.cinematicRoll = camera.cinematicRoll;
+			this.rotateElapsed = camera.rotateElapsed;
 		}
 
 		private void restore(final GameCameraManager camera) {
@@ -633,6 +716,7 @@ public final class GameCameraManager extends CameraManager {
 			camera.started = this.started;
 			camera.cinematicTime = this.cinematicTime;
 			camera.cinematicRoll = this.cinematicRoll;
+			camera.rotateElapsed = this.rotateElapsed;
 			this.saved = false;
 		}
 	}
@@ -731,7 +815,21 @@ public final class GameCameraManager extends CameraManager {
 			else {
 				velocityX = 0;
 			}
-			this.target.add(velocityX * scrollFactor * deltaTime, velocityY * scrollFactor * deltaTime, 0);
+			float moveX = velocityX;
+			float moveY = velocityY;
+			if (this.smoothingFactor > 0) {
+				final float follow = 1f
+						- (float) StrictMath.exp(-deltaTime / (SMOOTHING_SECONDS * this.smoothingFactor));
+				this.smoothVelocityX += (velocityX - this.smoothVelocityX) * follow;
+				this.smoothVelocityY += (velocityY - this.smoothVelocityY) * follow;
+				moveX = this.smoothVelocityX;
+				moveY = this.smoothVelocityY;
+			}
+			else {
+				this.smoothVelocityX = velocityX;
+				this.smoothVelocityY = velocityY;
+			}
+			this.target.add(moveX * scrollFactor * deltaTime, moveY * scrollFactor * deltaTime, 0);
 		}
 		clampTargetToBounds();
 	}
@@ -847,6 +945,42 @@ public final class GameCameraManager extends CameraManager {
 		this.targetControllerYOffset = yoffset;
 		this.targetControllerInheritOrientation = inheritOrientation;
 
+	}
+
+	/**
+	 * SetCameraOrientController: the picture is taken from the unit (null ends it). The game camera, which the camera
+	 * natives report, does not follow.
+	 */
+	public void setOrientController(final RenderUnit unit, final float xoffset, final float yoffset) {
+		syncToGameStep();
+		this.orientUnit = unit;
+		this.orientXOffset = xoffset;
+		this.orientYOffset = yoffset;
+	}
+
+	/**
+	 * SetCameraRotateMode: the picture sweeps the angle (radians) about the point over the duration and stays turned
+	 * until the game camera is reset. A sweep about the same point adds to the turn so far; about another point it
+	 * replaces it.
+	 */
+	public void setRotateMode(final float x, final float y, final float radians, final float duration) {
+		syncToGameStep();
+		float current = 0;
+		if (this.rotateModeActive && (Math.abs(x - this.rotatePivotX) < 1f)
+				&& (Math.abs(y - this.rotatePivotY) < 1f)) {
+			current = currentRotateAngle();
+		}
+		this.rotateModeActive = true;
+		this.rotatePivotX = x;
+		this.rotatePivotY = y;
+		this.rotateFrom = current;
+		this.rotateTo = current + radians;
+		this.rotateDuration = duration;
+		this.rotateElapsed = 0;
+	}
+
+	public void setSmoothingFactor(final float factor) {
+		this.smoothingFactor = factor;
 	}
 
 	public RenderUnit getTargetControllerUnit() {
@@ -1077,6 +1211,7 @@ public final class GameCameraManager extends CameraManager {
 
 	public void applyCameraSetup(CustomCameraSetup cameraSetup, boolean doPan, boolean panTimed) {
 		syncToGameStep();
+		this.rotateModeActive = false;
 		this.customSetup = cameraSetup;
 		this.cameraType = cameraSetup.getCameraType();
 		if (doPan) {
@@ -1091,6 +1226,8 @@ public final class GameCameraManager extends CameraManager {
 
 	public void resetToGameCamera(final float duration) {
 		syncToGameStep();
+		this.orientUnit = null;
+		this.rotateModeActive = false;
 		if (this.cinematicCamera != null) {
 			// Measured on 1.29: the game camera comes back looking at the point the model's camera looked at.
 			setTarget(this.noisyTarget.x, this.noisyTarget.y);

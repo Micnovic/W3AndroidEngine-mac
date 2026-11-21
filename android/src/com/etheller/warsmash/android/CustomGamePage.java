@@ -366,7 +366,8 @@ final class CustomGamePage extends LauncherViews {
 					columns[0], menuY, columns[1], menuH);
 		}
 		else {
-			place(row, dropdown(glueList(SLOT_TYPES, 1), this.lobby.slotTypes[index], editable, menuH, textSize,
+			place(row, dropdown(glueList(SLOT_TYPES, 1), this.lobby.slotTypes[index],
+					CustomGame.typeEditable(details, index), menuH, textSize,
 					choice -> this.lobby.slotTypes[index] = choice), columns[0], menuY, columns[1], menuH);
 		}
 		place(row, dropdown(glueList(RACES, 0), this.lobby.slotRaces[index], editable, menuH, textSize,

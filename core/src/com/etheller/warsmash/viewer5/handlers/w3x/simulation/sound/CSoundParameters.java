@@ -1,7 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound;
 
 import com.etheller.warsmash.viewer5.AudioContext;
-import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
 
 /**
  * What scripts set on a sound before starting it, and how that becomes volume and position when it starts.
@@ -28,16 +27,17 @@ final class CSoundParameters {
 	float velocityX;
 	float velocityY;
 	float velocityZ;
-	RenderUnit attachedUnit;
+	// The position array rather than the unit: a script keeps the sound, and it must not keep a removed unit.
+	float[] attachedLocation;
 	String dialogueSpeakerNameKey = "";
 	String dialogueTextKey = "";
 
 	void updatePositionFromUnit() {
-		if (this.attachedUnit != null) {
+		if (this.attachedLocation != null) {
 			this.positioned = true;
-			this.x = this.attachedUnit.location[0];
-			this.y = this.attachedUnit.location[1];
-			this.z = this.attachedUnit.location[2];
+			this.x = this.attachedLocation[0];
+			this.y = this.attachedLocation[1];
+			this.z = this.attachedLocation[2];
 		}
 	}
 

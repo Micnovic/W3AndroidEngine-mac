@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItemType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -47,6 +48,9 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 	private final List<CUnitTypeRequirement> requirements;
 	private final CItem[] itemsHeld;
 	private final List<CAbility>[] itemsHeldAbilities;
+	// Worn items by loadout slot (the 3.0 equipment); null until something is equipped.
+	private CItem[] loadout;
+	private List<CAbility>[] loadoutAbilities;
 	private CItem droppingItem;
 	private CBehaviorGetItem behaviorGetItem;
 	private CBehaviorDropItem behaviorDropItem;
@@ -111,6 +115,7 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 				dropItem(game, unit, i, unit.getX(), unit.getY(), false);
 			}
 		}
+		dropEquipment(game, unit, false);
 	}
 
 	@Override
@@ -715,31 +720,40 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 
 	/** The abilities a held item gives its carrier, in the order they were added. */
 	public List<CAbility> getItemAbilities(final CItem item) {
+		final List<CAbility> held = heldAbilities(item);
+		return (held == null) ? new ArrayList<>() : new ArrayList<>(held);
+	}
+
+	/** The live list of the abilities a carried or worn item gives, or null when this unit does not hold it. */
+	private List<CAbility> heldAbilities(final CItem item) {
 		final int slot = getSlot(item);
-		return (slot < 0) ? new ArrayList<>() : new ArrayList<>(this.itemsHeldAbilities[slot]);
+		if (slot >= 0) {
+			return this.itemsHeldAbilities[slot];
+		}
+		final int worn = getLoadoutSlot(item);
+		return (worn >= 0) ? this.loadoutAbilities[worn] : null;
 	}
 
 	/** Gives the hero an ability through a held item; the item has it from then on. */
 	public CAbility addItemAbility(final CSimulation simulation, final CUnit hero, final CItem item,
 			final War3ID abilityId) {
-		final int slot = getSlot(item);
-		if ((slot < 0) || !this.canUseItems) {
+		final List<CAbility> held = heldAbilities(item);
+		if ((held == null) || !this.canUseItems) {
 			return null;
 		}
-		final CAbility ability = createItemAbility(simulation, hero, item, abilityId, slot);
+		final CAbility ability = createItemAbility(simulation, hero, item, abilityId, getSlot(item));
 		if (ability != null) {
-			this.itemsHeldAbilities[slot].add(ability);
+			held.add(ability);
 		}
 		return ability;
 	}
 
 	public void removeItemAbility(final CSimulation simulation, final CUnit hero, final CItem item,
 			final War3ID abilityId) {
-		final int slot = getSlot(item);
-		if (slot < 0) {
+		final List<CAbility> slotAbilities = heldAbilities(item);
+		if (slotAbilities == null) {
 			return;
 		}
-		final List<CAbility> slotAbilities = this.itemsHeldAbilities[slot];
 		for (int i = 0; i < slotAbilities.size(); i++) {
 			final CAbility ability = slotAbilities.get(i);
 			if (abilityId.equals(ability.getAlias())) {
@@ -761,7 +775,8 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 	public void dropItem(final CSimulation simulation, final CUnit hero, final CItem itemToDrop, final float x,
 			final float y, final boolean playUserUISounds) {
 		final int index = getSlot(itemToDrop);
-		if ((index < 0) || (itemToDrop == this.droppingItem)) {
+		final int worn = (index < 0) ? getLoadoutSlot(itemToDrop) : -1;
+		if (((index < 0) && (worn < 0)) || (itemToDrop == this.droppingItem)) {
 			// Not held, or a drop event's trigger removed the item while it is being dropped: the outer drop
 			// finishes it.
 			return;
@@ -769,22 +784,36 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 		// Measured on 1.29: the drop event fires while the hero still holds the item.
 		this.droppingItem = itemToDrop;
 		try {
+			if (worn >= 0) {
+				hero.fireUnequipItemEvents(simulation, itemToDrop);
+			}
 			hero.fireDropItemEvents(simulation, itemToDrop);
 		}
 		finally {
 			this.droppingItem = null;
 		}
-		if (this.itemsHeld[index] != itemToDrop) {
-			return;
+		final List<CAbility> itemAbilities;
+		if (index >= 0) {
+			if (this.itemsHeld[index] != itemToDrop) {
+				return;
+			}
+			this.itemsHeld[index] = null;
+			itemAbilities = this.itemsHeldAbilities[index];
 		}
-		this.itemsHeld[index] = null;
+		else {
+			if (this.loadout[worn] != itemToDrop) {
+				return;
+			}
+			this.loadout[worn] = null;
+			itemAbilities = this.loadoutAbilities[worn];
+		}
 		hero.onDropItem(simulation, itemToDrop, playUserUISounds);
 		itemToDrop.setLastHolder(hero);
 		itemToDrop.setContainedInventory(null, null);
-		for (final CAbility ability : this.itemsHeldAbilities[index]) {
+		for (final CAbility ability : itemAbilities) {
 			hero.remove(simulation, ability);
 		}
-		this.itemsHeldAbilities[index].clear();
+		itemAbilities.clear();
 		if (!itemToDrop.isDead()) {
 			itemToDrop.setHidden(false);
 			itemToDrop.setPointAndCheckUnstuck(x, y, simulation);
@@ -800,6 +829,11 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					game.removeItem(this.itemsHeld[i]);
 				}
 			}
+			for (int i = 0; (this.loadout != null) && (i < this.loadout.length); i++) {
+				if (this.loadout[i] != null) {
+					game.removeItem(this.loadout[i]);
+				}
+			}
 			return;
 		}
 		if (this.dropItemsOnDeath) {
@@ -808,7 +842,159 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					dropItem(game, hero, i, hero.getX(), hero.getY(), false);
 				}
 			}
+			dropEquipment(game, hero, false);
 		}
+	}
+
+	private void dropEquipment(final CSimulation game, final CUnit hero, final boolean playUserUISounds) {
+		for (int i = 0; (this.loadout != null) && (i < this.loadout.length); i++) {
+			if (this.loadout[i] != null) {
+				dropItem(game, hero, this.loadout[i], hero.getX(), hero.getY(), playUserUISounds);
+			}
+		}
+	}
+
+	public CItem getItemInLoadoutSlot(final int slot) {
+		if ((this.loadout == null) || (slot < 0) || (slot >= this.loadout.length)) {
+			return null;
+		}
+		return this.loadout[slot];
+	}
+
+	/** The loadout slot a worn item is in, or -1 when it is not worn by this unit. */
+	public int getLoadoutSlot(final CItem item) {
+		for (int i = 0; (item != null) && (this.loadout != null) && (i < this.loadout.length); i++) {
+			if (this.loadout[i] == item) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	public boolean hasEquipment() {
+		for (int i = 0; (this.loadout != null) && (i < this.loadout.length); i++) {
+			if (this.loadout[i] != null) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether a worn item is of this equipment type; ANY matches any worn item. */
+	public boolean hasEquipmentOfType(final CEquipmentType type) {
+		for (int i = 0; (this.loadout != null) && (i < this.loadout.length); i++) {
+			if ((this.loadout[i] != null)
+					&& ((type == CEquipmentType.ANY) || (this.loadout[i].getEquipmentType() == type))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The first free loadout slot for an item of this type, or -1 when it has none or all of them are taken. */
+	public int getFreeLoadoutSlot(final CEquipmentType type) {
+		for (final int slot : type.getLoadoutSlots()) {
+			if (getItemInLoadoutSlot(slot) == null) {
+				return slot;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Wears an item that lies on the ground or is carried in the slots of this unit, in the first free loadout slot
+	 * of its equipment type. A worn item keeps giving the unit its abilities; it is not one of the numbered slots,
+	 * so its abilities cannot be used from the slot buttons.
+	 */
+	public boolean equipItem(final CSimulation simulation, final CUnit hero, final CItem item) {
+		return equipItem(simulation, hero, item, -1);
+	}
+
+	/**
+	 * As {@link #equipItem(CSimulation, CUnit, CItem)}, into the given loadout slot when the item's equipment type
+	 * has it and it is free (a unit restored from a campaign wears its items where it wore them); any other value
+	 * takes the first free slot.
+	 */
+	public boolean equipItem(final CSimulation simulation, final CUnit hero, final CItem item,
+			final int preferredSlot) {
+		if ((item == null) || item.isDead() || !this.canGetItems || !isRequirementsMet(simulation, hero)
+				|| (getLoadoutSlot(item) >= 0)) {
+			return false;
+		}
+		int slot = getFreeLoadoutSlot(item.getEquipmentType());
+		if (slot < 0) {
+			return false;
+		}
+		if ((preferredSlot >= 0) && (preferredSlot < CEquipmentType.LOADOUT_SLOTS)
+				&& (getItemInLoadoutSlot(preferredSlot) == null)) {
+			for (final int allowed : item.getEquipmentType().getLoadoutSlots()) {
+				if (allowed == preferredSlot) {
+					slot = preferredSlot;
+				}
+			}
+		}
+		final int carried = getSlot(item);
+		final List<CAbility> itemAbilities;
+		if (carried >= 0) {
+			itemAbilities = this.itemsHeldAbilities[carried];
+			this.itemsHeldAbilities[carried] = new ArrayList<>();
+			this.itemsHeld[carried] = null;
+			for (final CAbility ability : itemAbilities) {
+				ability.setItemAbility(item, -1);
+			}
+		}
+		else if ((item.getContainedInventory() == null) && !item.isHidden()) {
+			itemAbilities = new ArrayList<>();
+			item.setHidden(true);
+			item.setContainedInventory(this, hero);
+			item.setGroundAbilities(null);
+		}
+		else {
+			return false;
+		}
+		if (this.loadout == null) {
+			this.loadout = new CItem[CEquipmentType.LOADOUT_SLOTS];
+			this.loadoutAbilities = new List[CEquipmentType.LOADOUT_SLOTS];
+		}
+		this.loadout[slot] = item;
+		this.loadoutAbilities[slot] = itemAbilities;
+		if ((carried < 0) && this.canUseItems) {
+			for (final War3ID abilityId : item.getAbilityIds()) {
+				final CAbility abilityFromItem = createItemAbility(simulation, hero, item, abilityId, -1);
+				if (abilityFromItem != null) {
+					itemAbilities.add(abilityFromItem);
+				}
+			}
+		}
+		hero.onEquipItem(simulation, item);
+		return true;
+	}
+
+	/**
+	 * Takes a worn item off and carries it in the first free slot; a unit with no free slot puts it down where it
+	 * stands. Returns the item, or null when nothing was worn in that slot.
+	 */
+	public CItem unequipSlot(final CSimulation simulation, final CUnit hero, final int loadoutSlot) {
+		final CItem item = getItemInLoadoutSlot(loadoutSlot);
+		if (item == null) {
+			return null;
+		}
+		final List<CAbility> itemAbilities = this.loadoutAbilities[loadoutSlot];
+		for (int i = 0; i < this.itemsHeld.length; i++) {
+			if (this.itemsHeld[i] == null) {
+				this.loadout[loadoutSlot] = null;
+				this.loadoutAbilities[loadoutSlot] = null;
+				this.itemsHeld[i] = item;
+				this.itemsHeldAbilities[i] = itemAbilities;
+				for (final CAbility ability : itemAbilities) {
+					ability.setItemAbility(item, i);
+				}
+				hero.onUnequipItem(simulation, item);
+				return item;
+			}
+		}
+		dropItem(simulation, hero, item, hero.getX(), hero.getY(), false);
+		return item;
 	}
 
 

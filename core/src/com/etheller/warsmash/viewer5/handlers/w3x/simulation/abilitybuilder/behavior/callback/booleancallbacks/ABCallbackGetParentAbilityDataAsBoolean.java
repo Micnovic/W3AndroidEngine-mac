@@ -8,6 +8,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.behavior.callback.integercallbacks.ABIntegerCallback;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABCondition;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABLocalStoreKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
 
@@ -25,7 +26,7 @@ public class ABCallbackGetParentAbilityDataAsBoolean extends ABCondition {
 
 		final String data = levelData.get(parentLevel - 1).getData()
 				.get(this.dataField.callback(game, caster, localStore, castId));
-		final int parsedData = Integer.parseInt(data);
+		final int parsedData = ABDataText.parseInt(data);
 		return parsedData == 1;
 	}
 

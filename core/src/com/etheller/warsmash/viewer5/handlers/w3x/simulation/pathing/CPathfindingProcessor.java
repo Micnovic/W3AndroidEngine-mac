@@ -15,6 +15,7 @@ import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWorldCollision;
@@ -70,6 +71,17 @@ public class CPathfindingProcessor {
 	 * stands and it walks to the point of that search nearest the target, sliding along what stands in its way.
 	 */
 	private static final int SHORT_SEARCH_ITERATIONS = 16;
+	/**
+	 * Measured on 1.29: ordered onto blocked ground (a wood), a unit walks round to the free point nearest the order point
+	 * only when the nearest it can get on its own side is more than sqrt(2) times as far from it, or no nearer than where
+	 * it stands (a unit already at the edge walks round); otherwise it stops on its own side, at the point nearest the
+	 * order point that the first steps of its search reached. A free point those first steps already get to (a doodad
+	 * in open ground) is simply walked to. Only for a move a player or a script ordered: a unit running from an
+	 * attacker keeps to the nearest free point.
+	 */
+	private static final int NEAR_SIDE_ITERATIONS = 512;
+	private static final double NEAR_SIDE_RATIO = StrictMath.sqrt(2);
+	private static final float NEAR_SIDE_MIN_GAIN = 32f;
 	private static final float SLIDE_STEP = 4f;
 	private static final int SLIDE_STEPS = 64;
 	private static final int WITHDRAWN_TURN_UPDATES = 2;
@@ -84,10 +96,17 @@ public class CPathfindingProcessor {
 	private static final double ENCLOSED_FLOOD_MARGIN = 1024;
 	/** A free line this many cells long from the goal means the ground round it is open: no fill is needed. */
 	private static final int ENCLOSED_OPEN_REACH = 12;
+	@SavedTransient
+	private int[] enclosedSeen;
+	@SavedTransient
+	private int[] enclosedQueue;
 	/**
 	 * Iterations one tick may spend on searches. A search that has already used that much in earlier ticks is given as
 	 * much again each tick, up to the maximum, so a long one ends in a few ticks while a short one costs what it did.
-	 * It follows from the search's own count, so it is the same on every machine.
+	 * It follows from the search's own count, so it is the same on every machine. While other searches wait behind it,
+	 * a search under way may spend the maximum: a unit of a crowd given a new order otherwise stood some seconds for the
+	 * searches of the units queued before it. A new search still starts only within the plain budget, so the other
+	 * players' searches get their turn as before.
 	 */
 	private static final int TICK_ITERATIONS = 1500;
 	private static final int TICK_ITERATIONS_MAX = 4000;
@@ -95,7 +114,7 @@ public class CPathfindingProcessor {
 	private static final int HUMAN_PRIORITY_MAX_WAIT = 200;
 	private static final double DETOUR_MIN_DISTANCE = 1024;
 	private int totalIterations = 0;
-	private int totalJobLoops = 0;
+	private long jobNanos;
 	private final int pathingGridCellCount;
 
 	public CPathfindingProcessor(final PathingGrid pathingGrid, final CWorldCollision worldCollision,
@@ -123,9 +142,6 @@ public class CPathfindingProcessor {
 		private CPathfindingProcessor reservedFor;
 		private final Reachability[] reachability = new Reachability[REACHABILITY_CACHE];
 		private int[] fillQueue;
-
-		public SharedGraph(final PathingGrid pathingGrid) {
-		}
 
 		/**
 		 * The arrays of a search are made when one needs them: most maps are searched with one of the two kinds of
@@ -206,6 +222,25 @@ public class CPathfindingProcessor {
 			return !anyOpen;
 		}
 
+		/**
+		 * Makes what the first search of a unit size would otherwise make in its first step: the search arrays and the
+		 * parts of the map the unit can walk between, all found. Parts are only told apart by number, so finding them
+		 * all ahead gives the searches the same answers.
+		 */
+		public void prewarm(final PathingGrid pathingGrid, final MovementType movementType, final float collisionSize) {
+			if ((movementType == MovementType.FLY) || (movementType == MovementType.DISABLED)) {
+				return;
+			}
+			final boolean corner = isCollisionSizeBetterSuitedForCorners(collisionSize);
+			searchGrid(pathingGrid, corner);
+			final Reachability parts = reachability(pathingGrid, movementType, collisionSize, corner);
+			for (int y = 0; y < parts.height; y++) {
+				for (int x = 0; x < parts.width; x++) {
+					parts.part(this, pathingGrid, x, y);
+				}
+			}
+		}
+
 		private Reachability reachability(final PathingGrid pathingGrid, final MovementType movementType,
 				final float collisionSize, final boolean corners) {
 			final MovementType ground = Reachability.ground(movementType);
@@ -233,9 +268,10 @@ public class CPathfindingProcessor {
 		}
 	}
 
-	// A melee game asks for four (walking units of four collision sizes); with fewer, entries pushed each other out
-	// and every search rebuilt one over the whole map.
-	private static final int REACHABILITY_CACHE = 5;
+	// A melee game asks for four walking sizes, each on cell points (reachability checks) and, for the sizes that
+	// path on corners, on corner points too, plus the naval and amphibious sizes; with fewer entries they pushed each
+	// other out and every search rebuilt one over the whole map. Entries are only allocated when asked for.
+	private static final int REACHABILITY_CACHE = 8;
 
 	/**
 	 * Which grid points of a search graph a unit can walk between, ignoring other units: the parts of the map apart
@@ -336,7 +372,7 @@ public class CPathfindingProcessor {
 			}
 		}
 
-		private static final int MAX_CHANGES = 8;
+		private static final int MAX_CHANGES = 32;
 		/** Rectangles of changed points this close (in points) are repaired as one. */
 		private static final int MERGE_GAP = 3;
 		/** Repairs only look this far past the changed points, and no larger a patch than this. */
@@ -389,13 +425,11 @@ public class CPathfindingProcessor {
 					}
 				}
 			}
-			int labelled = -1;
+			int labelledCount = 0;
+			final int[] labelled = new int[patches];
 			for (int i = 0; i < patches; i++) {
 				if (touchesLabelled(patch, i)) {
-					if (labelled >= 0) {
-						return false;
-					}
-					labelled = i;
+					labelled[labelledCount++] = i;
 				}
 				else {
 					// no part found is next to it: its points are tested again when asked for
@@ -405,9 +439,23 @@ public class CPathfindingProcessor {
 					}
 				}
 			}
-			if (labelled >= 0) {
-				repairPatch(grid, patch[labelled * 4], patch[(labelled * 4) + 1], patch[(labelled * 4) + 2],
-						patch[(labelled * 4) + 3]);
+			if (labelledCount > 1) {
+				// each patch is repaired as if it were the only change, on the state the one before it left; the
+				// points of the others not tested yet count as closed until their turn
+				for (int n = 0; n < labelledCount; n++) {
+					final int i = labelled[n];
+					for (int y = patch[(i * 4) + 1]; y <= patch[(i * 4) + 3]; y++) {
+						for (int x = patch[i * 4]; x <= patch[(i * 4) + 2]; x++) {
+							if (this.pathable[(y * this.width) + x] == UNKNOWN) {
+								this.pathable[(y * this.width) + x] = BLOCKED;
+							}
+						}
+					}
+				}
+			}
+			for (int n = 0; n < labelledCount; n++) {
+				final int i = labelled[n];
+				repairPatch(graph, grid, patch[i * 4], patch[(i * 4) + 1], patch[(i * 4) + 2], patch[(i * 4) + 3]);
 			}
 			return true;
 		}
@@ -458,8 +506,8 @@ public class CPathfindingProcessor {
 		 * and no unlabelled point is next to them. Else the parts next to the patch are forgotten, found again when
 		 * asked for.
 		 */
-		private void repairPatch(final PathingGrid grid, final int patchMinX, final int patchMinY,
-				final int patchMaxX, final int patchMaxY) {
+		private void repairPatch(final SharedGraph graph, final PathingGrid grid, final int patchMinX,
+				final int patchMinY, final int patchMaxX, final int patchMaxY) {
 			final int minX = Math.max(patchMinX - 1, 0);
 			final int maxX = Math.min(patchMaxX + 1, this.width - 1);
 			final int minY = Math.max(patchMinY - 1, 0);
@@ -478,9 +526,6 @@ public class CPathfindingProcessor {
 					}
 				}
 			}
-			final int patchWidth = (patchMaxX - patchMinX) + 1;
-			final int patchHeight = (patchMaxY - patchMinY) + 1;
-			final boolean[] gained = new boolean[patchWidth * patchHeight];
 			boolean anyLost = false;
 			boolean anyGained = false;
 			for (int y = patchMinY; y <= patchMaxY; y++) {
@@ -495,7 +540,6 @@ public class CPathfindingProcessor {
 						anyLost = true;
 					}
 					else if (nowOpen && !wasOpen) {
-						gained[((y - patchMinY) * patchWidth) + (x - patchMinX)] = true;
 						anyGained = true;
 					}
 				}
@@ -513,7 +557,7 @@ public class CPathfindingProcessor {
 				}
 			}
 			else if (anyGained) {
-				kept = growParts(grid, gained, patchMinX, patchMinY, patchWidth, minX, minY, maxX, maxY);
+				kept = growParts(graph, grid, minX, minY, maxX, maxY);
 			}
 			if (!kept) {
 				for (int i = 0; i < this.part.length; i++) {
@@ -588,14 +632,16 @@ public class CPathfindingProcessor {
 		}
 
 		/**
-		 * Labels the points that became open with the part they step from, when every point they step to is in that
-		 * one part or became open too.
+		 * Labels the points that became open, and whatever open points not yet in a part they lead to, with the part
+		 * they step from. A part found whole stays whole this way: a point it now steps to that has no part is in no
+		 * part found, so all of the points it leads to are too. Returns false when a step now joins two parts found.
 		 */
-		private boolean growParts(final PathingGrid grid, final boolean[] gained, final int patchMinX,
-				final int patchMinY, final int patchWidth, final int minX, final int minY, final int maxX,
-				final int maxY) {
-			final int patchHeight = gained.length / patchWidth;
-			final int[] queue = new int[(((maxX - minX) + 1) * ((maxY - minY) + 1)) + gained.length];
+		private boolean growParts(final SharedGraph graph, final PathingGrid grid, final int minX, final int minY,
+				final int maxX, final int maxY) {
+			if ((graph.fillQueue == null) || (graph.fillQueue.length < this.part.length)) {
+				graph.fillQueue = new int[this.part.length];
+			}
+			final int[] queue = graph.fillQueue;
 			int head = 0;
 			int tail = 0;
 			for (int y = minY; y <= maxY; y++) {
@@ -622,10 +668,7 @@ public class CPathfindingProcessor {
 					if (other == label) {
 						continue;
 					}
-					final int gx = nx - patchMinX;
-					final int gy = ny - patchMinY;
-					if ((other != 0) || (gx < 0) || (gy < 0) || (gx >= patchWidth) || (gy >= patchHeight)
-							|| !gained[(gy * patchWidth) + gx]) {
+					if (other != 0) {
 						return false;
 					}
 					this.part[next] = label;
@@ -682,26 +725,94 @@ public class CPathfindingProcessor {
 			int tail = 0;
 			this.part[start] = id;
 			queue[tail++] = start;
+			final int[] part = this.part;
+			final int width = this.width;
 			while (head < tail) {
 				final int index = queue[head++];
-				final int cx = index % this.width;
-				final int cy = index / this.width;
+				final int cx = index % width;
+				final int cy = index / width;
+				if ((cx > 0) && (cy > 0) && (cx < (width - 1)) && (cy < (this.height - 1))) {
+					// the eight points around it are tested once each; a step needs the point it goes to and
+					// the two it passes between
+					final boolean north = open(grid, cx, cy + 1);
+					final boolean south = open(grid, cx, cy - 1);
+					final boolean east = open(grid, cx + 1, cy);
+					final boolean west = open(grid, cx - 1, cy);
+					if (north && (part[index + width] == 0)) {
+						part[index + width] = id;
+						queue[tail++] = index + width;
+					}
+					if (south && (part[index - width] == 0)) {
+						part[index - width] = id;
+						queue[tail++] = index - width;
+					}
+					if (east && (part[index + 1] == 0)) {
+						part[index + 1] = id;
+						queue[tail++] = index + 1;
+					}
+					if (west && (part[index - 1] == 0)) {
+						part[index - 1] = id;
+						queue[tail++] = index - 1;
+					}
+					if (north && east && (part[index + width + 1] == 0) && open(grid, cx + 1, cy + 1)) {
+						part[index + width + 1] = id;
+						queue[tail++] = index + width + 1;
+					}
+					if (north && west && (part[index + width - 1] == 0) && open(grid, cx - 1, cy + 1)) {
+						part[index + width - 1] = id;
+						queue[tail++] = index + width - 1;
+					}
+					if (south && east && (part[index - width + 1] == 0) && open(grid, cx + 1, cy - 1)) {
+						part[index - width + 1] = id;
+						queue[tail++] = index - width + 1;
+					}
+					if (south && west && (part[index - width - 1] == 0) && open(grid, cx - 1, cy - 1)) {
+						part[index - width - 1] = id;
+						queue[tail++] = index - width - 1;
+					}
+					continue;
+				}
 				for (final Direction direction : Direction.VALUES) {
 					final int nx = cx + direction.xOffset;
 					final int ny = cy + direction.yOffset;
 					if (!open(grid, nx, ny)) {
 						continue;
 					}
-					final int next = (ny * this.width) + nx;
-					if ((this.part[next] != 0) || !open(grid, cx, ny) || !open(grid, nx, cy)) {
+					final int next = (ny * width) + nx;
+					if ((part[next] != 0) || !open(grid, cx, ny) || !open(grid, nx, cy)) {
 						continue;
 					}
-					this.part[next] = id;
+					part[next] = id;
 					queue[tail++] = next;
 				}
 			}
 			return id;
 		}
+	}
+
+	private boolean staysOnNearSide(final PathfindingJob job) {
+		job.nearSideDecided = true;
+		if ((job.nearSideCell < 0) || (job.nearSideDistance > (NEAR_SIDE_RATIO
+				* StrictMath.hypot(job.goalX - job.goal.x, job.goalY - job.goal.y)))) {
+			return false;
+		}
+		job.nearSideStays = job.nearSideDistance >= (StrictMath.hypot(job.startX - job.goal.x,
+				job.startY - job.goal.y) - NEAR_SIDE_MIN_GAIN);
+		// at the edge already: a new order walks round, a search on the way (the unit has come to the edge) stops
+		return !job.nearSideStays || !job.queueItem.isFirstSearch();
+	}
+
+	private void finishOnNearSide(final PathfindingJob job, final CSimulation simulation) {
+		final LinkedList<CPathPoint> path;
+		if (job.nearSideStays) {
+			path = new LinkedList<>();
+			path.add(new CPathPoint(job.startX, job.startY));
+		}
+		else {
+			path = buildPath(job, job.nearSideCell, false);
+		}
+		finishJob();
+		job.queueItem.pathFound(job.goal, path, false, simulation);
 	}
 
 	private void finishJob() {
@@ -1110,6 +1221,16 @@ public class CPathfindingProcessor {
 	}
 
 	public void update(final CSimulation simulation) {
+		if (!PerfStats.ENABLED) {
+			updateJobs(simulation);
+			return;
+		}
+		final long start = System.nanoTime();
+		updateJobs(simulation);
+		this.jobNanos += System.nanoTime() - start;
+	}
+
+	private void updateJobs(final CSimulation simulation) {
 		this.gameTurnTick = simulation.getGameTurnTick();
 		if (!this.withdrawnTurns.isEmpty()) {
 			final Iterator<int[]> withdrawn = this.withdrawnTurns.values().iterator();
@@ -1141,6 +1262,9 @@ public class CPathfindingProcessor {
 				final PathfindingJob ownerHead = graph.owner.moveQueue.peek();
 				if ((ownerHead != null) && ownerHead.jobStarted && !ownerHead.humanOrder && !ownerHead.preempted) {
 					ownerHead.preempted = true;
+					if (PerfStats.ENABLED) {
+						PerfStats.pathDiscarded(graph.owner.totalIterations, graph.owner.jobNanos);
+					}
 					ownerHead.jobStarted = false;
 					ownerHead.searchGrid = null;
 					graph.owner = null;
@@ -1156,11 +1280,10 @@ public class CPathfindingProcessor {
 		}
 		int workIterations = 0;
 		JobsLoop: while (!this.moveQueue.isEmpty()) {
-			this.totalJobLoops++;
 			final PathfindingJob job = this.moveQueue.peek();
-			final int tickBudget = job.jobStarted
-					? Math.min(TICK_ITERATIONS_MAX, Math.max(TICK_ITERATIONS, this.totalIterations))
-					: TICK_ITERATIONS;
+			final int tickBudget = !job.jobStarted ? TICK_ITERATIONS
+					: (this.moveQueue.size() > 1) ? TICK_ITERATIONS_MAX
+							: Math.min(TICK_ITERATIONS_MAX, Math.max(TICK_ITERATIONS, this.totalIterations));
 			if (job.jobStarted && (job.searchGrid == null)) {
 				// a search saved before its state moved into the shared arrays starts again
 				job.jobStarted = false;
@@ -1175,7 +1298,7 @@ public class CPathfindingProcessor {
 				graph.reservedFor = null;
 				this.pathfindJobId = ++graph.lastJobId;
 				this.totalIterations = 0;
-				this.totalJobLoops = 0;
+				this.jobNanos = 0;
 				job.jobStarted = true;
 				PerfStats.pathJob();
 				workIterations += 5; // setup of job predicted cost
@@ -1192,6 +1315,8 @@ public class CPathfindingProcessor {
 				job.bestGLimit = Double.MAX_VALUE;
 				job.limitExtended = false;
 				job.metScriptedTerrain = false;
+				job.nearSideCell = -1;
+				job.nearSideDistance = Float.MAX_VALUE;
 				job.shortSearch = searchesShort(simulation, job.ignoreIntersectionsWithThisUnit);
 				if (!job.shortSearch) {
 					if (!this.pathingGrid.isPathable(job.goalX, job.goalY, job.movementType, job.collisionSize)) {
@@ -1251,6 +1376,8 @@ public class CPathfindingProcessor {
 				}
 				final double straightCells = StrictMath.hypot(job.goalX - job.startX, job.goalY - job.startY) / 32;
 				job.straightCells = straightCells;
+				job.nearSideDecided = job.shortSearch || !job.goalOnBlockedGround || (job.queueItem == null)
+						|| !job.queueItem.isOrderedPointMove();
 				job.iterationLimit = job.shortSearch ? SHORT_SEARCH_ITERATIONS
 						: (int) Math.min(this.pathingGridCellCount,
 								Math.max(MIN_SEARCH_ITERATIONS, 4 * straightCells * straightCells));
@@ -1293,8 +1420,11 @@ public class CPathfindingProcessor {
 						}
 					}
 				}
-				final int startGridY = job.gridMapping.getY(this.pathingGrid, job.startY);
-				final int startGridX = job.gridMapping.getX(this.pathingGrid, job.startX);
+				// a unit a script has put off the map searches from the nearest grid point instead of past the arrays
+				final int startGridY = Math.min(Math.max(0, job.gridMapping.getY(this.pathingGrid, job.startY)),
+						grid.height - 1);
+				final int startGridX = Math.min(Math.max(0, job.gridMapping.getX(this.pathingGrid, job.startX)),
+						grid.width - 1);
 				job.enclosedGoalRadius = 0;
 				if ((job.weightForHittingWalls >= 1E9f) && !job.goalNodesBlocked && !job.shortSearch) {
 					job.enclosedGoalRadius = enclosedGoalRadius(job, grid,
@@ -1397,6 +1527,13 @@ public class CPathfindingProcessor {
 						}
 					}
 					else {
+						if (!job.nearSideDecided) {
+							final float distanceToTarget = (float) distance(currentX, currentY, job.goal.x, job.goal.y);
+							if (distanceToTarget < job.nearSideDistance) {
+								job.nearSideDistance = distanceToTarget;
+								job.nearSideCell = current;
+							}
+						}
 						final float distanceToGoal = (float) distance(currentX, currentY, job.goalX, job.goalY);
 						if (distanceToGoal < job.bestDistance) {
 							job.bestDistance = distanceToGoal;
@@ -1448,6 +1585,12 @@ public class CPathfindingProcessor {
 				workIterations++;
 				this.totalIterations++;
 				PerfStats.pathIteration();
+				if (!job.nearSideDecided
+						&& (this.totalIterations >= Math.max(NEAR_SIDE_ITERATIONS, job.iterationLimit / 8))
+						&& staysOnNearSide(job)) {
+					finishOnNearSide(job, simulation);
+					continue JobsLoop;
+				}
 				// Measured: the original walks across a whole melee map; a fixed cap stopped such paths after a few
 				// steps. A short chase into a crowd of units has no way through and searched the whole map each time
 				// a unit in a fight moved, so the limit grows with the distance instead.
@@ -1578,8 +1721,15 @@ public class CPathfindingProcessor {
 			return 0;
 		}
 		final int seenSize = ENCLOSED_POCKET_CELLS * 4;
-		final int[] seen = new int[seenSize];
-		final int[] queue = new int[ENCLOSED_POCKET_CELLS];
+		if (this.enclosedSeen == null) {
+			this.enclosedSeen = new int[seenSize];
+			this.enclosedQueue = new int[ENCLOSED_POCKET_CELLS];
+		}
+		else {
+			Arrays.fill(this.enclosedSeen, 0);
+		}
+		final int[] seen = this.enclosedSeen;
+		final int[] queue = this.enclosedQueue;
 		int head = 0;
 		int tail = 0;
 		queue[tail++] = goalCell;
@@ -1706,17 +1856,22 @@ public class CPathfindingProcessor {
 		final int maxRing = Math.max(reach.width, reach.height);
 		for (int ring = 0; (ring <= maxRing) && (((ring - 1) * 32) <= bestDistance); ring++) {
 			for (int i = -ring; i <= ring; i++) {
-				for (int j = -ring; j <= ring; j++) {
-					if ((Math.abs(i) != ring) && (Math.abs(j) != ring)) {
-						continue;
-					}
+				// Only the cells of the ring itself: the whole row on its two sides, the two ends in between.
+				final int jStep = (Math.abs(i) == ring) ? 1 : Math.max(1, 2 * ring);
+				for (int j = -ring; j <= ring; j += jStep) {
 					final int x = goalX + i;
 					final int y = goalY + j;
 					if ((x < 0) || (y < 0) || (x >= reach.width) || (y >= reach.height)) {
 						continue;
 					}
-					final double distance = StrictMath.hypot(reach.worldX(this.pathingGrid, x) - job.goalX,
-							reach.worldY(this.pathingGrid, y) - job.goalY);
+					final float offsetX = reach.worldX(this.pathingGrid, x) - job.goalX;
+					final float offsetY = reach.worldY(this.pathingGrid, y) - job.goalY;
+					// hypot is exact to within an ulp, so a square clearly above the best cannot be nearer
+					if (((double) offsetX * offsetX) + ((double) offsetY * offsetY) > (bestDistance * bestDistance
+							* 1.0000001)) {
+						continue;
+					}
+					final double distance = StrictMath.hypot(offsetX, offsetY);
 					if ((distance < bestDistance) && contains(startParts, startPartCount, reach.label(x, y))) {
 						bestDistance = distance;
 						bestX = x;
@@ -2262,6 +2417,10 @@ public class CPathfindingProcessor {
 		int bestCell;
 		float bestDistance;
 		double bestGLimit;
+		boolean nearSideDecided;
+		int nearSideCell;
+		float nearSideDistance;
+		boolean nearSideStays;
 		SearchGrid searchGrid;
 		GridMapping gridMapping;
 		int startGridMinX;

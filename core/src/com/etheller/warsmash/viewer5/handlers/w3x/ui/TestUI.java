@@ -33,7 +33,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.sound.KeyedSounds;
 
 public class TestUI {
 	private static final Vector2 screenCoordsVector = new Vector2();
-	private static final boolean ENABLE_NOT_YET_IMPLEMENTED_BUTTONS = false;
 
 	private final DataSource dataSource;
 	private final Scene uiScene;
@@ -117,13 +116,6 @@ public class TestUI {
 		this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
 
 		this.loadSounds();
-	}
-
-	private static String getStringWithWTS(final WTS wts, String string) {
-		if (string.startsWith("TRIGSTR_")) {
-			string = wts.get(Integer.parseInt(string.substring(8)));
-		}
-		return string;
 	}
 
 	public void resize() {

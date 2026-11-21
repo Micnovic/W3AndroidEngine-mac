@@ -86,10 +86,15 @@ public final class FaceFxLibrary {
 		return index().find((actorPath == null) ? null : speakerOfActor(actorPath), soundPath);
 	}
 
+	/** Lists the animations now, which took a frame of a tenth of a second and more at the first line. */
+	public void prepare() {
+		index();
+	}
+
 	private synchronized FaceFxAnimIndex index() {
 		if (this.index == null) {
 			this.index = new FaceFxAnimIndex(
-					this.data.getListfile(path -> path.toLowerCase(Locale.ROOT).endsWith(FaceFxAnimIndex.ANIMSET_EXTENSION)),
+					this.data.getListfileByExtension(FaceFxAnimIndex.ANIMSET_EXTENSION),
 					this::read);
 		}
 		return this.index;

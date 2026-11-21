@@ -9,7 +9,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.nightelf.root.CAbilityRoot;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityTypeLevelData;
 
 public class CAbilityTypeRoot extends CAbilityType<CAbilityTypeRootLevelData> {
 
@@ -28,7 +27,7 @@ public class CAbilityTypeRoot extends CAbilityType<CAbilityTypeRootLevelData> {
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
 
-		final CAbilityTypeRootLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeRootLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityRoot heroAbility = (CAbilityRoot) (existingAbility);
 
 		heroAbility.setRootedWeaponsAttackBits(levelData.getRootedWeaponsAttackBits());

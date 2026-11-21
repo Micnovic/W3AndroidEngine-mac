@@ -1,10 +1,8 @@
 package com.etheller.warsmash.datasources;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -40,11 +38,14 @@ import java.util.concurrent.FutureTask;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
+import com.badlogic.gdx.utils.IntSet;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.PerfStats;
+import com.etheller.warsmash.util.StreamBytes;
 import com.hiveworkshop.blizzard.casc.info.Info;
 import com.hiveworkshop.blizzard.casc.io.WarcraftIIICASC;
 import com.hiveworkshop.blizzard.casc.io.WarcraftIIICASC.FileSystem;
+import com.hiveworkshop.blizzard.casc.vfs.VirtualFileSystem.PathResult;
 import com.hiveworkshop.json.JSONArray;
 import com.hiveworkshop.json.JSONObject;
 import com.hiveworkshop.json.JSONTokener;
@@ -53,6 +54,8 @@ public class CascDataSource implements DataSource {
 	private final String[] prefixes;
 	private final Mount mount;
 	private Map<String, String> fileAliases = Collections.emptyMap();
+	/** The hash codes of the alias sources, so that a path without an alias is looked up without normalizing it. */
+	private IntSet aliasHashes = new IntSet();
 	private boolean closed;
 
 	public CascDataSource(final String warcraft3InstallPath, final String[] prefixes, final String product,
@@ -74,6 +77,10 @@ public class CascDataSource implements DataSource {
 			if (this.has("filealiases.json")) {
 				try (InputStream stream = this.getResourceAsStream("filealiases.json")) {
 					this.fileAliases = cachedFileAliases(stream);
+					this.aliasHashes = new IntSet(this.fileAliases.size());
+					for (final String source : this.fileAliases.keySet()) {
+						this.aliasHashes.add(source.hashCode());
+					}
 				}
 			}
 		}
@@ -146,7 +153,7 @@ public class CascDataSource implements DataSource {
 	 * data, and parsing the same file for each took longer than reading the map.
 	 */
 	static Map<String, String> cachedFileAliases(final InputStream stream) throws IOException {
-		final byte[] bytes = readAll(stream);
+		final byte[] bytes = StreamBytes.readAll(stream);
 		synchronized (PARSED_ALIASES) {
 			for (final Iterator<ParsedAliases> iterator = PARSED_ALIASES.iterator(); iterator.hasNext();) {
 				final ParsedAliases parsed = iterator.next();
@@ -169,20 +176,16 @@ public class CascDataSource implements DataSource {
 		return readOnly;
 	}
 
-	private static byte[] readAll(final InputStream stream) throws IOException {
-		final ByteArrayOutputStream out = new ByteArrayOutputStream();
-		final byte[] buffer = new byte[8192];
-		int read;
-		while ((read = stream.read(buffer)) != -1) {
-			out.write(buffer, 0, read);
-		}
-		return out.toByteArray();
-	}
-
 	@Override
 	public InputStream getResourceAsStream(final String filepath) {
 		final String readable = findReadable(filepath);
 		return readable == null ? null : internalGetResourceAsStream(readable);
+	}
+
+	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		final String readable = findReadable(filepath);
+		return readable == null ? null : () -> internalGetResourceAsStream(readable);
 	}
 
 	/**
@@ -191,20 +194,67 @@ public class CascDataSource implements DataSource {
 	 * answered from the index of listed paths, so the answer is not kept for each path asked.
 	 */
 	private String findReadable(final String filepath) {
-		String path = normalizePath(filepath);
-		final String resolvedAlias = this.fileAliases.get(path);
-		if (resolvedAlias != null) {
-			path = resolvedAlias;
-		}
+		final String path = resolveAlias(filepath);
 		for (final String prefix : this.prefixes) {
 			if (isReadable(prefix, path)) {
-				return prefix + "\\" + path;
+				return prefix + "\\" + normalizePath(path);
 			}
 		}
 		if (isReadable(null, path)) {
-			return path;
+			return normalizePath(path);
 		}
 		return null;
+	}
+
+	/**
+	 * The alias target of a path, or the path as asked. The index finds a path in any letter case and with either
+	 * separator, so it is not normalized unless some alias may apply to it.
+	 */
+	private String resolveAlias(final String filepath) {
+		if (this.fileAliases.isEmpty()) {
+			return filepath;
+		}
+		final int hash = normalizedHash(filepath);
+		if ((hash != NOT_ASCII) && !this.aliasHashes.contains(hash)) {
+			return filepath;
+		}
+		final String resolvedAlias = this.fileAliases.get(normalizePath(filepath));
+		return resolvedAlias != null ? resolvedAlias : filepath;
+	}
+
+	private boolean isFound(final String filepath) {
+		final String path = resolveAlias(filepath);
+		for (final String prefix : this.prefixes) {
+			if (isReadable(prefix, path)) {
+				return true;
+			}
+		}
+		return isReadable(null, path);
+	}
+
+	static final int NOT_ASCII = 0;
+
+	/**
+	 * The hash code of normalizePath(path) without making it, or NOT_ASCII for a path that is not plain ASCII (or
+	 * whose form happens to hash to it).
+	 */
+	static int normalizedHash(final String path) {
+		int hash = 0;
+		final int length = path.length();
+		for (int i = 0; i < length; i++) {
+			char c = path.charAt(i);
+			if (c >= 128) {
+				return NOT_ASCII;
+			}
+			if ((c == '/') || (c == ':')) {
+				c = '\\';
+			}
+			else if ((c >= 'A') && (c <= 'Z')) {
+				c += 'a' - 'A';
+			}
+			hash = (31 * hash) + c;
+		}
+		return hash;
 	}
 
 	/** The path as the storage names files: lower case, with backslashes. */
@@ -236,13 +286,15 @@ public class CascDataSource implements DataSource {
 	private InputStream internalGetResourceAsStream(final String tempFilepath) {
 		try {
 			if (isReadable(tempFilepath)) {
-				final InputStream stream = this.mount.fileSystem.openFileStream(tempFilepath, STREAM_MIN_BYTES);
+				final PathResult file = this.mount.fileSystem.resolveStoredFile(tempFilepath);
+				final InputStream stream = this.mount.fileSystem.openFileStream(file, STREAM_MIN_BYTES);
 				if (stream != null) {
-					return new BufferedInputStream(stream, STREAM_BUFFER_BYTES);
+					return new IndependentStream.Buffered(stream, STREAM_BUFFER_BYTES);
 				}
-				final ByteBuffer buffer = this.mount.fileSystem.readFileData(tempFilepath);
+				final ByteBuffer buffer = this.mount.fileSystem.readFileData(file);
 				if (buffer.hasArray()) {
-					return new ByteArrayInputStream(buffer.array());
+					// The buffer is read for this request alone, so a reader of the whole file may keep its array.
+					return new StreamBytes.Owned(buffer.array());
 				}
 				final byte[] data = new byte[buffer.remaining()];
 				buffer.clear();
@@ -368,16 +420,14 @@ public class CascDataSource implements DataSource {
 
 	@Override
 	public boolean has(final String filepath) {
-		return findReadable(filepath) != null;
+		return isFound(filepath);
 	}
 
 	@Override
 	public String findFirst(final String... filepaths) {
 		final String[] resolvedPaths = new String[filepaths.length];
 		for (int i = 0; i < filepaths.length; i++) {
-			final String filepath = normalizePath(filepaths[i]);
-			final String resolvedAlias = this.fileAliases.get(filepath);
-			resolvedPaths[i] = resolvedAlias != null ? resolvedAlias : filepath;
+			resolvedPaths[i] = resolveAlias(filepaths[i]);
 		}
 		for (final String prefix : this.prefixes) {
 			for (int i = 0; i < resolvedPaths.length; i++) {
@@ -414,19 +464,27 @@ public class CascDataSource implements DataSource {
 			return known == READABLE;
 		}
 		try {
-			final boolean readable = this.mount.fileSystem
-					.isReadableFile(prefix == null ? path : prefix + "\\" + path);
+			final boolean readable = this.mount.fileSystem.isReadableFile(storedPath(prefix, path));
 			this.mount.readable[index] = readable ? READABLE : UNREADABLE;
 			return readable;
 		}
 		catch (final IOException e) {
-			throw new RuntimeException("CASC parser error for: " + (prefix == null ? path : prefix + "\\" + path), e);
+			throw new RuntimeException("CASC parser error for: " + storedPath(prefix, path), e);
 		}
+	}
+
+	private static String storedPath(final String prefix, final String path) {
+		return prefix == null ? normalizePath(path) : prefix + "\\" + normalizePath(path);
 	}
 
 	@Override
 	public Collection<String> getListfile() {
 		return this.mount.listFile;
+	}
+
+	@Override
+	public Collection<String> getListfileByExtension(final String extension) {
+		return this.mount.pathsEndingWith(extension);
 	}
 
 	@Override
@@ -465,6 +523,21 @@ public class CascDataSource implements DataSource {
 		final ArrayDeque<String> extractionOrder = new ArrayDeque<>();
 		long extractedBytes;
 		private int users;
+		/** The listed paths of each extension asked for, in the order of the list; the list does not change. */
+		private final Map<String, List<String>> pathsByExtension = new ConcurrentHashMap<>();
+
+		List<String> pathsEndingWith(final String extension) {
+			return this.pathsByExtension.computeIfAbsent(extension.toLowerCase(Locale.ROOT), (key) -> {
+				final DataSource.PathFilter filter = DataSource.PathFilter.endingWith(extension);
+				final List<String> found = new ArrayList<>();
+				for (final String path : this.listFile) {
+					if (filter.test(path, 0)) {
+						found.add(path);
+					}
+				}
+				return Collections.unmodifiableList(found);
+			});
+		}
 
 		void trimExtracted(final String keep) {
 			while ((this.extractedBytes > EXTRACT_LIMIT_BYTES) && (this.extractionOrder.size() > 1)) {

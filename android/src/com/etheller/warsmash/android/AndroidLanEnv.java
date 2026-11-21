@@ -11,6 +11,7 @@ import com.etheller.warsmash.input.touch.ControlScheme;
 import com.etheller.warsmash.lan.LanGameStart;
 import com.etheller.warsmash.lan.LanSessions;
 import com.etheller.warsmash.launcher.LaunchRequest;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.launcher.lan.LanLauncherModel;
 import com.etheller.warsmash.launcher.lan.LanPortraitId;
@@ -117,6 +118,16 @@ final class AndroidLanEnv implements LanLauncherModel.Env {
 		if (activity != null) {
 			activity.launchGame(request, LauncherActivity.PAGE_LAN);
 		}
+	}
+
+	@Override
+	public void mapIssue(final File map, final java.util.function.Consumer<MapIssue> done) {
+		final LauncherActivity activity = LauncherActivity.current();
+		if ((map == null) || (activity == null) || (activity.catalog == null)) {
+			done.accept(MapIssue.NONE);
+			return;
+		}
+		activity.catalog.mapIssue(map.getAbsolutePath(), done);
 	}
 
 	@Override

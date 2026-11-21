@@ -132,6 +132,30 @@ public class WarcraftIIICASC implements AutoCloseable {
 		 * @throws IOException If an error occurs when reading the file.
 		 */
 		public ByteBuffer readFileData(final String filePath) throws IOException {
+			return readFileData(resolveStoredFile(filePath));
+		}
+
+		/**
+		 * Fully read a file found with {@link #resolveStoredFile} into memory.
+		 *
+		 * @param file the file.
+		 * @return Buffer containing file data.
+		 * @throws IOException If an error occurs when reading the file.
+		 */
+		public ByteBuffer readFileData(final PathResult file) throws IOException {
+			final ByteBuffer fileBuffer = file.readFile(null);
+			fileBuffer.flip();
+			return fileBuffer;
+		}
+
+		/**
+		 * Resolves the file at the specified file path, to be opened or read without resolving it again.
+		 *
+		 * @param filePath File path of the file.
+		 * @return the file.
+		 * @throws IOException If the path is not a file in local storage, or an error occurs when resolving it.
+		 */
+		public PathResult resolveStoredFile(final String filePath) throws IOException {
 			final byte[][] pathFragments = VirtualFileSystem.convertFilePath(filePath);
 			final PathResult resolveResult = vfs.resolvePath(pathFragments);
 
@@ -140,10 +164,7 @@ public class WarcraftIIICASC implements AutoCloseable {
 			} else if (!resolveResult.existsInStorage()) {
 				throw new FileNotFoundException("the specified file is not in local storage");
 			}
-
-			final ByteBuffer fileBuffer = resolveResult.readFile(null);
-			fileBuffer.flip();
-			return fileBuffer;
+			return resolveResult;
 		}
 
 		/**
@@ -156,18 +177,22 @@ public class WarcraftIIICASC implements AutoCloseable {
 		 * @throws IOException If an error occurs when opening the file.
 		 */
 		public InputStream openFileStream(final String filePath, final long minimumSize) throws IOException {
-			final byte[][] pathFragments = VirtualFileSystem.convertFilePath(filePath);
-			final PathResult resolveResult = vfs.resolvePath(pathFragments);
+			return openFileStream(resolveStoredFile(filePath), minimumSize);
+		}
 
-			if (!resolveResult.isFile()) {
-				throw new FileNotFoundException("the specified file path does not resolve to a file");
-			} else if (!resolveResult.existsInStorage()) {
-				throw new FileNotFoundException("the specified file is not in local storage");
-			}
-			if (resolveResult.getFileSize() < minimumSize) {
+		/**
+		 * Opens a file found with {@link #resolveStoredFile} as {@link #openFileStream(String, long)} does.
+		 *
+		 * @param file        the file.
+		 * @param minimumSize Smaller files give null.
+		 * @return the stream, or null when the file is to be read with {@link #readFileData}
+		 * @throws IOException If an error occurs when opening the file.
+		 */
+		public InputStream openFileStream(final PathResult file, final long minimumSize) throws IOException {
+			if (file.getFileSize() < minimumSize) {
 				return null;
 			}
-			return resolveResult.openStream();
+			return file.openStream();
 		}
 	}
 

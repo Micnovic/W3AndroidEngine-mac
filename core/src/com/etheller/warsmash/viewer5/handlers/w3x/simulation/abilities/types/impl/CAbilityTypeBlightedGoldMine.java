@@ -26,7 +26,7 @@ public class CAbilityTypeBlightedGoldMine extends CAbilityType<CAbilityTypeBligh
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeBlightedGoldMineLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeBlightedGoldMineLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityBlightedGoldMine heroAbility = ((CAbilityBlightedGoldMine) existingAbility);
 
 		heroAbility.setGoldPerInterval(levelData.getGoldPerInterval());

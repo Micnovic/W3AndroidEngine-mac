@@ -142,7 +142,7 @@ final class AIProduction {
 		final List<CUnit> bases = new ArrayList<>();
 		final List<CUnit> producers = new ArrayList<>();
 		boolean anyBase = false;
-		for (final CUnit unit : AIUnits.inClaimOrder(ai.simulation)) {
+		for (final CUnit unit : AIUnits.inClaimOrder(ai)) {
 			if (!ai.isOurs(unit) || ((town != -1) && (AITowns.townOf(ai, unit.getX(), unit.getY()) != town))) {
 				continue;
 			}
@@ -170,6 +170,10 @@ final class AIProduction {
 				if ((base.getBuildQueue()[0] == null) && base.order(ai.simulation, typeIdValue, null)) {
 					started++;
 				}
+			}
+			if (started > 0) {
+				// An upgrading structure counts as its new type at once.
+				ai.countCache.clear();
 			}
 			return started > 0;
 		}
@@ -244,7 +248,9 @@ final class AIProduction {
 			if (altar == null) {
 				return false;
 			}
-			altar.order(ai.simulation, deadHero.getHandleId(), null);
+			if (altar.order(ai.simulation, deadHero.getHandleId(), null)) {
+				ai.countCache.clear();
+			}
 			return true;
 		}
 		if (!ai.newHeroes || producers.isEmpty() || !requirementsMet(ai, type)) {
@@ -356,7 +362,7 @@ final class AIProduction {
 		CUnit first = null;
 		CUnit second = null;
 		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (ai.isArmyUnit(unit) && AIUnits.isIdle(unit) && !ai.attackCaptain.getMembers().contains(unit)) {
+			if (ai.isArmyUnit(unit) && AIUnits.isIdle(unit) && !ai.attackCaptain.isMember(unit)) {
 				if ((first == null) && unit.getTypeId().equals(a)) {
 					first = unit;
 				}

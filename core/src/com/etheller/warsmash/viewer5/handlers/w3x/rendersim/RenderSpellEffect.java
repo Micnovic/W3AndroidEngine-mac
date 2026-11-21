@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -24,11 +25,11 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	public static final PrimaryTag[] DEATH_ONLY = { PrimaryTag.DEATH };
 	public static final PrimaryTag[] STAND_THEN_DEATH = { PrimaryTag.STAND, PrimaryTag.DEATH };
 	private SequenceLoopMode sequenceLoopMode;
-	private final MdxComplexInstance modelInstance;
+	private MdxComplexInstance modelInstance;
 	private PrimaryTag[] animationQueue;
 	private final EnumSet<SecondaryTag> requiredAnimationNames;
 	private int animationQueueIndex;
-	private final List<Sequence> sequences;
+	private List<Sequence> sequences;
 	private boolean killWhenDone = true;
 	private String modelName;
 	private CWidget widget;
@@ -46,8 +47,13 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	private float scriptZ;
 	private float scriptPitch;
 	private float scriptRoll;
+	private final float[] scriptScale = { 1, 1, 1 };
+	/** The height it was last drawn at, for what asks after the model is gone. */
+	private float lastLocalZ;
 	private final EnumSet<SecondaryTag> scriptSubAnimations = EnumSet.noneOf(SecondaryTag.class);
 	private final List<Integer> scriptQueuedSequences = new java.util.ArrayList<>();
+	/** Whether the model is still being read: the effect starts its animations when it is built. */
+	private boolean waiting;
 
 	public RenderSpellEffect(final MdxComplexInstance modelInstance, final War3MapViewer war3MapViewer, final float yaw,
 			final PrimaryTag[] animationQueue, final EnumSet<SecondaryTag> requiredAnimationNames) {
@@ -62,6 +68,17 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 		this.modelInstance.setSequenceLoopMode(sequenceLoopMode);
 		this.modelInstance.localRotation.setFromAxisRad(0, 0, 1, yaw);
 		this.modelInstance.sequenceEnded = true;
+		if (modelInstance.isWaiting()) {
+			this.waiting = true;
+			modelInstance.modelLoadedObserver = this::modelBuilt;
+		}
+		else {
+			start();
+		}
+	}
+
+	private void start() {
+		final MdxModel model = (MdxModel) this.modelInstance.model;
 		playNextAnimation();
 		if ((this.modelInstance.sequence == -1) && (model.getSequences().size() > 0)) {
 			this.modelInstance.setSequence(0);
@@ -69,8 +86,29 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 		}
 	}
 
+	private void modelBuilt() {
+		this.waiting = false;
+		// an effect taken away while it waited has nothing to play
+		if ((this.modelInstance != null) && (this.animationQueue.length > 0)) {
+			start();
+		}
+	}
+
+	/** Builds the model now when it is still being read, for what needs its sequences. */
+	private void ensureBuilt() {
+		if (this.waiting) {
+			((MdxModel) this.modelInstance.model).finishPending();
+		}
+	}
+
 	@Override
 	public boolean updateAnimations(final War3MapViewer war3MapViewer, final float deltaTime) {
+		if (this.modelInstance == null) {
+			return true;
+		}
+		if (this.waiting) {
+			return false;
+		}
 		if (this.modelInstance.sequenceEnded && !this.scriptQueuedSequences.isEmpty()
 				&& (this.animationQueueIndex >= this.animationQueue.length)) {
 			playScriptSequence(this.scriptQueuedSequences.remove(0));
@@ -83,6 +121,11 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 					this.modelInstance.setParent(null);
 				}
 				war3MapViewer.worldScene.removeInstance(this.modelInstance);
+				this.lastLocalZ = this.modelInstance.localLocation.z;
+				// A script may keep the handle for good; it must not keep the model with it.
+				this.modelInstance = null;
+				this.sequences = Collections.emptyList();
+				return true;
 			} else {
 				this.animationQueueIndex = 0;
 				return false;
@@ -100,6 +143,9 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	}
 
 	public void applySequence() {
+		if ((this.modelInstance == null) || this.waiting) {
+			return;
+		}
 		final PrimaryTag tag = this.animationQueue[this.animationQueueIndex];
 		final IndexedSequence sequence = SequenceUtils.selectSequence(tag, requiredAnimationNames, this.sequences,
 				true);
@@ -118,6 +164,10 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 		this.animationQueue = animations;
 		this.animationQueueIndex = 0;
 		setKillWhenDone(killWhenDone);
+		if (this.waiting) {
+			// the first of them is played when the model is built
+			return;
+		}
 		applySequence();
 		this.animationQueueIndex++;
 	}
@@ -125,6 +175,9 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	@Override
 	public void setKillWhenDone(final boolean killWhenDone) {
 		this.killWhenDone = killWhenDone;
+		if (this.modelInstance == null) {
+			return;
+		}
 		if (killWhenDone) {
 			sequenceLoopMode = SequenceLoopMode.NEVER_LOOP;
 			this.modelInstance.setSequenceLoopMode(SequenceLoopMode.NEVER_LOOP);
@@ -171,6 +224,9 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	}
 
 	public float getLocalZ() {
+		if (this.modelInstance == null) {
+			return this.lastLocalZ;
+		}
 		return this.modelInstance.localLocation.z;
 	}
 
@@ -184,12 +240,15 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 
 	/** Stays until something ends it, unlike an effect that plays once and is gone. */
 	public boolean isLasting() {
-		return (this.modelName != null) && (this.sequenceLoopMode != SequenceLoopMode.NEVER_LOOP)
+		return (this.modelInstance != null) && (this.modelName != null) && (this.sequenceLoopMode != SequenceLoopMode.NEVER_LOOP)
 				&& (this.animationQueue.length > 0);
 	}
 
 	@Override
 	public void removeWithoutDeath() {
+		if (this.modelInstance == null) {
+			return;
+		}
 		this.animationQueue = new PrimaryTag[0];
 		this.animationQueueIndex = 0;
 		this.killWhenDone = true;
@@ -198,12 +257,15 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	}
 
 	public void setHeight(final float height) {
+		if (this.modelInstance == null) {
+			return;
+		}
 		this.modelInstance.setLocation(modelInstance.localLocation.x, modelInstance.localLocation.y, height);
 	}
 
 	@Override
 	public RenderSpellEffect getLiveEffect() {
-		return this;
+		return this.modelInstance == null ? null : this;
 	}
 
 	public MdxComplexInstance getModelInstance() {
@@ -217,7 +279,7 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 	private void ensureScriptPosition() {
 		if (!this.scriptPositionKnown) {
 			this.scriptPositionKnown = true;
-			this.baseRenderZ = this.modelInstance.localLocation.z;
+			this.baseRenderZ = getLocalZ();
 			// The getters report the terrain height under the creation point, not the walkable height drawn at.
 			this.baseZ = this.viewer == null ? this.baseRenderZ
 					: this.viewer.terrain.getGroundHeight(this.pointX, this.pointY);
@@ -270,7 +332,37 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 		if (overGround && (this.viewer != null)) {
 			renderZ += this.viewer.terrain.getGroundHeight(this.scriptX, this.scriptY);
 		}
-		this.modelInstance.setLocation(this.scriptX, this.scriptY, renderZ);
+		if (this.modelInstance != null) {
+			this.modelInstance.setLocation(this.scriptX, this.scriptY, renderZ);
+		}
+		this.lastLocalZ = renderZ;
+	}
+
+	/** Where the effect stands now, from its own fields so that it is known while the model is still being read. */
+	public float getPlacedX() {
+		if (this.modelInstance != null) {
+			return this.modelInstance.localLocation.x;
+		}
+		return this.scriptPositionKnown ? this.scriptX : this.pointX;
+	}
+
+	public float getPlacedY() {
+		if (this.modelInstance != null) {
+			return this.modelInstance.localLocation.y;
+		}
+		return this.scriptPositionKnown ? this.scriptY : this.pointY;
+	}
+
+	public float getSavedScaleX() {
+		return this.scriptScale[0];
+	}
+
+	public float getSavedScaleY() {
+		return this.scriptScale[1];
+	}
+
+	public float getSavedScaleZ() {
+		return this.scriptScale[2];
 	}
 
 	public float getScriptPitch() {
@@ -283,6 +375,10 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 
 	/** Jumps to the given time, in seconds, into the animation playing now. */
 	public void setScriptTime(final float seconds) {
+		if (this.modelInstance == null) {
+			return;
+		}
+		ensureBuilt();
 		final int sequenceIndex = this.modelInstance.sequence;
 		if ((sequenceIndex < 0) || (sequenceIndex >= this.sequences.size())) {
 			return;
@@ -320,6 +416,10 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 
 	/** BlzSetSpecialEffectAnimation and BlzPlaySpecialEffect: the animation plays now, the queued ones are dropped. */
 	public void playScriptAnimation(final String animationName) {
+		if (this.modelInstance == null) {
+			return;
+		}
+		ensureBuilt();
 		final int index = selectScriptSequence(animationName);
 		if (index >= 0) {
 			this.scriptQueuedSequences.clear();
@@ -329,6 +429,10 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 
 	/** BlzQueueSpecialEffectAnimation: plays after the animation playing now and the ones queued before. */
 	public void queueScriptAnimation(final String animationName) {
+		if (this.modelInstance == null) {
+			return;
+		}
+		ensureBuilt();
 		final int index = selectScriptSequence(animationName);
 		if (index >= 0) {
 			if (this.modelInstance.sequenceEnded && this.scriptQueuedSequences.isEmpty()) {
@@ -354,16 +458,26 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 
 	/** The scale of the three axes after BlzSetSpecialEffectMatrixScale, or the uniform scale. */
 	public void setScriptMatrixScale(final float x, final float y, final float z) {
-		this.modelInstance.setScale(new float[] { x, y, z });
+		this.scriptScale[0] = x;
+		this.scriptScale[1] = y;
+		this.scriptScale[2] = z;
+		if (this.modelInstance != null) {
+			this.modelInstance.setScale(new float[] { x, y, z });
+		}
 	}
 
 	public float getScriptScale() {
-		return this.modelInstance.localScale.x;
+		return this.modelInstance == null ? this.scriptScale[0] : this.modelInstance.localScale.x;
 	}
 
 	/** BlzResetSpecialEffectMatrix: the scale and the turn the script gave go back to what the effect had. */
 	public void resetScriptMatrix() {
-		this.modelInstance.setUniformScale(1f);
+		this.scriptScale[0] = 1;
+		this.scriptScale[1] = 1;
+		this.scriptScale[2] = 1;
+		if (this.modelInstance != null) {
+			this.modelInstance.setUniformScale(1f);
+		}
 		if (isScriptPlaced()) {
 			setScriptOrientation(this.yaw, 0, 0);
 		}
@@ -379,6 +493,8 @@ public class RenderSpellEffect extends AllocatedHandle implements RenderEffect, 
 		final Quaternion rotation = new Quaternion().setFromAxisRad(0, 0, 1, yaw);
 		rotation.mul(new Quaternion().setFromAxisRad(0, -1, 0, pitch));
 		rotation.mul(new Quaternion().setFromAxisRad(1, 0, 0, roll));
-		this.modelInstance.setRotation(new float[] { rotation.x, rotation.y, rotation.z, rotation.w });
+		if (this.modelInstance != null) {
+			this.modelInstance.setRotation(new float[] { rotation.x, rotation.y, rotation.z, rotation.w });
+		}
 	}
 }

@@ -24,6 +24,8 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 	private TextureFrame activeHighlightFrame;
 	private SpriteFrame cooldownFrame;
 	private SpriteFrame autocastFrame;
+	private SpriteFrame effectFrame;
+	private boolean effectShown;
 	private TextureFrame numberOverlayFrame;
 	private SingleStringFrame numberOverlayStringFrame;
 	private float defaultWidth;
@@ -61,7 +63,29 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 		this.numberOverlayStringFrame = numberOverlayStringFrame;
 	}
 
+	/** The model of a script's button effect; without one the active highlight stands in for it. */
+	public void setEffectFrame(final SpriteFrame effectFrame) {
+		this.effectFrame = effectFrame;
+	}
+
+	/** Lets the button shine for a script's command button effect. */
+	public void setButtonEffect(final boolean shown) {
+		if (this.effectFrame != null) {
+			this.effectFrame.setVisible(shown);
+			if (shown && !this.effectShown) {
+				this.effectFrame.setSequence(PrimaryTag.STAND);
+			}
+		}
+		else if (shown && (this.activeHighlightFrame != null)) {
+			this.activeHighlightFrame.setVisible(true);
+		}
+		this.effectShown = shown;
+	}
+
 	public void clear() {
+		if (this.effectFrame != null) {
+			this.effectFrame.setVisible(false);
+		}
 		this.iconFrame.setVisible(false);
 		if (this.activeHighlightFrame != null) {
 			this.activeHighlightFrame.setVisible(false);
@@ -158,6 +182,9 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 		if (this.autocastFrame != null) {
 			this.autocastFrame.positionBounds(gameUI, viewport);
 		}
+		if (this.effectFrame != null) {
+			this.effectFrame.positionBounds(gameUI, viewport);
+		}
 	}
 
 	@Override
@@ -180,6 +207,9 @@ public class CommandCardIcon extends AbstractRenderableFrame implements Clickabl
 		}
 		if (this.autocastFrame != null) {
 			this.autocastFrame.render(batch, baseFont, glyphLayout);
+		}
+		if (this.effectFrame != null) {
+			this.effectFrame.render(batch, baseFont, glyphLayout);
 		}
 	}
 

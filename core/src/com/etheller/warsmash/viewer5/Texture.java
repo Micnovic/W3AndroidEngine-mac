@@ -9,7 +9,22 @@ public abstract class Texture extends HandlerResource<ResourceHandler> implement
 		super(viewer, extension, pathSolver, fetchUrl, handler);
 	}
 
+	/** Whether the texture is queued for a later decode and upload, so what it holds is not yet what it will show. */
+	private boolean pending;
+
+	public final boolean isPending() {
+		return this.pending;
+	}
+
+	protected final void setPending(final boolean pending) {
+		this.pending = pending;
+	}
+
 	public abstract void bind(final int unit);
+
+	/** Called each time the texture is bound for drawing, before its pending state is looked at. */
+	public void markDrawn() {
+	}
 
 	public abstract void internalBind();
 

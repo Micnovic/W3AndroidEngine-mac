@@ -116,6 +116,9 @@ public class MdxRenderBatch extends RenderBatch {
 					if (mappedTexture == null) {
 						mappedTexture = texture;
 					}
+					if ((mappedTexture != null) && mappedTexture.isPending()) {
+						continue;
+					}
 					viewer.webGL.bindTexture(mappedTexture, 0);
 
 					layer.bind(shader);

@@ -1604,7 +1604,7 @@ final class UnitNatives extends CommonNatives {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String whichAnimation = arguments.get(1).visit(StringJassValueVisitor.getInstance());
 					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
+					if ((renderPeer != null) && (whichAnimation != null)) {
 						renderPeer.queueAnimation(whichAnimation);
 					}
 					return null;
@@ -1614,7 +1614,7 @@ final class UnitNatives extends CommonNatives {
 					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					final String whichAnimation = arguments.get(1).visit(StringJassValueVisitor.getInstance());
 					final RenderUnit renderPeer = war3MapViewer.getRenderPeer(whichUnit);
-					if (renderPeer != null) {
+					if ((renderPeer != null) && (whichAnimation != null)) {
 						renderPeer.playAnimation(whichAnimation);
 					}
 					if (whichUnit != null) {

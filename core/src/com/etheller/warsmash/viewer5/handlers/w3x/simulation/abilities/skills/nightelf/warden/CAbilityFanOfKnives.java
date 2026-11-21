@@ -62,7 +62,7 @@ public class CAbilityFanOfKnives extends CAbilityNoTargetSpellBase {
 			unit.damage(simulation, caster, DAMAGE_FLAGS, CAttackType.SPELLS, CDamageType.UNIVERSAL,
 					CWeaponSoundTypeJass.WHOKNOWS.name(), damage);
 		}
-		simulation.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.CASTER);
+		simulation.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.EFFECT);
 		return false;
 	}
 }

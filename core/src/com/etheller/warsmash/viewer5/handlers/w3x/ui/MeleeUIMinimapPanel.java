@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
@@ -511,10 +512,11 @@ final class MeleeUIMinimapPanel {
 		final float[] footprint = this.ui.meleeUIMinimap.getCameraFootprint();
 		final int width = Gdx.graphics.getWidth();
 		final int height = Gdx.graphics.getHeight();
-		final int[] cornersX = { 0, width, width, 0 };
-		final int[] cornersY = { 0, 0, height, height };
 		for (int i = 0; i < 4; i++) {
-			this.ui.war3MapViewer.getClickLocationOnZPlane(this.minimapCornerTemp, cornersX[i], cornersY[i],
+			// Corners in the order (0, 0), (width, 0), (width, height), (0, height).
+			final int cornerX = (i == 1) || (i == 2) ? width : 0;
+			final int cornerY = i >= 2 ? height : 0;
+			this.ui.war3MapViewer.getClickLocationOnZPlane(this.minimapCornerTemp, cornerX, cornerY,
 					this.ui.cameraManager.target.z);
 			footprint[i * 2] = this.minimapCornerTemp.x;
 			footprint[(i * 2) + 1] = this.minimapCornerTemp.y;
@@ -658,6 +660,10 @@ final class MeleeUIMinimapPanel {
 
 	private void pingMinimap(final float x, final float y, final float duration, final int red, final int green,
 			final int blue, final int firstSequence, final int sequence, final int deathSequence) {
+		if (Gdx.app.getType() == Application.ApplicationType.HeadlessDesktop) {
+			// Nothing draws or animates the ping there, so it would never end and be given back.
+			return;
+		}
 		SpriteFrame frame = this.freeMinimapPings.pollFirst();
 		if (frame == null) {
 			frame = (SpriteFrame) this.ui.rootFrame.createFrameByType("SPRITE", "SmashMinimapPing", this.ui.rootFrame,

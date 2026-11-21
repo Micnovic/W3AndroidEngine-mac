@@ -14,6 +14,7 @@ import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.value.CodeJassValue;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CDestructable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -72,10 +73,18 @@ public class AIController {
 	final Map<CUnit, CUnit> orderedTargets = new LinkedHashMap<>();
 	final Set<CUnit> gatherOrdered = new LinkedHashSet<>();
 	private final Deque<int[]> commands = new ArrayDeque<>();
+	@SavedTransient
 	final Map<War3ID, int[]> countCache = new HashMap<>();
+	@SavedTransient
 	int countCacheTick = -1;
+	@SavedTransient
+	java.util.List<AIMapKnowledge.Camp> campCache;
+	@SavedTransient
+	int campCacheTick = -1;
 	private CUnit allianceTarget;
 	CUnit enemyBase;
+	/** The tick a search began in; its answer is held back until a later tick or a wait for it. */
+	int enemyBaseSearchTick = -1;
 	CodeJassValue heroLevelsFunction;
 	CUnit levelingHero;
 	int levelingHeroLevel;
@@ -104,6 +113,7 @@ public class AIController {
 	final Set<CUnit> ignoredHeroes = new LinkedHashSet<>();
 	int replacementCount = 3;
 	boolean amphibious;
+	@SavedTransient
 	AILand land;
 
 	static final class AIGuardPost {
@@ -304,16 +314,22 @@ public class AIController {
 		return this.commands.size();
 	}
 
+	/** Measured: the commands come out newest first. */
 	public int getLastCommand() {
-		return this.commands.isEmpty() ? 0 : this.commands.peekFirst()[0];
+		return this.commands.isEmpty() ? 0 : this.commands.peekLast()[0];
 	}
 
 	public int getLastData() {
-		return this.commands.isEmpty() ? 0 : this.commands.peekFirst()[1];
+		return this.commands.isEmpty() ? 0 : this.commands.peekLast()[1];
 	}
 
 	public void popLastCommand() {
-		this.commands.pollFirst();
+		this.commands.pollLast();
+	}
+
+	/** A reference kept between ticks is stale once its unit has died or been removed from the game. */
+	boolean isGone(final CUnit unit) {
+		return unit.isDead() || unit.isRemovedFromGame();
 	}
 
 	boolean isOurs(final CUnit unit) {
@@ -647,6 +663,11 @@ public class AIController {
 
 	public void startGetEnemyBase() {
 		this.enemyBase = AIMapKnowledge.findEnemyBase(this, -1);
+		this.enemyBaseSearchTick = this.simulation.getGameTurnTick();
+	}
+
+	public void waitEnemyBase() {
+		this.enemyBaseSearchTick = -1;
 	}
 
 	public CUnit getEnemyBase() {
@@ -666,7 +687,7 @@ public class AIController {
 	 * about ten seconds after the script starts.
 	 */
 	public CUnit getMegaTarget() {
-		if ((this.megaTarget != null) && this.megaTarget.isDead()) {
+		if ((this.megaTarget != null) && isGone(this.megaTarget)) {
 			this.megaTarget = null;
 		}
 		return this.megaTarget;
@@ -680,12 +701,15 @@ public class AIController {
 		if (owner == null) {
 			return null;
 		}
+		// Measured: the answers come newest building first, and one removed a moment ago is no longer given.
+		CUnit newest = null;
 		for (final CUnit unit : this.simulation.getUnits()) {
-			if ((unit.getPlayerIndex() == owner.getId()) && !unit.isDead() && unit.isBuilding()) {
-				return unit;
+			if ((unit.getPlayerIndex() == owner.getId()) && !unit.isDead() && unit.isBuilding()
+					&& !this.simulation.isRemovalPending(unit)) {
+				newest = unit;
 			}
 		}
-		return null;
+		return newest;
 	}
 
 	public void setAllianceTarget(final CUnit target) {
@@ -693,7 +717,7 @@ public class AIController {
 	}
 
 	public CUnit getOwnAllianceTarget() {
-		if ((this.allianceTarget != null) && this.allianceTarget.isDead()) {
+		if ((this.allianceTarget != null) && isGone(this.allianceTarget)) {
 			this.allianceTarget = null;
 		}
 		return this.allianceTarget;

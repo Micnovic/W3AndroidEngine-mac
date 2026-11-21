@@ -8,7 +8,6 @@ import java.util.function.IntSupplier;
 
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
-import com.etheller.warsmash.viewer5.handlers.w3x.CampaignMaps;
 
 /**
  * The [Graphics] section of the engine configuration, which both launchers write from their Options page: the in-game
@@ -20,10 +19,12 @@ public final class GraphicsSettings {
 	public static final String SECTION = "Graphics";
 	public static final String KEY_SET = "Set";
 	public static final String KEY_TEXTURE_SIZE = "TextureSize";
+	private static final String KEY_DEFAULT_TEXTURE_SIZE = "DeviceTextureSize";
 	/** "Auto" (the default: compressed on phones and tablets), "On" or "Off"; see {@link #textureCompression}. */
 	public static final String KEY_TEXTURE_COMPRESSION = "TextureCompression";
 	/**
-	 * "Auto" (the default: the shape of each unit's model on the ground, as the Reforged graphics draw it),
+	 * "Auto" (the default: the shape of each unit's model on the ground with the Reforged graphics, as they draw it,
+	 * and the round blob with the Classic graphics, as the original draws it),
 	 * "Full" (always) or "Blob" (the round shadow of the Classic graphics).
 	 */
 	public static final String KEY_UNIT_SHADOWS = "UnitShadows";
@@ -36,6 +37,13 @@ public final class GraphicsSettings {
 	public static final int[] TEXTURE_SIZES = { 512, 1024, 2048, 0 };
 	/** Below this much memory a tablet is treated as a phone. */
 	private static final long TABLET_MEMORY_MB = 6 * 1024;
+	/** Below this much memory a device is a 4 GB one (they tell 3.5 to 3.8 GB), which the system kills a game on first. */
+	private static final long LOW_MEMORY_MB = 4608;
+	/**
+	 * Names the memory tier a run plays as ("low", "medium" or "high"), whatever the device has: for measuring what a
+	 * weaker device gets on a stronger one.
+	 */
+	public static final String MEMORY_TIER_PROPERTY = "warsmash.memtier";
 	/** A GPU with less memory of its own gets the smaller default limit. */
 	private static final long LOW_VIDEO_MEMORY_MB = 3 * 1024;
 	private static final String[] SOFTWARE_RENDERERS = { "llvmpipe", "softpipe", "swiftshader", "microsoft basic",
@@ -69,21 +77,34 @@ public final class GraphicsSettings {
 
 	/** The texture size limit to play with; without a setting no limit. */
 	public static int textureSize(final DataTable ini) {
-		return Math.max(0, configuredTextureSize(ini));
+		final int configured = configuredTextureSize(ini);
+		return Math.max(0, configured >= 0 ? configured : deviceDefaultTextureSize(ini));
 	}
 
 	/**
 	 * The texture size limit of a game with these graphics: the configured one, else the {@code defaultSize} for the HD
-	 * and DE graphics, whose textures are four times the size of Classic's, and no limit for Classic.
+	 * and DE graphics, whose textures are four times the size of Classic's, and no limit for Classic. A default the
+	 * device chose ({@link #applyDefaultTextureSize}) is not a choice of the player, so Classic keeps its textures
+	 * whole, which a device short of memory still lowers through {@link MemoryTier}. For the HD and DE graphics the
+	 * size never exceeds what the device's memory holds ({@link #textureCap}), whatever was stored by an
+	 * earlier version, an Options choice since lowered or an ini edited by hand; the stored value is left as it is.
 	 */
-	public static int textureSize(final DataTable ini, final GraphicsSet graphics,
-			final IntSupplier defaultSize) {
+	public static int textureSize(final DataTable ini, final GraphicsSet graphics, final IntSupplier defaultSize) {
+		return textureSize(ini, graphics, defaultSize, true);
+	}
+
+	/** @param etc2Supported whether the GPU reads ETC2; without it textures are uncompressed and the cap is lower */
+	public static int textureSize(final DataTable ini, final GraphicsSet graphics, final IntSupplier defaultSize,
+			final boolean etc2Supported) {
 		final int configured = configuredTextureSize(ini);
-		if (configured >= 0) {
-			return graphics == GraphicsSet.CLASSIC ? configured
-					: limitToCap(configured, textureCap(deviceMemoryMb, compressionWanted(ini, true)));
+		if (graphics == GraphicsSet.CLASSIC) {
+			return Math.max(0, configured);
 		}
-		return graphics == GraphicsSet.CLASSIC ? 0 : Math.max(0, defaultSize.getAsInt());
+		final long memoryMb = deviceMemoryMb();
+		final int cap = textureCap(memoryMb, textureCompression(ini, graphics, memoryMb > 0, etc2Supported));
+		final int deviceDefault = deviceDefaultTextureSize(ini);
+		return limitToCap(configured >= 0 ? configured
+				: deviceDefault >= 0 ? deviceDefault : Math.max(0, defaultSize.getAsInt()), cap);
 	}
 
 	/** Tells the settings how much memory the device has, so that texture sizes it cannot hold are lowered. */
@@ -91,8 +112,83 @@ public final class GraphicsSettings {
 		deviceMemoryMb = memoryMb;
 	}
 
+	/** The device's memory, or that of a device of the tier {@link #MEMORY_TIER_PROPERTY} names. */
 	public static long deviceMemoryMb() {
-		return deviceMemoryMb;
+		return tierMemoryMb(System.getProperty(MEMORY_TIER_PROPERTY), deviceMemoryMb);
+	}
+
+	/** The memory a run plays with when a tier is named: a typical device of that tier, else the device's own. */
+	public static long tierMemoryMb(final String forcedTier, final long memoryMb) {
+		final MemoryTier tier = MemoryTier.fromName(forcedTier);
+		return tier == null ? memoryMb : tier.typicalMemoryMb(memoryMb);
+	}
+
+	public static MemoryTier memoryTier() {
+		return MemoryTier.of(deviceMemoryMb());
+	}
+
+	/**
+	 * How much of a device's memory the textures of the game's models may hold, and how many of their largest levels
+	 * are left out. Unlimited and whole on desktops and devices with 6 GB and more; their textures look the same
+	 * whatever this does.
+	 */
+	public enum MemoryTier {
+		/** About 4 GB: every texture a level smaller (above 128 pixels), and the least recently drawn let go past 192 MB. */
+		LOW(1, 192L << 20, 3584),
+		/** Phones up to 6 GB: textures let go past 384 MB. */
+		MEDIUM(0, 384L << 20, 5632),
+		/** 6 GB and more. */
+		HIGH(0, 0, 8192),
+		/** A desktop, or a device that did not tell its memory. */
+		UNLIMITED(0, 0, 0);
+
+		private final int skippedLevels;
+		private final long textureBudget;
+		private final long typicalMemoryMb;
+
+		MemoryTier(final int skippedLevels, final long textureBudget, final long typicalMemoryMb) {
+			this.skippedLevels = skippedLevels;
+			this.textureBudget = textureBudget;
+			this.typicalMemoryMb = typicalMemoryMb;
+		}
+
+		public static MemoryTier of(final long memoryMb) {
+			if (memoryMb <= 0) {
+				return UNLIMITED;
+			}
+			if (memoryMb < LOW_MEMORY_MB) {
+				return LOW;
+			}
+			return memoryMb < TABLET_MEMORY_MB ? MEDIUM : HIGH;
+		}
+
+		/** The tier a name stands for, null for none or an unknown one. */
+		static MemoryTier fromName(final String name) {
+			if (name == null) {
+				return null;
+			}
+			for (final MemoryTier tier : values()) {
+				if (tier.name().equalsIgnoreCase(name.trim())) {
+					return tier;
+				}
+			}
+			return null;
+		}
+
+		/** The largest levels of a model texture left out, beyond what the texture size limit leaves out. */
+		public int skippedLevels() {
+			return this.skippedLevels;
+		}
+
+		/** The bytes of model textures above which those not drawn for a while are let go, 0 for no budget. */
+		public long textureBudget() {
+			return this.textureBudget;
+		}
+
+		/** The device's own memory when it is of this tier, else that of a typical device of the tier. */
+		long typicalMemoryMb(final long actualMemoryMb) {
+			return of(actualMemoryMb) == this ? actualMemoryMb : this.typicalMemoryMb;
+		}
 	}
 
 	/**
@@ -103,6 +199,9 @@ public final class GraphicsSettings {
 	public static int textureCap(final long memoryMb, final boolean compressed) {
 		if (memoryMb <= 0) {
 			return 0;
+		}
+		if (memoryMb < LOW_MEMORY_MB) {
+			return 512;
 		}
 		if (memoryMb < TABLET_MEMORY_MB) {
 			return compressed ? 1024 : 512;
@@ -196,7 +295,7 @@ public final class GraphicsSettings {
 		if (value.equalsIgnoreCase("Blob")) {
 			return false;
 		}
-		return true;
+		return graphics != GraphicsSet.CLASSIC;
 	}
 
 	/** The render scale of the configuration in percent, 100 (full size) when it sets none or something unreadable. */
@@ -233,12 +332,26 @@ public final class GraphicsSettings {
 		return renderScalePercent(ini) / 100f;
 	}
 
-	/** Puts a default texture size limit into a configuration that sets none, for this run only. */
+	/**
+	 * Gives a configuration that sets no texture size the default of the device, for this run only. It is kept apart
+	 * from the player's choice, which only the HD and DE graphics fall back from.
+	 */
 	public static void applyDefaultTextureSize(final DataTable ini, final int textureSize) {
-		if ((ini == null) || (configuredTextureSize(ini) >= 0)) {
+		if ((ini == null) || (deviceDefaultTextureSize(ini) >= 0)) {
 			return;
 		}
-		section(ini).setField(KEY_TEXTURE_SIZE, Integer.toString(textureSize));
+		section(ini).setField(KEY_DEFAULT_TEXTURE_SIZE, Integer.toString(textureSize));
+	}
+
+	private static int deviceDefaultTextureSize(final DataTable ini) {
+		final Element section = ini == null ? null : ini.get(SECTION);
+		final String value = section == null ? "" : section.getField(KEY_DEFAULT_TEXTURE_SIZE).trim();
+		try {
+			return value.isEmpty() ? -1 : Math.max(0, Integer.parseInt(value));
+		}
+		catch (final NumberFormatException e) {
+			return -1;
+		}
 	}
 
 	/**
@@ -298,9 +411,9 @@ public final class GraphicsSettings {
 	 * campaign mission has those of its campaign version, any other map those the options set for custom games. A map
 	 * made for the Reforged graphics alone is never played in Classic.
 	 */
-	public static GraphicsSet gameGraphics(final DataTable ini, final String mapFilename, final boolean reforgedCampaign,
+	public static GraphicsSet gameGraphics(final DataTable ini, final boolean campaignGame, final boolean reforgedCampaign,
 			final boolean reforgedMap) {
-		if (CampaignMaps.isCampaignMap(mapFilename)) {
+		if (campaignGame) {
 			return reforgedCampaign || reforgedMap ? GraphicsSet.REFORGED : GraphicsSet.CLASSIC;
 		}
 		final GraphicsSet custom = graphicsSet(ini);
@@ -319,7 +432,7 @@ public final class GraphicsSettings {
 		return chosen.isEmpty() || chosen.equals(base) ? new String[] { base } : new String[] { chosen, base };
 	}
 
-	private static String locale(final DataTable ini) {
+	public static String locale(final DataTable ini) {
 		final Element sources = ini == null ? null : ini.get("DataSources");
 		if (sources == null) {
 			return "enus";

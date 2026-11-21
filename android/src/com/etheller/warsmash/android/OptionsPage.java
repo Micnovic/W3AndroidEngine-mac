@@ -8,6 +8,7 @@ import static com.etheller.warsmash.launcher.LauncherKeys.KEY_UPDATE_CHECK;
 import static com.etheller.warsmash.launcher.LauncherKeys.KEY_UPDATE_SKIPPED;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -41,6 +42,7 @@ import com.etheller.warsmash.launcher.SkinArt;
 
 /** The launcher's own Options: its tabs of settings, most of them the engine's. */
 final class OptionsPage extends LauncherViews {
+	private boolean sharingLogs;
 	static final int TAB_GRAPHICS = 0;
 	private static final int TAB_SOUND = 1;
 	private static final int TAB_GAMEPLAY = 2;
@@ -160,6 +162,10 @@ final class OptionsPage extends LauncherViews {
 				choice -> engine.setGraphics(GraphicsSettings.KEY_TEXTURE_SIZE,
 						Integer.toString(GraphicsSettings.TEXTURE_SIZES[choice])),
 				getString(R.string.options_texture_capped, cap));
+		if ((cap > 0) && (GraphicsSettings.limitToCap(textureSize, cap) != textureSize)) {
+			noteRow(rows, getString(R.string.options_texture_limited,
+					textureSize == 0 ? getString(R.string.options_texture_full) : Integer.toString(textureSize), cap));
+		}
 		final String[] scaleNames = new String[LauncherOptions.RENDER_SCALES.length];
 		for (int i = 0; i < scaleNames.length; i++) {
 			scaleNames[i] = getString(stringId(LauncherOptions.RENDER_SCALES[i]));
@@ -516,25 +522,45 @@ final class OptionsPage extends LauncherViews {
 					} }, null, 12, true);
 			return false;
 		});
-		final File last = CrashLogs.latest(this.activity);
-		infoRow(rows, R.string.options_crash_share,
-				last == null ? getString(R.string.options_crash_none) : last.getName(), false);
+		infoRow(rows, R.string.options_logs_share, getString(R.string.options_logs_share_value), false);
 		final View shareRow = rows.getChildAt(rows.getChildCount() - 1);
-		shareRow.setContentDescription(getString(R.string.options_crash_share));
-		if (last != null) {
-			onTap(shareRow, false, v -> {
+		shareRow.setContentDescription(getString(R.string.options_logs_share));
+		onTap(shareRow, false, v -> shareLogs());
+		infoRow(rows, R.string.options_logs_where, getString(R.string.options_logs_where_value,
+				CrashLogs.location(this.activity)), true);
+	}
+
+	/** The log is read off the main thread; the share sheet opens when the snapshot is written. */
+	private void shareLogs() {
+		if (this.sharingLogs) {
+			return;
+		}
+		this.sharingLogs = true;
+		new Thread(() -> {
+			File file = null;
+			try {
+				file = CrashLogs.snapshot(this.activity);
+			}
+			catch (final IOException | RuntimeException e) {
+				// Reported below as a log that could not be shared.
+			}
+			final File shared = file;
+			this.activity.runOnUiThread(() -> {
+				this.sharingLogs = false;
+				if (shared == null) {
+					this.activity.dialogs.showMessage(getString(R.string.options_logs_share),
+							getString(R.string.options_logs_none));
+					return;
+				}
 				try {
-					CrashLogs.share(this.activity);
+					CrashLogs.share(this.activity, shared, "Warsmash log");
 				}
 				catch (final RuntimeException e) {
-					this.activity.dialogs.showMessage(getString(R.string.options_crash_share),
+					this.activity.dialogs.showMessage(getString(R.string.options_logs_share),
 							getString(R.string.options_crash_cannot_share));
 				}
 			});
-		}
-		else {
-			shareRow.setAlpha(0.5f);
-		}
+		}, "share-logs").start();
 	}
 
 	/** An option row: the gold label on the left, a line above every row but the first. */

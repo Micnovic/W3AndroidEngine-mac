@@ -368,6 +368,12 @@ final class OrderNatives extends CommonNatives {
 		});
 	}
 
+	/** A worn item has no numbered slot, so it has no "itemuse" order to give. */
+	private static boolean isCarried(final CItem item) {
+		return (item != null) && (item.getContainedInventory() != null)
+				&& (item.getContainedInventory().getSlot(item) >= 0);
+	}
+
 	private void registerItemOrders() {
 		jassProgramVisitor.getJassNativeManager().createNative("UnitUseItem",
 				(arguments, globalScope, triggerScope) -> {
@@ -376,7 +382,7 @@ final class OrderNatives extends CommonNatives {
 						return BooleanJassValue.FALSE;
 					}
 					final CItem item = arguments.get(1).visit(ObjectJassValueVisitor.getInstance());
-					if ((item == null) || (item.getContainedInventory() == null)) {
+					if (!isCarried(item)) {
 						return BooleanJassValue.FALSE;
 					}
 					final CPlayerUnitOrderExecutor defaultPlayerUnitOrderExecutor = this.simulation
@@ -414,7 +420,7 @@ final class OrderNatives extends CommonNatives {
 				return BooleanJassValue.FALSE;
 			}
 			final CItem item = arguments.get(1).visit(ObjectJassValueVisitor.getInstance());
-			if ((item == null) || (item.getContainedInventory() == null)) {
+			if (!isCarried(item)) {
 				return BooleanJassValue.FALSE;
 			}
 			CWidget whichTarget = arguments.get(2).visit(ObjectJassValueVisitor.getInstance());
@@ -452,7 +458,7 @@ final class OrderNatives extends CommonNatives {
 						return BooleanJassValue.FALSE;
 					}
 					final CItem item = arguments.get(1).visit(ObjectJassValueVisitor.getInstance());
-					if ((item == null) || (item.getContainedInventory() == null)) {
+					if (!isCarried(item)) {
 						return BooleanJassValue.FALSE;
 					}
 					final AbilityPointTarget whichLocation = arguments.get(2)

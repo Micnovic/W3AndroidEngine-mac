@@ -9,6 +9,8 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -58,6 +60,14 @@ final class LauncherArt {
 	private static final String LANGUAGE_FONT = "language";
 	/** Fonts of the bold face are kept under their size plus this. */
 	private static final int BOLD_KEY = 1 << 16;
+	/** Stands for the wide font, which draws the text the skin's Latin fonts have no signs for. */
+	private static final String WIDE_FONT = "wide";
+	private static final int WIDE_KEY = 1 << 17;
+	/** Last resort for the wide font where the game data lacks it: files of the system with Chinese and Korean. */
+	private static final String[] SYSTEM_WIDE_FONTS = { "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/malgun.ttf",
+			"C:/Windows/Fonts/msjh.ttc", "/System/Library/Fonts/PingFang.ttc",
+			"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+			"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc" };
 
 	final boolean reforged;
 	private final DataSource data;
@@ -313,16 +323,28 @@ final class LauncherArt {
 	 * interface for headings and names (the text font where the data lacks it).
 	 */
 	BitmapFont font(final int pixels, final boolean bold) {
-		final int size = Math.max(6, Math.min(400, pixels)) + (bold ? BOLD_KEY : 0);
+		return font(pixels, bold, null);
+	}
+
+	/**
+	 * As {@link #font(int, boolean)}, for a text: one with Chinese, Japanese or Korean signs is set in the game
+	 * data's global font (the system's where the data lacks it) when the skin's own font is a Latin one.
+	 */
+	BitmapFont font(final int pixels, final boolean bold, final String text) {
+		final boolean wide = (text != null) && needsWide(text) && !fontName(bold).equals(LANGUAGE_FONT);
+		final int size = Math.max(6, Math.min(400, pixels)) + (wide ? WIDE_KEY : bold ? BOLD_KEY : 0);
 		BitmapFont font = this.fonts.get(size);
 		if (font == null) {
-			final FreeTypeFontGenerator generator = generator(bold);
+			final FreeTypeFontGenerator generator = wide ? wideGenerator() : generator(bold);
+			if (wide && (generator == null)) {
+				return font(pixels, bold, null);
+			}
 			if (generator == null) {
 				font = new BitmapFont(true);
 			}
 			else {
 				final FreeTypeFontParameter parameter = new FreeTypeFontParameter();
-				parameter.size = size % BOLD_KEY;
+				parameter.size = size & (BOLD_KEY - 1);
 				parameter.flip = true;
 				parameter.characters = CHARACTERS;
 				// Names and strings of the data may use signs the preset lacks (Chinese, Korean, Cyrillic).
@@ -337,6 +359,42 @@ final class LauncherArt {
 			this.fonts.put(size, font);
 		}
 		return font;
+	}
+
+	/** Whether a text has signs of the Han, Hangul or kana scripts, which the skin's Latin fonts lack. */
+	static boolean needsWide(final CharSequence text) {
+		for (int i = 0; i < text.length(); i++) {
+			final char c = text.charAt(i);
+			if (((c >= 0x1100) && (c <= 0x11FF)) || ((c >= 0x2E80) && (c <= 0xA4CF)) || ((c >= 0xAC00) && (c <= 0xD7FF))
+					|| ((c >= 0xF900) && (c <= 0xFAFF)) || ((c >= 0xFE30) && (c <= 0xFE4F))
+					|| ((c >= 0xFF00) && (c <= 0xFFEF))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private FreeTypeFontGenerator wideGenerator() {
+		if (!this.generators.containsKey(WIDE_FONT)) {
+			FreeTypeFontGenerator generator = null;
+			try {
+				final String path = pathOf(SkinArt.FONT_GLOBAL);
+				if ((path != null) && this.data.has(path)) {
+					generator = new FreeTypeFontGenerator(new DataSourceFileHandle(this.data, path));
+				}
+				for (int i = 0; (generator == null) && (i < SYSTEM_WIDE_FONTS.length); i++) {
+					final FileHandle file = Gdx.files.absolute(SYSTEM_WIDE_FONTS[i]);
+					if (file.exists()) {
+						generator = new FreeTypeFontGenerator(file);
+					}
+				}
+			}
+			catch (final RuntimeException e) {
+				LauncherLog.w("Unable to read the wide font", e);
+			}
+			this.generators.put(WIDE_FONT, generator);
+		}
+		return this.generators.get(WIDE_FONT);
 	}
 
 	private FreeTypeFontGenerator generator(final boolean bold) {

@@ -38,6 +38,10 @@ public final class CGameCache {
 		this.data = FILES.computeIfAbsent(this.fileName, key -> new Data());
 	}
 
+	String getFileName() {
+		return this.fileName;
+	}
+
 	public void flush() {
 		FILES.remove(this.fileName);
 		this.data = null;

@@ -63,6 +63,10 @@ public class Storage implements AutoCloseable {
 	private static final int BLTE_PREAMBLE_SIZE = 8;
 
 	private static final int READ_CHUNK = 1 << 16;
+	private static final int SCRATCH_MIN_BYTES = 1 << 14;
+	/** Somewhat more than the files that are read whole rather than streamed can take stored. */
+	private static final int SCRATCH_MAX_BYTES = (1 << 20) + (1 << 18);
+	private static final ThreadLocal<byte[]> SCRATCH = new ThreadLocal<>();
 
 	/**
 	 * File extension used by storage index files.
@@ -297,6 +301,17 @@ public class Storage implements AutoCloseable {
 	}
 
 	public BankStream getBanks(final Key encodingKey) throws IOException {
+		return getBanks(encodingKey, false);
+	}
+
+	/**
+	 * Like {@link #getBanks(Key)}, but the stored data of a small file may be read into an array this thread keeps
+	 * for the purpose: the returned stream must then be read to its end before this thread reads from the storage
+	 * again.
+	 *
+	 * @param scratch whether the stored data may be read into the array of this thread
+	 */
+	public BankStream getBanks(final Key encodingKey, final boolean scratch) throws IOException {
 		final int bucketIndex = getBucketIndex(encodingKey.getKey(), encodingKeyLength);
 		final IndexFile index = indicies[bucketIndex];
 		final IndexEntry indexEntry = index.getEntry(encodingKey);
@@ -306,7 +321,7 @@ public class Storage implements AutoCloseable {
 		}
 
 		try {
-			return openBanks(index, indexEntry);
+			return openBanks(index, indexEntry, scratch);
 		} catch (final MalformedCASCStructureException e) {
 			// Some installs keep a key in more than one index entry, or in an older index, with only one of them
 			// pointing at the file.
@@ -316,7 +331,7 @@ public class Storage implements AutoCloseable {
 						continue;
 					}
 					try {
-						return openBanks(candidate, entry);
+						return openBanks(candidate, entry, scratch);
 					} catch (final MalformedCASCStructureException | EOFException again) {
 						continue;
 					}
@@ -398,12 +413,16 @@ public class Storage implements AutoCloseable {
 	 * BLTE data without a header counts when its header hashes to the key. Data
 	 * found either way has its banks checked against their hashes.
 	 */
-	private BankStream openBanks(final IndexFile index, final IndexEntry indexEntry) throws IOException {
+	private BankStream openBanks(final IndexFile index, final IndexEntry indexEntry, final boolean scratch)
+			throws IOException {
 		final long dataOffset = indexEntry.getDataOffset();
 		final int storeIndex = index.getStoreIndex(dataOffset);
 		final long storeOffset = index.getStoreOffset(dataOffset);
 
-		final ByteBuffer storageBuffer = getStorageBuffer(storeIndex, storeOffset, indexEntry.getFileSize());
+		// withEarlierHeader reads into an array of its own: these data are still used when it finds nothing.
+		final ByteBuffer storageBuffer = scratch
+				? getScratchStorageBuffer(storeIndex, storeOffset, indexEntry.getFileSize())
+				: getStorageBuffer(storeIndex, storeOffset, indexEntry.getFileSize());
 		final boolean blte = BLTEContent.hasIdentifier(storageBuffer);
 		if (!blte) {
 			try {
@@ -496,6 +515,32 @@ public class Storage implements AutoCloseable {
 		}
 		while (buffer.hasRemaining() && (channel.read(buffer, offset + buffer.position()) != -1));
 		buffer.limit(capacity);
+	}
+
+	/**
+	 * Fetches a buffer from storage into the array this thread keeps for small files, when the data fit it: the stored
+	 * data of a small file are only decoded into the file's own buffer, and a new array for each was a large part of
+	 * what a map load left to collect.
+	 */
+	private ByteBuffer getScratchStorageBuffer(final int index, final long offset, final long length)
+			throws IOException {
+		if (useMemoryMapping || (length > SCRATCH_MAX_BYTES)) {
+			return getStorageBuffer(index, offset, length);
+		}
+		byte[] scratch = SCRATCH.get();
+		if ((scratch == null) || (scratch.length < length)) {
+			scratch = new byte[Math.min(SCRATCH_MAX_BYTES,
+					Math.max(SCRATCH_MIN_BYTES, Integer.highestOneBit((int) length - 1) << 1))];
+			SCRATCH.set(scratch);
+		}
+		final FileChannel fileChannel = getDataFileChannel(index);
+		final ByteBuffer storageBuffer = ByteBuffer.wrap(scratch, 0, (int) length).slice();
+		readFully(fileChannel, storageBuffer, offset);
+		if (storageBuffer.hasRemaining()) {
+			throw new EOFException("unexpected end of file");
+		}
+		storageBuffer.clear();
+		return storageBuffer;
 	}
 
 	/**

@@ -11,7 +11,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
  * scales; what the sound device plays is scaled by the game on screen, and by none outside of a game.
  */
 public final class CSoundMixer {
-	private static final int MAX_TRACKED_LOOPS = 128;
+	private static final int MAX_TRACKED_LOOPS = 512;
 	private static CSoundMixer audible = new CSoundMixer();
 	private static float soundOption = 1f;
 	private static float musicOption = 1f;
@@ -22,6 +22,8 @@ public final class CSoundMixer {
 	private final float[] groupScales = new float[CSoundVolumeGroup.VALUES.length];
 	private final Deque<PlayingLoop> playingLoops = new ArrayDeque<>();
 	private Runnable musicScaleListener;
+	private String environment = "";
+	private boolean cinematicAudio;
 
 	public CSoundMixer() {
 		reset();
@@ -62,6 +64,27 @@ public final class CSoundMixer {
 
 	public float getGroupScale(final CSoundVolumeGroup group) {
 		return this.groupScales[group.ordinal()];
+	}
+
+	/**
+	 * NewSoundEnvironment: the audio back ends (OpenAL through libGDX) expose no reverb to apply it to, so only the
+	 * name is kept.
+	 */
+	public void setEnvironment(final String environment) {
+		this.environment = environment == null ? "" : environment;
+	}
+
+	public String getEnvironment() {
+		return this.environment;
+	}
+
+	/** SetCinematicAudio: the cinematic mix is made by the volume groups the script sets, so only the switch is kept. */
+	public void setCinematicAudio(final boolean cinematicAudio) {
+		this.cinematicAudio = cinematicAudio;
+	}
+
+	public boolean isCinematicAudio() {
+		return this.cinematicAudio;
 	}
 
 	public void setMusicScaleListener(final Runnable listener) {
@@ -105,14 +128,22 @@ public final class CSoundMixer {
 	}
 
 	/**
-	 * A one shot sound keeps the volume it started with, but a loop has to follow a change of the settings. Stopped
-	 * loops are not reported here; setting the volume of one does nothing, so they simply age out of the list.
+	 * A one shot sound keeps the volume it started with, but a loop has to follow a change of the settings. It is
+	 * followed until it is reported stopped.
 	 */
 	public void loopStarted(final Sound sound, final long id, final float volume, final int channel) {
 		if (this.playingLoops.size() >= MAX_TRACKED_LOOPS) {
 			this.playingLoops.removeFirst();
 		}
 		this.playingLoops.addLast(new PlayingLoop(sound, id, volume, channel));
+	}
+
+	public void loopStopped(final Sound sound, final long id) {
+		this.playingLoops.removeIf(loop -> (loop.id == id) && (loop.sound == sound));
+	}
+
+	public void loopsStopped(final Sound sound) {
+		this.playingLoops.removeIf(loop -> loop.sound == sound);
 	}
 
 	/** The game's looping sounds (ambience, movement) end, as when its screen is replaced by a movie. */

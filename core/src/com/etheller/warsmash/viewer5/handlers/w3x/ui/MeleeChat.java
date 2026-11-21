@@ -70,6 +70,9 @@ public final class MeleeChat {
 
 		void sendCheat(String cheat);
 
+		/** tenthleveltaurenchieftain: a song once, on this machine, then the map's music again. */
+		void playCheatMusic(String musicName);
+
 		/** motherland: leaves for a campaign mission, named by its campaign race and number. */
 		void playCampaignMission(String race, int mission);
 	}
@@ -355,6 +358,10 @@ public final class MeleeChat {
 		final CReleaseCheats.Parsed cheat = CReleaseCheats.parse(message);
 		if (cheat == null) {
 			return false;
+		}
+		if (cheat.getCode().musicName() != null) {
+			this.host.playCheatMusic(cheat.getCode().musicName());
+			return true;
 		}
 		final CReleaseCheats.Result result = CReleaseCheats.preview(this.simulation, this.localPlayer.getId(),
 				message);

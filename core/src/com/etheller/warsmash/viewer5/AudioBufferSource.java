@@ -35,8 +35,8 @@ public class AudioBufferSource {
 	}
 
 	/**
-	 * Starts a loop. One heard from a place keeps following the camera: it is started even when out of range or in
-	 * fog, silent, so that the id the caller keeps stays valid, and is made audible when the camera comes near.
+	 * Starts a loop. One heard from a place keeps following the camera: its id is valid until it is stopped through
+	 * {@link SoundLoops}, but it holds a voice of the sound device only while the camera is near enough to hear it.
 	 *
 	 * @param volume         the loudness before the game's volume groups
 	 * @param heardOnlyWhereSeen whether the loop is silent where the player sees nothing
@@ -55,7 +55,7 @@ public class AudioBufferSource {
 		final PositionalLoop loop = new PositionalLoop(this.buffer, this.panner, volume, channel, pitch,
 				heardOnlyWhereSeen);
 		final long id = loop.begin();
-		if ((id != -1) && (this.panner.context != null)) {
+		if (this.panner.context != null) {
 			this.panner.context.addLoop(loop);
 		}
 		return id;

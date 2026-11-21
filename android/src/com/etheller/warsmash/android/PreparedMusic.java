@@ -26,6 +26,8 @@ final class PreparedMusic implements Music {
 		return thread;
 	});
 	private static final List<PreparedMusic> OPEN = new ArrayList<>();
+	/** Guarded by OPEN: a track made while the game is off the screen starts held. */
+	private static boolean inBackground;
 
 	private MediaPlayer player;
 	private boolean disposed;
@@ -44,6 +46,7 @@ final class PreparedMusic implements Music {
 	PreparedMusic(final String path) {
 		synchronized (OPEN) {
 			OPEN.add(this);
+			this.pausedInBackground = inBackground;
 		}
 		PREPARER.execute(() -> prepare(path));
 	}
@@ -246,20 +249,21 @@ final class PreparedMusic implements Music {
 		}
 	}
 
-	private static List<PreparedMusic> open() {
+	private static List<PreparedMusic> open(final boolean background) {
 		synchronized (OPEN) {
+			inBackground = background;
 			return new ArrayList<>(OPEN);
 		}
 	}
 
 	static void pauseAll() {
-		for (final PreparedMusic music : open()) {
+		for (final PreparedMusic music : open(true)) {
 			music.background(true);
 		}
 	}
 
 	static void resumeAll() {
-		for (final PreparedMusic music : open()) {
+		for (final PreparedMusic music : open(false)) {
 			music.background(false);
 		}
 	}

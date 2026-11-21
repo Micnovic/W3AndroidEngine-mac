@@ -373,7 +373,12 @@ public abstract class OpenALMusic implements Music {
 
 	@Override
 	public void dispose() {
+		final boolean wasPlaying = this.sourceID != -1;
 		stop();
+		if (!wasPlaying) {
+			// Never played: stop() had nothing to close, but the constructor may have opened the file.
+			reset();
+		}
 		if (this.audio.noDevice) {
 			return;
 		}

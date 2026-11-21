@@ -11,23 +11,8 @@ import mpq.compression.pkware.PKExploder;
 
 import com.etheller.warsmash.util.Log;
 
-public class Compression {	
-	/*static TDecompressTable dcmp_table[] =
-	{
-	    {MPQ_COMPRESSION_BZIP2,        Decompress_BZIP2},        // Decompression with Bzip2 library
-	    {MPQ_COMPRESSION_PKWARE,       Decompress_PKLIB},        // Decompression with Pkware Data Compression Library
-	    {MPQ_COMPRESSION_ZLIB,         Decompress_ZLIB},         // Decompression with the "zlib" library
-	    {MPQ_COMPRESSION_HUFFMANN,     Decompress_huff},         // Huffmann decompression
-	    {MPQ_COMPRESSION_ADPCM_STEREO, Decompress_ADPCM_stereo}, // IMA ADPCM stereo decompression
-	    {MPQ_COMPRESSION_ADPCM_MONO,   Decompress_ADPCM_mono},   // IMA ADPCM mono decompression
-	    {MPQ_COMPRESSION_SPARSE,       Decompress_SPARSE}        // Sparse decompression
-	};*/
-	
-	//private WritableByteBuffer adapter = new WritableByteBuffer();
-	/*private OutputStream adapterFront = Channels.newOutputStream(adapter);
-	
-	private InflaterOutputStream zlibInflater = new InflaterOutputStream(adapterFront);
-	private WritableByteChannel zlibDecompressWriter = Channels.newChannel(zlibInflater);*/
+public class Compression {
+
 	private PKExploder pkexploderDecompress = new PKExploder();
 	private Huffman huffmanDecompress = new Huffman();
 	private ADPCM adpcmDecompress = new ADPCM(2);

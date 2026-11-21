@@ -15,8 +15,9 @@ public class Grid {
 
 	public Grid(final float x, final float y, final int width, final int depth, final int cellWidth,
 			final int cellDepth) {
-		final int columns = width / cellWidth;
-		final int rows = depth / cellDepth;
+		// Rounded up: a remainder narrower than a cell still needs its own column, or instances there would be dropped.
+		final int columns = Math.max(1, (width + cellWidth - 1) / cellWidth);
+		final int rows = Math.max(1, (depth + cellDepth - 1) / cellDepth);
 
 		this.x = x;
 		this.y = y;
@@ -86,32 +87,24 @@ public class Grid {
 		int bottom = (int) (Math.floor((y - (r * s.y)) / this.cellDepth));
 		int top = (int) (Math.floor((y + (r * s.y)) / this.cellDepth));
 
-		if ((right < 0) || (left > (this.columns - 1)) || (top < 0) || (bottom > (this.rows - 1))) {
-			// The instance is outside of the grid, so remove it.
+		// Clamp the values so they are in the grid; an instance beyond the edge stays in the nearest cells
+		// instead of dropping out of the scene.
+		left = Math.max(0, Math.min(left, this.columns - 1));
+		right = Math.max(0, Math.min(right, this.columns - 1));
+		bottom = Math.max(0, Math.min(bottom, this.rows - 1));
+		top = Math.max(0, Math.min(top, this.rows - 1));
+
+		// If the values actually changed, update the cells.
+		if ((left != instance.left) || (right != instance.right) || (bottom != instance.bottom)
+				|| (top != instance.top)) {
 			this.remove(instance);
-		}
-		else {
-			// Clamp the values so they are in the grid.
-			left = Math.max(left, 0);
-			right = Math.min(right, this.columns - 1);
-			bottom = Math.max(bottom, 0);
-			top = Math.min(top, this.rows - 1);
 
-			// If the values actually changed, update the cells.
-			if ((left != instance.left) || (right != instance.right) || (bottom != instance.bottom)
-					|| (top != instance.top)) {
-				/// TODO: This can be optimized by checking if there are shared cells.
-				/// That can be done in precisely the same way as done a few lines above, i.e.
-				/// simple rectangle intersection.
-				this.remove(instance);
+			instance.left = left;
+			instance.right = right;
+			instance.bottom = bottom;
+			instance.top = top;
 
-				instance.left = left;
-				instance.right = right;
-				instance.bottom = bottom;
-				instance.top = top;
-
-				this.add(instance);
-			}
+			this.add(instance);
 		}
 	}
 

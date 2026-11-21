@@ -21,6 +21,7 @@ import java.util.function.Predicate;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.utils.LongMap;
 import com.badlogic.gdx.math.Vector2;
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.HandleIdSource;
@@ -31,6 +32,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedFormerly;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedDefault;
 import com.etheller.interpreter.ast.scope.variableevent.CLimitOp;
 import com.etheller.interpreter.ast.scope.variableevent.VariableEvent;
+import com.etheller.interpreter.ast.util.JassProfiler;
 import com.etheller.warsmash.parsers.jass.JassAIEnvironment;
 import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.units.DataTable;
@@ -58,6 +60,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.hand
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorMove;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CImage;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CMultiboard;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCommandEvents;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CTrackable;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttackInstant;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttackListener;
@@ -144,6 +147,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	private final List<TextTag> scriptTextTags = new ArrayList<>();
 	private final List<CImage> scriptImages = new ArrayList<>();
 	private final List<CTrackable> trackables = new ArrayList<>();
+	private final CCommandEvents commandEvents = new CCommandEvents();
 	/** The multiboard drawn: the one shown last. */
 	private CMultiboard shownMultiboard;
 	private boolean multiboardsSuppressed;
@@ -154,6 +158,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	private final List<CEffect> newProjectiles;
 	private final List<CUnitSpellEffectListener> spellEffectListeners = new ArrayList<>();
 	private final HandleIdAllocator handleIdAllocator;
+	@SavedTransient
 	private transient final SimulationRenderController simulationRenderController;
 	private int gameTurnTick = 0;
 	private boolean scriptStartPending = false;
@@ -186,14 +191,16 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	private final List<Trigger> addedOnTickTriggers = new ArrayList<>();
 	private final List<Trigger> removedOnTickTriggers = new ArrayList<>();
 	private final LinkedList<Trigger> onTickTriggers = new LinkedList<>();
+	@SavedTransient
 	private transient CommandErrorListener commandErrorListener;
 	private transient CPlayerCommandLog playerCommandLog;
+	@SavedTransient
 	private transient CPlayerCommandHost playerCommandHost;
 	@SavedTransient
 	private transient CFrameEventHandler frameEventHandler;
 	private final CRegionManager regionManager;
 	private final List<com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitInRangeEvent> unitInRangeEvents = new ArrayList<>();
-	private final Map<Long, com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CUnitVisionFogModifier> sharedVisions = new HashMap<>();
+	private final LongMap<com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CUnitVisionFogModifier> sharedVisions = new LongMap<>();
 	private final List<TimeOfDayEvent> timeOfDayVariableEvents = new ArrayList<>();
 	private final List<GameStateVariableEvent> gameStateVariableEvents = new ArrayList<>();
 	private final Map<CUnit, CTimerFlyHeight> flyHeightChanges = new HashMap<>();
@@ -1153,7 +1160,7 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		CPathfindingProcessor pathfindingProcessor = this.pathfindingProcessors[playerIndex];
 		if (pathfindingProcessor == null) {
 			if (this.pathfindingGraph == null) {
-				this.pathfindingGraph = new CPathfindingProcessor.SharedGraph(this.pathingGrid);
+				this.pathfindingGraph = new CPathfindingProcessor.SharedGraph();
 			}
 			pathfindingProcessor = new CPathfindingProcessor(this.pathingGrid, this.worldCollision,
 					this.pathfindingGraph);
@@ -1164,10 +1171,18 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 				getPlayer(playerIndex).getController() == CMapControl.USER);
 	}
 
+	/** Makes the path search data a unit of a type needs for its first search, while the game is still loading. */
+	public void prewarmPathing(final CUnitType unitType) {
+		if (this.pathfindingGraph == null) {
+			this.pathfindingGraph = new CPathfindingProcessor.SharedGraph();
+		}
+		this.pathfindingGraph.prewarm(this.pathingGrid, unitType.getMovementType(), unitType.getCollisionSize());
+	}
+
 	/** Whether a unit at a point can walk to within a reach of another point, ignoring other units. */
 	public boolean canWalkNear(final CUnit unit, final float toX, final float toY, final float reach) {
 		if (this.pathfindingGraph == null) {
-			this.pathfindingGraph = new CPathfindingProcessor.SharedGraph(this.pathingGrid);
+			this.pathfindingGraph = new CPathfindingProcessor.SharedGraph();
 		}
 		return this.pathfindingGraph.canReach(this.pathingGrid, unit.getMovementType(),
 				unit.getUnitType().getCollisionSize(), unit.getX(), unit.getY(), toX, toY, reach);
@@ -1289,6 +1304,9 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public void update() {
+		if (JassProfiler.ENABLED) {
+			JassProfiler.setTick(this.gameTurnTick);
+		}
 		PerfStats.stepMark();
 		if (this.scriptStartPending) {
 			this.scriptStartPending = false;
@@ -1393,9 +1411,11 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		for (final Runnable runnable : this.runningPostUpdateCallbacks) {
 			runnable.run();
 		}
+		PerfStats.stepEnd(PerfStats.Step.POST);
 		expireScriptTextTags();
 		this.handleIdAllocator.endStep();
 		SimulationChecksum.afterStep(this);
+		PerfStats.stepEnd(PerfStats.Step.TAIL);
 	}
 
 	private void updateSelections() {
@@ -1444,6 +1464,11 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public void removeUnit(final CUnit unit) {
+		// A second removal (RemoveUnit twice, or on a handle already gone) must not run onRemove again: the
+		// techtree count would drop twice and the stale handle id, maybe given to a new unit, would be unmapped.
+		if (unit.isRemovedFromGame() || this.removedUnits.contains(unit)) {
+			return;
+		}
 		unit.setHidden(true);
 		final CPlayer player = this.getPlayer(unit.getPlayerIndex());
 		if (unit.getFoodMade() != 0) {
@@ -1458,10 +1483,19 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		this.removedUnits.add(unit);
 	}
 
+	/** True between RemoveUnit and the end of the step that carries it out. */
+	public boolean isRemovalPending(final CUnit unit) {
+		return !this.removedUnits.isEmpty() && this.removedUnits.contains(unit);
+	}
+
 	private void finishAddingNewUnits() {
 		this.units.addAll(this.newUnits);
 		this.newUnits.clear();
 		for (final CUnit unit : this.removedUnits) {
+			if (unit.isRemovedFromGame()) {
+				// Its update already ended it in this step.
+				continue;
+			}
 			this.units.remove(unit);
 			for (final CAbility ability : unit.getAbilities()) {
 				this.handleIdToAbility.remove(ability.getHandleId());
@@ -1917,6 +1951,10 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 
 	public void addTrackable(final CTrackable trackable) {
 		this.trackables.add(trackable);
+	}
+
+	public CCommandEvents getCommandEvents() {
+		return this.commandEvents;
 	}
 
 	public List<CTrackable> getTrackables() {

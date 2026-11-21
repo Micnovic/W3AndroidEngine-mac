@@ -29,7 +29,7 @@ public class EventObjectSnd extends EmittedObject<MdxComplexInstance, EventObjec
 			final EventObjectEmitterObject emitterObject = emitter.emitterObject;
 			final MdxNode node = instance.nodes[emitterObject.index];
 			final AudioContext audioContext = scene.audioContext;
-			final List<Sound> decodedBuffers = emitterObject.decodedBuffers;
+			final List<EventObjectSound> decodedBuffers = emitterObject.decodedBuffers;
 			if (decodedBuffers.isEmpty()) {
 				return;
 			}
@@ -37,24 +37,36 @@ public class EventObjectSnd extends EmittedObject<MdxComplexInstance, EventObjec
 			if ((audioContext.visibility != null) && !audioContext.visibility.isHeardAt(location.x, location.y)) {
 				return;
 			}
-			final AudioPanner panner = audioContext.createPanner();
-			final AudioBufferSource source = audioContext.createBufferSource();
-
-			// Panner settings
-			panner.setPosition(location.x, location.y, location.z);
-			panner.setDistances(emitterObject.distanceCutoff, emitterObject.minDistance);
-			panner.connect(audioContext.destination);
-
-			// Source.
-			source.buffer = decodedBuffers.get((int) (Math.random() * decodedBuffers.size()));
-			source.connect(panner);
-
-			// Make a sound.
-			source.start(0, emitterObject.volume * CSoundMixer.audible().channelScale(emitterObject.channel),
-					(emitterObject.pitch + ((float) Math.random() * emitterObject.pitchVariance * 2))
-							- emitterObject.pitchVariance,
-					false);
+			final float x = location.x;
+			final float y = location.y;
+			final float z = location.z;
+			decodedBuffers.get((int) (Math.random() * decodedBuffers.size()))
+					.whenReady(buffer -> start(audioContext, emitterObject, buffer, x, y, z));
 		}
+	}
+
+	private static void start(final AudioContext audioContext, final EventObjectEmitterObject emitterObject,
+			final Sound buffer, final float x, final float y, final float z) {
+		if (buffer == null) {
+			return;
+		}
+		final AudioPanner panner = audioContext.createPanner();
+		final AudioBufferSource source = audioContext.createBufferSource();
+
+		// Panner settings
+		panner.setPosition(x, y, z);
+		panner.setDistances(emitterObject.distanceCutoff, emitterObject.minDistance);
+		panner.connect(audioContext.destination);
+
+		// Source.
+		source.buffer = buffer;
+		source.connect(panner);
+
+		// Make a sound.
+		source.start(0, emitterObject.volume * CSoundMixer.audible().channelScale(emitterObject.channel),
+				(emitterObject.pitch + ((float) Math.random() * emitterObject.pitchVariance * 2))
+						- emitterObject.pitchVariance,
+				false);
 	}
 
 	@Override

@@ -24,7 +24,7 @@ public class CAbilityTypeDrop extends CAbilityType<CAbilityTypeDropLevelData> {
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeDropLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeDropLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityDrop heroAbility = ((CAbilityDrop) existingAbility);
 
 		heroAbility.setCastRange(levelData.getCastRange());

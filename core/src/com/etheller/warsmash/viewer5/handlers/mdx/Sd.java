@@ -1,6 +1,5 @@
 package com.etheller.warsmash.viewer5.handlers.mdx;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,8 +12,9 @@ public abstract class Sd<TYPE> {
 	public int interpolationType;
 	public War3ID name;
 	public TYPE defval;
-	public SdSequence<TYPE> globalSequence;
-	public List<SdSequence<TYPE>> sequences;
+	/** The keys in each sequence of the model, or in the one global sequence the timeline runs on. */
+	public SdSequence<TYPE> sequences;
+	private boolean global;
 
 	public static final Map<War3ID, Integer> forcedInterpMap = new HashMap<>();
 
@@ -93,8 +93,6 @@ public abstract class Sd<TYPE> {
 		this.model = model;
 		this.name = timeline.getName();
 		this.defval = convertDefaultValue(defVals.get(timeline.getName()));
-		this.globalSequence = null;
-		this.sequences = new ArrayList<>();
 
 		// Allow to force an interpolation type.
 		// The game seems to do this with visibility tracks, where the type is
@@ -105,43 +103,25 @@ public abstract class Sd<TYPE> {
 
 		final SdSequence.SharedKeys shared = SdSequence.sharedKeys(model.arrayPool, timeline);
 		if ((globalSequenceId != -1) && (globalSequences.size() > 0)) {
-			this.globalSequence = new SdSequence<TYPE>(this, 0, globalSequences.get(globalSequenceId).longValue(),
-					timeline, true, arrayDescriptor, shared);
+			this.global = true;
+			this.sequences = new SdSequence<TYPE>(this, new int[1],
+					new int[] { (int) globalSequences.get(globalSequenceId).longValue() }, timeline, true,
+					arrayDescriptor, shared);
 		}
 		else {
-			final long[] frames = timeline.getFrames();
-			final List<Sequence> modelSequences = model.getSequences();
-			for (int i = 0, l = modelSequences.size(); i < l; i++) {
-				final long[] interval = modelSequences.get(i).getInterval();
-
-				if (!hasKeyIn(frames, interval[0], interval[1])) {
-					// One holder of the default value for every timeline of the model that has no key here.
-					this.sequences.add((SdSequence<TYPE>) model.defaultSdSequence(i, interval[0], interval[1]));
-				}
-				else {
-					this.sequences.add(new SdSequence<TYPE>(this, interval[0], interval[1], timeline, false,
-							arrayDescriptor, shared));
-				}
-			}
+			final int[][] intervals = model.sequenceIntervals();
+			this.sequences = new SdSequence<TYPE>(this, intervals[0], intervals[1], timeline, false, arrayDescriptor,
+					shared);
 		}
-	}
-
-	private static boolean hasKeyIn(final long[] frames, final long start, final long end) {
-		for (final long frame : frames) {
-			if ((frame >= start) && (frame <= end)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	public int getValue(final TYPE out, final int sequence, final int frame, final int counter) {
-		if (this.globalSequence != null) {
-			return this.globalSequence.getValue(this, out,
-					this.globalSequence.getEnd() == 0 ? 0 : counter % this.globalSequence.getEnd());
+		if (this.global) {
+			final long end = this.sequences.getEnd(0);
+			return this.sequences.getValue(this, out, 0, end == 0 ? 0 : counter % end);
 		}
 		else if ((sequence != -1) && (this.sequences.size() > sequence)) {
-			return this.sequences.get(sequence).getValue(this, out, frame);
+			return this.sequences.getValue(this, out, sequence, frame);
 		}
 		else {
 			this.copy(out, this.defval);
@@ -151,12 +131,7 @@ public abstract class Sd<TYPE> {
 	}
 
 	public boolean isVariant(final int sequence) {
-		if (this.globalSequence != null) {
-			return !this.globalSequence.constant;
-		}
-		else {
-			return !this.sequences.get(sequence).constant;
-		}
+		return !this.sequences.isConstant(this.global ? 0 : sequence);
 	}
 
 	protected abstract TYPE convertDefaultValue(float[] defaultValue);

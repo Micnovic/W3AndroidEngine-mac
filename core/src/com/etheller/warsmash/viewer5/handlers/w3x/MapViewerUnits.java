@@ -81,6 +81,7 @@ final class MapViewerUnits {
 		viewer.terrain.loadSplats();
 
 		viewer.unitsReady = true;
+		viewer.setDeferModelTextures(true);
 		viewer.anyReady = true;
 	}
 
@@ -195,12 +196,15 @@ final class MapViewerUnits {
 		return createBlobShadow(viewer, renderShadowType, unitX, unitY);
 	}
 
+	// The Classic blob darkens the ground a little more than the HD one for the same texture.
+	private static final float CLASSIC_BLOB_OPACITY = 0.65f;
+
 	static SplatMover createBlobShadow(final War3MapViewer viewer, final RenderShadowType renderShadowType, final float unitX, final float unitY) {
 		if (renderShadowType != null) {
 			final float x = unitX - renderShadowType.getX();
 			final float y = unitY - renderShadowType.getY();
 			return viewer.terrain.addUnitShadowSplat(renderShadowType.getTexture(), x, y, x + renderShadowType.getWidth(),
-					y + renderShadowType.getHeight(), 3, 0.5f, false);
+					y + renderShadowType.getHeight(), 3, viewer.isPackageInterface() ? 0.5f : CLASSIC_BLOB_OPACITY, false);
 		}
 		return null;
 	}

@@ -96,4 +96,29 @@ class CrashReportTest {
 		assertTrue(text.contains("Error\nnone"));
 		assertFalse(text.contains("Last error the game logged"));
 	}
+
+	@Test
+	void snapshotIsShareableButNotACrashLog() {
+		final String name = CrashReport.snapshotName(1762650000000L, UTC);
+		assertEquals("log-20251109-010000.txt", name);
+		assertTrue(CrashReport.isSnapshot(name));
+		assertTrue(CrashReport.isShareable(name));
+		assertFalse(CrashReport.isCrashLog(name));
+		assertFalse(CrashReport.isSnapshot("log-../x.txt"));
+		assertFalse(CrashReport.isShareable("other.txt"));
+		assertEquals(null, CrashReport.newest(Arrays.asList(name)));
+	}
+
+	@Test
+	void snapshotCarriesTheRunLogAndTheLatestCrash() {
+		final CrashReport.Details details = new CrashReport.Details();
+		details.time = 1762650000000L;
+		details.appVersion = "1.2.3";
+		details.log = Arrays.asList("line one", "line two");
+		final String text = CrashReport.snapshotText(details, "Warsmash crash log\nError", UTC);
+		assertTrue(text.contains("App version: 1.2.3"));
+		assertTrue(text.contains("line two"));
+		assertTrue(text.contains("Latest saved crash log\nWarsmash crash log"));
+		assertFalse(CrashReport.snapshotText(details, null, UTC).contains("Latest saved crash log"));
+	}
 }

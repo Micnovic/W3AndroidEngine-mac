@@ -357,7 +357,10 @@ public class JassAIEnvironment {
 			ai.startGetEnemyBase();
 			return null;
 		});
-		natives.createNative("WaitGetEnemyBase", (arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
+		natives.createNative("WaitGetEnemyBase", (arguments, globalScope, triggerScope) -> {
+			ai.waitEnemyBase();
+			return BooleanJassValue.FALSE;
+		});
 		natives.createNative("GetEnemyBase", (arguments, globalScope, triggerScope) -> unit(ai.getEnemyBase()));
 		natives.createNative("GetEnemyExpansion",
 				(arguments, globalScope, triggerScope) -> unit(ai.getEnemyExpansion()));

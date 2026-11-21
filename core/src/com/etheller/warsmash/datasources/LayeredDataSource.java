@@ -155,6 +155,11 @@ public final class LayeredDataSource implements DataSource {
 	}
 
 	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		return this.data.opener(resolve(filepath));
+	}
+
+	@Override
 	public File getFile(final String filepath) throws IOException {
 		return this.data.getFile(resolve(filepath));
 	}
@@ -198,6 +203,11 @@ public final class LayeredDataSource implements DataSource {
 	@Override
 	public Collection<String> getListfile(final Predicate<String> accept) {
 		return this.data.getListfile(accept);
+	}
+
+	@Override
+	public Collection<String> getListfileByExtension(final String extension) {
+		return this.data.getListfileByExtension(extension);
 	}
 
 	@Override

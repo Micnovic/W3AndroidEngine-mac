@@ -38,6 +38,12 @@ public abstract class ABGenericTimedBuff extends ABBuff {
 	}
 
 	@Override
+	public int hashCode() {
+		// Subclasses redefine equals, but every one of them requires the same class.
+		return getClass().getName().hashCode();
+	}
+
+	@Override
 	public void onAdd(CSimulation game, CUnit unit) {
 		this.onBuffAdd(game, unit);
 		startExpiry(game);

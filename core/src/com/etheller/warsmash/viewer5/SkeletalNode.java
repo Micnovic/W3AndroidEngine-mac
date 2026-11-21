@@ -17,6 +17,12 @@ public abstract class SkeletalNode extends GenericNode {
 	protected static final Vector3 blendHeap = new Vector3();
 	protected static final Vector3 blendScaleHeap = new Vector3();
 
+	// The local pose of a node that no timeline moves is the same default for all of them: they read these, and a
+	// node that is ever driven from outside takes a pose of its own first.
+	private static final Vector3 NO_TRANSLATION = new Vector3();
+	private static final Quaternion NO_ROTATION = new Quaternion(0, 0, 0, 1);
+	private static final Vector3 NO_SCALING = new Vector3(1, 1, 1);
+
 	public UpdatableObject object;
 
 	public boolean billboarded;
@@ -240,7 +246,33 @@ public abstract class SkeletalNode extends GenericNode {
 		}
 	}
 
+	/** Makes this node hold the default pose of its own where it only shared it (see the constants above). */
+	public void shareDefaultPose(final boolean translation, final boolean rotation, final boolean scaling) {
+		if (translation) {
+			this.localLocation = NO_TRANSLATION;
+		}
+		if (rotation) {
+			this.localRotation = NO_ROTATION;
+		}
+		if (scaling) {
+			this.localScale = NO_SCALING;
+		}
+	}
+
+	public void ownLocalPose() {
+		if (this.localLocation == NO_TRANSLATION) {
+			this.localLocation = new Vector3(NO_TRANSLATION);
+		}
+		if (this.localRotation == NO_ROTATION) {
+			this.localRotation = new Quaternion(NO_ROTATION);
+		}
+		if (this.localScale == NO_SCALING) {
+			this.localScale = new Vector3(NO_SCALING);
+		}
+	}
+
 	public void setOverrideWorldRotation(final Quaternion overrideLocalRotation) {
+		ownLocalPose();
 		this.overrideWorldRotation = overrideLocalRotation;
 		this.preOverrideLocalRotation = new Quaternion();
 		this.preOverrideLocalRotation.set(this.localRotation);

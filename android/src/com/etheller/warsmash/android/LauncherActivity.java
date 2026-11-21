@@ -51,6 +51,7 @@ import com.etheller.warsmash.launcher.DataFolderCheck;
 import com.etheller.warsmash.launcher.CampaignResult;
 import com.etheller.warsmash.launcher.GameResult;
 import com.etheller.warsmash.launcher.LaunchGuard;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.lan.LanLauncherModel;
 import net.warsmash.lan.maps.LanMapIndex;
@@ -141,6 +142,7 @@ public class LauncherActivity extends AndroidApplication {
 	private File musicTrack;
 	/** A game is being started; the launcher takes no more taps. */
 	boolean launching;
+	private boolean checkingMap;
 	TextView pageNote;
 
 	final PrepPage prepPage = new PrepPage(this);
@@ -391,7 +393,9 @@ public class LauncherActivity extends AndroidApplication {
 					this.loadPage.loadFailureText(result.loadFailure));
 		}
 		else if ((result != null) && result.failed()) {
-			this.dialogs.showMessage(getString(R.string.game_not_started), result.failureText());
+			this.dialogs.showMessage(getString(R.string.game_not_started),
+					result.issue != MapIssue.NONE ? this.customPage.issueText(result.issue, false)
+							: result.failureText());
 		}
 	}
 
@@ -587,7 +591,7 @@ public class LauncherActivity extends AndroidApplication {
 
 	/** The glue click sounds of the skin's art, loaded once the art is prepared. */
 	private void loadClicks() {
-		if ((this.clicks != null) || (this.cache == null) || !new SkinCache.Art(this.cache).has(SkinArt.CLICK)) {
+		if ((this.clicks != null) || (this.cache == null) || !this.cache.file(SkinArt.CLICK).isFile()) {
 			return;
 		}
 		this.clicks = new SoundPool.Builder().setMaxStreams(2)
@@ -710,7 +714,14 @@ public class LauncherActivity extends AndroidApplication {
 
 	/** An original scene behind a page: its recording when the data has one and animations are on, else the still. */
 	BackdropView backdrop(final Drawable still, final String scene, final float focus) {
-		final BackdropView view = new BackdropView(this, still, animated() ? this.art.recording(scene) : null, focus);
+		return backdrop(still, scene, focus, 1, 1);
+	}
+
+	/** As above, the scene enlarged by the zoom about its left edge at pivotY of the height. */
+	BackdropView backdrop(final Drawable still, final String scene, final float focus, final float zoom,
+			final float pivotY) {
+		final BackdropView view = new BackdropView(this, still, animated() ? this.art.recording(scene) : null, focus,
+				zoom, pivotY);
 		this.building.add(view);
 		return view;
 	}
@@ -723,12 +734,26 @@ public class LauncherActivity extends AndroidApplication {
 	BackdropView sceneBackdrop(final Drawable still, final String recorded, final float focus, final int layer,
 			final String skinField, final String fallbackField, final FogSettings fog, final int fogVersion,
 			final float x, final float y, final float w, final float h, final float modelX) {
-		final BackdropView view = backdrop(still, recorded, focus);
+		return sceneBackdrop(still, recorded, focus, layer, skinField, fallbackField, fog, fogVersion, x, y, w, h,
+				modelX, 1, 1);
+	}
+
+	BackdropView sceneBackdrop(final Drawable still, final String recorded, final float focus, final int layer,
+			final String skinField, final String fallbackField, final FogSettings fog, final int fogVersion,
+			final float x, final float y, final float w, final float h, final float modelX, final float zoom,
+			final float pivotY) {
+		final BackdropView view = backdrop(still, recorded, focus, zoom, pivotY);
 		if (!view.hasRecording() && animated() && (this.renderer != null)) {
 			final Rectangle clip = glRect(x, y, w, h);
 			Rectangle viewport = clip;
 			final float sceneW = h * SCENE_ASPECT;
-			if ((modelX >= 0) && (sceneW > w)) {
+			if ((zoom > 1) || (pivotY < 1)) {
+				// A framed scene (pivotY under 1) is placed as its recording is: cropped by the focus, then enlarged.
+				final float framedW = h * CampaignChoice.RECORDING_ASPECT;
+				viewport = glRect(x - (Math.max(0, framedW - w) * focus * zoom), y + (pivotY * h * (1 - zoom)),
+						framedW * zoom, h * zoom);
+			}
+			else if ((modelX >= 0) && (sceneW > w)) {
 				final float crop = CampaignChoice.modelFocus(modelX, w / h, SCENE_ASPECT);
 				viewport = glRect(x - (crop * (sceneW - w)), y, sceneW, h);
 			}
@@ -771,9 +796,50 @@ public class LauncherActivity extends AndroidApplication {
 		}
 	}
 
-	/** Starts a game in the engine; the launcher comes back when it ends, on the page given. */
+	/**
+	 * Starts a game in the engine; the launcher comes back when it ends, on the page given. A map the engine cannot
+	 * play is refused here, before the engine is started.
+	 */
 	void launchGame(final LaunchRequest request, final int returnPage) {
 		// Only one game runs at a time: this is where every page's start action ends up.
+		final LaunchGuard.Blocked blocked = LaunchGuard.check(request);
+		if (blocked != null) {
+			this.lanPage.showBlocked(blocked);
+			return;
+		}
+		if (this.launching || this.checkingMap || isFinishing()) {
+			return;
+		}
+		final GameCatalog asked = this.catalog;
+		if ((request.mapFile == null) || request.mapChecked || (asked == null)) {
+			beginLaunch(request, returnPage);
+			return;
+		}
+		this.checkingMap = true;
+		asked.mapIssue(request.mapFile, issue -> {
+			this.checkingMap = false;
+			if (isFinishing()) {
+				return;
+			}
+			if (issue == null) {
+				// the catalog was closed during the check: the lobby must not wait for a game that never starts
+				if (request.lan) {
+					lan().launchFailed();
+				}
+			}
+			else if (issue == MapIssue.NONE) {
+				beginLaunch(request, returnPage);
+			}
+			else if (request.lan) {
+				lan().launchRefused(issue);
+			}
+			else {
+				this.dialogs.showMessage(getString(R.string.game_not_started), this.customPage.issueText(issue, false));
+			}
+		});
+	}
+
+	private void beginLaunch(final LaunchRequest request, final int returnPage) {
 		final LaunchGuard.Blocked blocked = LaunchGuard.check(request);
 		if (blocked != null) {
 			this.lanPage.showBlocked(blocked);
@@ -838,6 +904,10 @@ public class LauncherActivity extends AndroidApplication {
 
 	/** The engine configuration was changed by the launcher (the content folder): it is read again with the catalog. */
 	void reloadContent() {
+		if (isDestroyed()) {
+			// onDestroy closed the catalog; a new one would keep its thread and the game data open
+			return;
+		}
 		final File iniFile = SkinCache.iniFile(this);
 		try {
 			this.ini = AndroidLauncher.loadWarsmashIni(iniFile);
@@ -856,6 +926,10 @@ public class LauncherActivity extends AndroidApplication {
 	}
 
 	void openGameData() {
+		if (isFinishing()) {
+			// A second tap before this window is gone would open the data folder window twice.
+			return;
+		}
 		final Intent intent = new Intent(this, DataFolderActivity.class);
 		intent.putExtra(DataFolderActivity.EXTRA_OPEN, true);
 		startActivity(intent);

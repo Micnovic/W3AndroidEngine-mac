@@ -171,7 +171,7 @@ package net.warsmash.parsers.jass;
 		if (peekNext() == '.') {
 			zzMarkedPos++;
 			extendDigits(10);
-			yylval = Double.parseDouble(yytext());
+			yylval = com.etheller.interpreter.ast.util.JassNumbers.parseLiteral(yytext());
 			return SmashJassParser.Lexer.REAL;
 		}
 		yylval = parseLiteral(0, 8);

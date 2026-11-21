@@ -88,35 +88,35 @@ final class AIAttack {
 			if (got >= qty) {
 				break;
 			}
-			if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !members.contains(unit)
+			if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !ai.attackCaptain.isMember(unit)
 					&& !isInjured(ai, unit)) {
-				members.add(unit);
+				ai.attackCaptain.addMember(unit);
 				got++;
 			}
 		}
 		if (got < qty) {
-			for (final CUnit unit : AIUnits.inClaimOrder(ai.simulation)) {
+			for (final CUnit unit : AIUnits.inClaimOrder(ai)) {
 				if (got >= qty) {
 					break;
 				}
 				if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !unit.isConstructing()
-						&& !members.contains(unit) && !isInjured(ai, unit)) {
+						&& !ai.attackCaptain.isMember(unit) && !isInjured(ai, unit)) {
 					AIDefense.leavePost(ai, unit);
-					ai.defenseCaptain.getMembers().remove(unit);
-					members.add(unit);
+					ai.defenseCaptain.removeMember(unit);
+					ai.attackCaptain.addMember(unit);
 					got++;
 				}
 			}
 		}
 		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !members.contains(unit)
+			if (unit.getTypeId().equals(typeId) && ai.isArmyUnit(unit) && !ai.attackCaptain.isMember(unit)
 					&& isInjured(ai, unit)) {
 				ai.injured.add(unit);
 			}
 		}
 		int resting = 0;
 		for (final CUnit unit : ai.injured) {
-			if (unit.getTypeId().equals(typeId) && !members.contains(unit)) {
+			if (unit.getTypeId().equals(typeId) && !ai.attackCaptain.isMember(unit)) {
 				resting++;
 			}
 		}
@@ -126,7 +126,7 @@ final class AIAttack {
 	}
 
 	static void removeInjuries(final AIController ai) {
-		for (final Iterator<CUnit> iterator = ai.attackCaptain.getMembers().iterator(); iterator.hasNext();) {
+		for (final Iterator<CUnit> iterator = ai.attackCaptain.memberIterator(); iterator.hasNext();) {
 			final CUnit unit = iterator.next();
 			if (unit.getLife() < (unit.getMaxLife() * 0.5f)) {
 				iterator.remove();
@@ -136,7 +136,7 @@ final class AIAttack {
 	}
 
 	static void removeSiege(final AIController ai) {
-		for (final Iterator<CUnit> iterator = ai.attackCaptain.getMembers().iterator(); iterator.hasNext();) {
+		for (final Iterator<CUnit> iterator = ai.attackCaptain.memberIterator(); iterator.hasNext();) {
 			final CUnit unit = iterator.next();
 			for (final War3ID siege : SIEGE_UNITS) {
 				if (siege.equals(unit.getTypeId())) {
@@ -218,7 +218,7 @@ final class AIAttack {
 				return true;
 			}
 			for (final CUnit unit : ai.simulation.getUnits()) {
-				if (ai.isArmyUnit(unit) && !ai.attackCaptain.getMembers().contains(unit)
+				if (ai.isArmyUnit(unit) && !ai.attackCaptain.isMember(unit)
 						&& (unit.getCurrentBehavior() instanceof CBehaviorAttack)) {
 					return true;
 				}
@@ -277,7 +277,7 @@ final class AIAttack {
 		final boolean[] attacked = new boolean[1];
 		ai.simulation.getWorldCollision().enumUnitsInRange(x, y, ATTACKER_RADIUS, (unit) -> {
 			if (ai.isEnemy(unit) && (unit.getCurrentBehavior() instanceof CBehaviorAttack)
-					&& members.contains(((CBehaviorAttack) unit.getCurrentBehavior()).getTarget())) {
+					&& attack.isMember(((CBehaviorAttack) unit.getCurrentBehavior()).getTarget())) {
 				attacked[0] = true;
 				return true;
 			}
@@ -433,12 +433,12 @@ final class AIAttack {
 	static void suicideUnit(final AIController ai, final int count, final int typeIdValue, final int targetPlayer) {
 		final War3ID typeId = new War3ID(typeIdValue);
 		int sent = 0;
-		for (final CUnit unit : AIUnits.inClaimOrder(ai.simulation)) {
+		for (final CUnit unit : AIUnits.inClaimOrder(ai)) {
 			if (sent >= count) {
 				break;
 			}
 			if (ai.isArmyUnit(unit) && unit.getTypeId().equals(typeId)
-					&& !ai.attackCaptain.getMembers().contains(unit)) {
+					&& !ai.attackCaptain.isMember(unit)) {
 				final CUnit target = targetPlayer >= 0 ? nearestUnitOf(ai, targetPlayer, true)
 						: AIMapKnowledge.getEnemyBase(ai);
 				if (target != null) {
@@ -450,7 +450,7 @@ final class AIAttack {
 	}
 
 	static void pruneMembers(final AIController ai) {
-		for (final Iterator<CUnit> iterator = ai.attackCaptain.getMembers().iterator(); iterator.hasNext();) {
+		for (final Iterator<CUnit> iterator = ai.attackCaptain.memberIterator(); iterator.hasNext();) {
 			final CUnit unit = iterator.next();
 			if (!ai.isOurs(unit) || (unit.isHidden() && !isAboard(ai, unit))) {
 				iterator.remove();
@@ -461,13 +461,14 @@ final class AIAttack {
 
 	static void updateCaptains(final AIController ai) {
 		pruneMembers(ai);
+		ai.attackCaptain.forgetRemovedPreviousMembers();
 		ai.attackCaptain.forgetOrders();
 		final AICaptain attack = ai.attackCaptain;
 		if ((attack.getGoalUnit() != null) && (attack.getGoalUnit().isDead() || attack.getGoalUnit().isHidden())) {
 			attack.clearGoal();
 		}
 		final AbilityPointTarget home = new AbilityPointTarget(attack.getHomeX(), attack.getHomeY());
-		for (final Iterator<CUnit> iterator = attack.getMembers().iterator(); iterator.hasNext();) {
+		for (final Iterator<CUnit> iterator = attack.memberIterator(); iterator.hasNext();) {
 			final CUnit unit = iterator.next();
 			final boolean hero = unit.getHeroData() != null;
 			final float lifeRatio = unit.getLife() / unit.getMaxLife();
@@ -505,7 +506,7 @@ final class AIAttack {
 			driveAttackCaptain(ai);
 		}
 		else if (!attack.isRetreating()) {
-			ai.gatherOrdered.retainAll(attack.getMembers());
+			ai.gatherOrdered.removeIf((unit) -> !attack.isMember(unit));
 			final List<CUnit> gathering = new ArrayList<>();
 			for (final CUnit unit : attack.getMembers()) {
 				if (unit.getCurrentBehavior() instanceof CBehaviorAttack) {
@@ -543,7 +544,7 @@ final class AIAttack {
 	 */
 	private static void checkStuck(final AIController ai) {
 		final AICaptain attack = ai.attackCaptain;
-		ai.lastPositions.keySet().retainAll(attack.getMembers());
+		ai.lastPositions.keySet().removeIf((unit) -> !attack.isMember(unit));
 		final AbilityPointTarget goal = new AbilityPointTarget(attack.getGoalX(), attack.getGoalY());
 		for (final CUnit unit : attack.getMembers()) {
 			if (isAboard(ai, unit)) {
@@ -606,7 +607,7 @@ final class AIAttack {
 		final CUnit goalUnit = viaStage ? null : attack.getGoalUnit();
 		final AbilityPointTarget goal = viaStage ? new AbilityPointTarget(ai.stageX, ai.stageY)
 				: new AbilityPointTarget(attack.getGoalX(), attack.getGoalY());
-		ai.orderedTargets.keySet().retainAll(attack.getMembers());
+		ai.orderedTargets.keySet().removeIf((unit) -> !attack.isMember(unit));
 		final boolean footReachable = ai.simulation.getPathingGrid().isPathable(goal.x, goal.y,
 				MovementType.FOOT);
 		final AbilityPointTarget home = new AbilityPointTarget(attack.getHomeX(), attack.getHomeY());

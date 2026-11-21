@@ -438,6 +438,9 @@ final class CUnitProduction {
 		heroData.setReviving(false);
 		heroData.setAwaitingRevive(false);
 		unlockTechtreeOnRevive(self, game);
+		// A hero revived from its own death trigger is still in the collision where it died, and one with raisable
+		// bones is in the corpse tree.
+		game.getWorldCollision().removeUnit(self);
 		self.death.corpse = false;
 		self.death.boneCorpse = false;
 		self.death.freshCorpse = false;
@@ -470,6 +473,9 @@ final class CUnitProduction {
 		heroData.setReviving(false);
 		heroData.setAwaitingRevive(false);
 		unlockTechtreeOnRevive(self, game);
+		// A hero revived from its own death trigger is still in the collision where it died, and one with raisable
+		// bones is in the corpse tree.
+		game.getWorldCollision().removeUnit(self);
 		self.death.corpse = false;
 		self.death.boneCorpse = false;
 		self.death.freshCorpse = false;

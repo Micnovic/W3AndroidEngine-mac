@@ -1096,7 +1096,7 @@ public final class LanClient {
 				try {
 					found = index.find(info);
 				}
-				catch (final IOException e) {
+				catch (final IOException | RuntimeException e) {
 					LanLog.warn("map search failed", e);
 				}
 				final File result = found;
@@ -1710,8 +1710,16 @@ public final class LanClient {
 		});
 	}
 
-	/** Queues a command for the next turn and returns its sequence number. Safe from any thread. */
+	/**
+	 * Queues a command for the next turn and returns its sequence number, or -1 for a command too long to travel.
+	 * Safe from any thread.
+	 */
 	public int sendCommand(final byte[] command) {
+		if (command.length > LanProtocol.MAX_COMMAND_BYTES) {
+			// Its number would never reach the host, which closes the link at the gap the next command leaves.
+			LanLog.warn("command of " + command.length + " bytes not sent");
+			return -1;
+		}
 		final int seq;
 		synchronized (this.cmdLock) {
 			seq = ++this.nextSeq;

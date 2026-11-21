@@ -27,6 +27,13 @@ public abstract class ModelInstance extends Node {
 	/** Whether the scene already advances this instance's sequence clock while it is out of view. */
 	public boolean clockTracked;
 	/**
+	 * Whether the scene leaves this instance's sequence clock alone while it is out of view and catches it up when it
+	 * is next seen (see {@link #catchUpClock}), so thousands of standing doodads cost nothing off screen.
+	 */
+	public boolean lazyClock;
+	/** Scene time up to which the clock of a lazy instance has been advanced. */
+	public double clockTime;
+	/**
 	 * An effect (spell art, missile, special effect) that the viewer only sees where it has vision; the scene asks its
 	 * fog filter before drawing it.
 	 */
@@ -60,11 +67,24 @@ public abstract class ModelInstance extends Node {
 	}
 
 	public void show() {
+		// Time spent hidden does not count: a hidden instance never advanced.
+		settleClock(false);
 		this.rendered = true;
 	}
 
 	public void hide() {
+		settleClock(true);
 		this.rendered = false;
+	}
+
+	/**
+	 * Brings the clock of a lazy instance up to the scene's time (or, without advancing, marks it as being there), for
+	 * whoever is about to change what the clock runs on.
+	 */
+	public void settleClock(final boolean advance) {
+		if (this.lazyClock && (this.scene instanceof WorldScene)) {
+			((WorldScene) this.scene).settleClock(this, advance);
+		}
 	}
 
 	public boolean shown() {
@@ -90,6 +110,13 @@ public abstract class ModelInstance extends Node {
 	 * computing nodes or batches, so what the viewer sees on return is where the animation would be.
 	 */
 	public void advanceClock(final float dt) {
+	}
+
+	/**
+	 * Advances the clock by time the instance spent out of view, letting whoever picks the next sequence at an end do so
+	 * for each one that would have ended meanwhile.
+	 */
+	public void catchUpClock(final float seconds) {
 	}
 
 	/** Whether the current sequence still has to reach its end, so something may be waiting for that end. */
@@ -153,7 +180,7 @@ public abstract class ModelInstance extends Node {
 		return result;
 	}
 
-	private void updateSceneGridLocationInfo() {
+	void updateSceneGridLocationInfo() {
 		if (this.scene != null) {
 			// can't just use world location if it moves
 			float x, y;
@@ -278,7 +305,36 @@ public abstract class ModelInstance extends Node {
 	public void packBones(final BoneAtlas atlas) {
 	}
 
+	private boolean waiting;
+
 	public abstract void load();
+
+	/**
+	 * Whether this instance was made while its model's file was still being read and is not loaded yet: it shows
+	 * nothing, and what its owner asks for that depends on the model's contents is kept until
+	 * {@link #modelLoaded()}.
+	 */
+	public boolean isWaiting() {
+		return this.waiting;
+	}
+
+	void setWaiting(final boolean waiting) {
+		this.waiting = waiting;
+	}
+
+	/** Loads this instance, made while its model's file was still being read, now that the model is built. */
+	void loadWaiting() {
+		this.waiting = false;
+		load();
+		if (this.scene != null) {
+			this.scene.instanceLoaded(this);
+		}
+		modelLoaded();
+	}
+
+	/** After {@link #loadWaiting()}: what was set on the empty instance and depends on the model's contents. */
+	protected void modelLoaded() {
+	}
 
 	protected abstract RenderBatch getBatch(TextureMapper textureMapper2);
 

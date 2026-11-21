@@ -15,7 +15,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
  * the chat line's place; a known code with an argument that is not a number does nothing and shows nothing. The
  * resource, map, upgrade, time of day and game rule cheats reach every player; whosyourdaddy only the typing player.
  * From a script (the Cheat native) the developer cheats campaign AI scripts call (showmap, av, dg, vision N, gold N,
- * ...) do nothing in a release game.
+ * ...) do nothing in a release game. tenthleveltaurenchieftain only plays a song (Code.musicName).
  */
 public final class CReleaseCheats {
 	public static final int GOD_MODE = 1;
@@ -61,12 +61,23 @@ public final class CReleaseCheats {
 		WHOISJOHNGALT,
 		THEDUDEABIDES,
 		IOCAINEPOWDER,
-		MOTHERLAND;
+		MOTHERLAND,
+		TENTHLEVELTAURENCHIEFTAIN;
 
 		private static final Code[] VALUES = values();
 
 		public String text() {
 			return name().toLowerCase(Locale.US);
+		}
+
+		/**
+		 * The music a code plays on the typing player's machine, or null. Measured on 1.29: the line is taken as a
+		 * cheat (it reaches no chat trigger and shows no chat line) but shows no text and changes nothing in the game.
+		 * The song, Power of the Horde, is the only unused track of the music table; the original's sound could not be
+		 * recorded (a 1.29 window kept off screen opens no audio session).
+		 */
+		public String musicName() {
+			return this == TENTHLEVELTAURENCHIEFTAIN ? "PH1" : null;
 		}
 
 		static Code of(final String text) {
@@ -237,6 +248,8 @@ public final class CReleaseCheats {
 		}
 		case MOTHERLAND:
 			return parsed.motherland() == null ? Result.IGNORED : Result.ENABLED;
+		case TENTHLEVELTAURENCHIEFTAIN:
+			return Result.IGNORED;
 		case ISEEDEADPEOPLE:
 			return toggledOn(!simulation.isCheatRevealMap());
 		case WARPTEN:

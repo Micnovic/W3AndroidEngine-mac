@@ -2,6 +2,8 @@ package com.etheller.interpreter.ast.util;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.etheller.interpreter.ast.debug.JassException;
 import com.etheller.interpreter.ast.definition.JassDefinitionBlock;
@@ -19,6 +21,12 @@ public class JassProgram {
 	public final List<JassLibraryDefinitionBlock> libraries = new ArrayList<>();
 	public final List<JassScopeDefinitionBlock> scopes = new ArrayList<>();
 	public final List<JassDefinitionBlock> everythingElse = new ArrayList<>();
+
+	/**
+	 * Parsed definition blocks by script path. Blocks are immutable and define() builds fresh state in the scope
+	 * it is given, so every AI player can define the same parse in its own program.
+	 */
+	private final Map<String, List<JassDefinitionBlock>> parsedBlocks = new ConcurrentHashMap<>();
 
 	private boolean paused = false;
 
@@ -71,6 +79,14 @@ public class JassProgram {
 			}
 		}
 
+	}
+
+	public List<JassDefinitionBlock> getParsedBlocks(final String path) {
+		return this.parsedBlocks.get(path);
+	}
+
+	public void putParsedBlocks(final String path, final List<JassDefinitionBlock> blocks) {
+		this.parsedBlocks.put(path, blocks);
 	}
 
 	public void setPaused(final boolean paused) {

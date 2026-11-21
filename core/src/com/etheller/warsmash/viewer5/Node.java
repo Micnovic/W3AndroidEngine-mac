@@ -15,6 +15,7 @@ public abstract class Node extends GenericNode {
 	protected static final Vector3 scalingHeap = new Vector3();
 	protected static final Quaternion inverseRotationHeap = new Quaternion();
 	protected static final Vector3 inverseScaleHeap = new Vector3();
+	private static final float[] previousWorldHeap = new float[16 + 4 + 3];
 
 	public Node() {
 		this.pivot = new Vector3();
@@ -165,6 +166,15 @@ public abstract class Node extends GenericNode {
 
 		if (dirty) {
 			this.dirty = false;
+			final float[] previous = previousWorldHeap;
+			System.arraycopy(this.worldMatrix.val, 0, previous, 0, 16);
+			previous[16] = this.worldRotation.x;
+			previous[17] = this.worldRotation.y;
+			previous[18] = this.worldRotation.z;
+			previous[19] = this.worldRotation.w;
+			previous[20] = this.worldScale.x;
+			previous[21] = this.worldScale.y;
+			previous[22] = this.worldScale.z;
 
 			if (parent != null) {
 				Vector3 computedLocation;
@@ -226,6 +236,12 @@ public abstract class Node extends GenericNode {
 
 				this.worldScale.set(this.localScale);
 			}
+
+			// Units are placed and turned every frame even while they stand still; a transform that came out the same
+			// leaves the nodes below it as they are, so a standing unit's skeleton is not worked out again.
+			if (sameWorldTransform(previous)) {
+				this.wasDirty = false;
+			}
 		}
 
 		// World location
@@ -233,6 +249,19 @@ public abstract class Node extends GenericNode {
 		this.worldLocation.y = this.worldMatrix.val[Matrix4.M13];
 		this.worldLocation.z = this.worldMatrix.val[Matrix4.M23];
 
+	}
+
+	private boolean sameWorldTransform(final float[] previous) {
+		final float[] val = this.worldMatrix.val;
+		for (int i = 0; i < 16; i++) {
+			if (val[i] != previous[i]) {
+				return false;
+			}
+		}
+		return (this.worldRotation.x == previous[16]) && (this.worldRotation.y == previous[17])
+				&& (this.worldRotation.z == previous[18]) && (this.worldRotation.w == previous[19])
+				&& (this.worldScale.x == previous[20]) && (this.worldScale.y == previous[21])
+				&& (this.worldScale.z == previous[22]);
 	}
 
 	@Override

@@ -40,14 +40,34 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 	private String replaceableTextureFile;
 	private final War3MapViewer map;
 	private boolean active;
+	/** The shadow image to lay once the model says whether it casts a shadow of its own, see {@link #modelBuilt}. */
+	private final String shadowFile;
+	/** What a script asked of the animation while the model was not built, replayed when it is. */
+	private String waitingAnimation;
+	private float waitingSpeed = 1f;
 
 	public RenderDestructable(final War3MapViewer map, final MdxModel model, MdxModel portraitModel,
 			final GameObject row, final float[] location3D, final float[] scale3D, final float facingRadians,
 			final float selectionScale, final float maxPitch, final float maxRoll, final float life,
 			final BuildingShadow destructableShadow, final CDestructable simulationDestructable,
 			final int doodadVariation) {
-		super(map, model, row, location3D, scale3D, facingRadians, maxPitch, maxRoll, selectionScale, doodadVariation);
+		this(map, model, portraitModel, row, location3D, scale3D, facingRadians, selectionScale, maxPitch, maxRoll,
+				life, destructableShadow, null, false, simulationDestructable, doodadVariation);
+	}
+
+	/**
+	 * @param waitForModel whether the model may still be being read: the destructable then shows when it is built, and
+	 *                     the shadow image of {@code shadowFile} is decided then too
+	 */
+	public RenderDestructable(final War3MapViewer map, final MdxModel model, MdxModel portraitModel,
+			final GameObject row, final float[] location3D, final float[] scale3D, final float facingRadians,
+			final float selectionScale, final float maxPitch, final float maxRoll, final float life,
+			final BuildingShadow destructableShadow, final String shadowFile, final boolean waitForModel,
+			final CDestructable simulationDestructable, final int doodadVariation) {
+		super(map, model, row, location3D, scale3D, facingRadians, maxPitch, maxRoll, selectionScale, doodadVariation,
+				waitForModel);
 		this.map = map;
+		this.shadowFile = shadowFile;
 		this.portraitModel = portraitModel;
 		this.life = simulationDestructable.getLife();
 		this.destructableShadow = destructableShadow;
@@ -63,10 +83,10 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 				this.blighted = true;
 				this.replaceableTextureFile = blightTextureFile(map, this.replaceableTextureFile);
 			}
-			this.instance.setReplaceableTexture(this.replaceableTextureId, this.replaceableTextureFile + ".blp");
-			if (model.hd) {
-				this.instance.setReplaceableTextureHD(this.replaceableTextureId, this.replaceableTextureFile);
-			}
+		}
+		final boolean waiting = this.instance.isWaiting();
+		if (!waiting) {
+			modelBuilt(false);
 		}
 		this.selectionScale *= row.getFieldAsFloat(SEL_CIRCLE_SIZE, 0);
 		this.unitAnimationListenerImpl = new UnitAnimationListenerImpl((MdxComplexInstance) this.instance, 0, 0);
@@ -75,6 +95,50 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		this.selectable = row.readSLKTagBoolean("selectable");
 		this.unitAnimationListenerImpl.setActivityObserver(this::wake);
 		((MdxComplexInstance) this.instance).sequenceEndObserver = this::wake;
+		if (waiting) {
+			// the animation the listener keeps is started by its own observer, after the model's part is done here
+			final Runnable animationStart = getInstance().modelLoadedObserver;
+			getInstance().modelLoadedObserver = () -> {
+				modelBuilt(true);
+				if (animationStart != null) {
+					animationStart.run();
+				}
+				replayWaitingScript();
+			};
+		}
+	}
+
+	/**
+	 * What the destructable takes from its model's contents: its scene shadow, replaceable texture and shadow image.
+	 *
+	 * @param late whether the destructable has been made for a while, so that it may be gone again
+	 */
+	private void modelBuilt(final boolean late) {
+		final MdxModel model = (MdxModel) this.instance.model;
+		final MdxComplexInstance mdxInstance = getInstance();
+		mdxInstance.sceneryShadow = this.map.getDynamicShadowManager().castsSceneShadow(model, getScaleZ());
+		if ((this.replaceableTextureFile != null) && (this.replaceableTextureFile.length() > 1)) {
+			this.instance.setReplaceableTexture(this.replaceableTextureId, this.replaceableTextureFile + ".blp");
+			if (model.hd) {
+				this.instance.setReplaceableTextureHD(this.replaceableTextureId, this.replaceableTextureFile);
+			}
+		}
+		if ((this.shadowFile != null) && !mdxInstance.sceneryShadow && !this.dead
+				&& !this.simulationDestructable.isDead()
+				&& (!late || (this.map.getRenderPeer(this.simulationDestructable) == this))) {
+			this.destructableShadow = this.map.terrain.addShadow(this.shadowFile, this.x, this.y, true);
+		}
+	}
+
+	private void replayWaitingScript() {
+		final String animation = this.waitingAnimation;
+		this.waitingAnimation = null;
+		if (animation != null) {
+			setAnimation(animation);
+		}
+		if (this.waitingSpeed != 1f) {
+			setAnimationSpeed(this.waitingSpeed);
+		}
 	}
 
 	@Override
@@ -144,6 +208,10 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		// TODO maybe move getAnimation behaviors to here and make this thing not a
 		// doodad
 
+		if (this.instance.isWaiting()) {
+			// what changed is dealt with once the model is built
+			return;
+		}
 		final boolean dead = this.simulationDestructable.isDead();
 		final boolean blighted = this.simulationDestructable.isBlighted();
 		final boolean changed = (dead != this.dead) || (blighted && !this.blighted)
@@ -283,6 +351,10 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 	}
 
 	public void setAnimation(final String sequence) {
+		if (this.instance.isWaiting()) {
+			this.waitingAnimation = sequence;
+			return;
+		}
 		final EnumSet<PrimaryTag> primaryTags = EnumSet.noneOf(PrimaryTag.class);
 		PrimaryTag bestPrimaryTag = null;
 		final EnumSet<SecondaryTag> secondaryTags = EnumSet.noneOf(SecondaryTag.class);
@@ -327,6 +399,10 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 	}
 
 	public void setAnimationSpeed(final float speed) {
+		if (this.instance.isWaiting()) {
+			this.waitingSpeed = speed;
+			return;
+		}
 		if (this.instance instanceof MdxComplexInstance) {
 			((MdxComplexInstance) this.instance).setAnimationSpeed(speed);
 		}

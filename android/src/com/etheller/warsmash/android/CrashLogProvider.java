@@ -14,7 +14,7 @@ import android.provider.OpenableColumns;
 
 import com.etheller.warsmash.launcher.CrashReport;
 
-/** Gives the share sheet read access to the crash logs of the app's private files, and to nothing else. */
+/** Gives the share sheet read access to the crash logs and log snapshots of the app's private files, and to nothing else. */
 public final class CrashLogProvider extends ContentProvider {
 	static Uri uri(final Context context, final String name) {
 		return new Uri.Builder().scheme("content").authority(context.getPackageName() + ".crashlogs").appendPath(name)
@@ -23,7 +23,7 @@ public final class CrashLogProvider extends ContentProvider {
 
 	private File fileOf(final Uri uri) throws FileNotFoundException {
 		final String name = uri.getLastPathSegment();
-		if (!CrashReport.isCrashLog(name)) {
+		if (!CrashReport.isShareable(name)) {
 			throw new FileNotFoundException(String.valueOf(uri));
 		}
 		final File file = new File(CrashLogs.privateFolder(getContext()), name);

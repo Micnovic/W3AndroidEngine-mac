@@ -82,6 +82,10 @@ final class MapViewerSaves {
 		state.fogDensity = fog.density;
 		state.fogStart = fog.start;
 		state.fogEnd = fog.end;
+		state.fogMaxOpacity = fog.maxOpacity;
+		state.fogHeightMin = fog.heightMin;
+		state.fogHeightMax = fog.heightMax;
+		state.fogDrawOverSky = fog.drawOverSky;
 		state.waterColor = viewer.waterColor;
 		state.allyColorFilterState = viewer.getAllyColorFilter().getState();
 		state.restartMissionDisabled = viewer.restartMissionDisabled;
@@ -108,6 +112,12 @@ final class MapViewerSaves {
 			fog.density = state.fogDensity;
 			fog.start = state.fogStart;
 			fog.end = state.fogEnd;
+			if (state.fogMaxOpacity > 0) {
+				fog.maxOpacity = state.fogMaxOpacity;
+				fog.heightMin = state.fogHeightMin;
+				fog.heightMax = state.fogHeightMax;
+				fog.drawOverSky = state.fogDrawOverSky;
+			}
 		}
 		if (state.waterColor != null) {
 			viewer.setWaterBaseColor(state.waterColor);

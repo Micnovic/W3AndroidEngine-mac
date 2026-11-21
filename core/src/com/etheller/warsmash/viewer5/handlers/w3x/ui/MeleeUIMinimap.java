@@ -34,6 +34,9 @@ public class MeleeUIMinimap {
 	private Function<String, Texture> altIconLoader;
 	private String loadedAltIconPath;
 	private Texture loadedAltIcon;
+	private Supplier<String> terrainTexturePath;
+	private String loadedTerrainTexturePath;
+	private Texture loadedTerrainTexture;
 	private Supplier<List<ScriptMinimapIcon>> scriptIcons;
 	private final Map<String, Texture> scriptIconTextures = new HashMap<>();
 	private static final float HERO_STEP = 0.01f;
@@ -125,6 +128,24 @@ public class MeleeUIMinimap {
 		this.altIconLoader = loader;
 	}
 
+	/** Where a script's picture for the minimap's terrain (BlzChangeMinimapTerrainTex) is named; it loads like the icons do. */
+	public void setTerrainTextureSource(final Supplier<String> terrainTexturePath) {
+		this.terrainTexturePath = terrainTexturePath;
+	}
+
+	private Texture terrainTexture() {
+		final String path = (this.terrainTexturePath == null) || (this.altIconLoader == null) ? null
+				: this.terrainTexturePath.get();
+		if ((path == null) || path.isEmpty()) {
+			return this.minimapTexture;
+		}
+		if (!path.equals(this.loadedTerrainTexturePath)) {
+			this.loadedTerrainTexturePath = path;
+			this.loadedTerrainTexture = loadScriptIconTexture(path);
+		}
+		return this.loadedTerrainTexture == null ? this.minimapTexture : this.loadedTerrainTexture;
+	}
+
 	/** The icons map scripts created (CreateMinimapIcon*); their textures come from the alternate icon's loader. */
 	public void setScriptIconSource(final Supplier<List<ScriptMinimapIcon>> scriptIcons) {
 		this.scriptIcons = scriptIcons;
@@ -179,7 +200,7 @@ public class MeleeUIMinimap {
 			return;
 		}
 		if (this.terrainVisible) {
-			batch.draw(this.minimapTexture, this.minimap.x, this.minimap.y, this.minimap.width, this.minimap.height);
+			batch.draw(terrainTexture(), this.minimap.x, this.minimap.y, this.minimap.width, this.minimap.height);
 		}
 		else {
 			batch.setColor(0, 0, 0, 1);

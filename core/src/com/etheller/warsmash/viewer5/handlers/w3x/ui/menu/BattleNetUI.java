@@ -2,7 +2,6 @@ package com.etheller.warsmash.viewer5.handlers.w3x.ui.menu;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

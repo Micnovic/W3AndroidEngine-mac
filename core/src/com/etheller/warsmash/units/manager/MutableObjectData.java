@@ -16,6 +16,7 @@ import com.etheller.warsmash.units.custom.Change;
 import com.etheller.warsmash.units.custom.ChangeMap;
 import com.etheller.warsmash.units.custom.ObjectDataChangeEntry;
 import com.etheller.warsmash.units.custom.War3ObjectDataChangeset;
+import com.etheller.warsmash.util.SafeParse;
 import com.etheller.warsmash.util.DataErrors;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.util.War3ID;
@@ -512,7 +513,7 @@ public final class MutableObjectData {
 							if (getAlias().asStringValue().equalsIgnoreCase(use)) {
 								final int index = metaField.getFieldValue("index");
 								if ((key.length() >= 5) && (key.charAt(4) == (('A' + index) - 1))) {
-									final int level = Integer.parseInt(key.substring(5));
+									final int level = SafeParse.parseInt(key.substring(5));
 									return getFieldAsString(War3ID.fromString(metaField.getId()), level);
 								}
 							}
@@ -538,7 +539,7 @@ public final class MutableObjectData {
 							if (getAlias().asStringValue().equalsIgnoreCase(use)) {
 								final int index = metaField.getFieldValue("index");
 								if ((key.length() >= 5) && (key.charAt(4) == (('A' + index) - 1))) {
-									final int level = Integer.parseInt(key.substring(5));
+									final int level = SafeParse.parseInt(key.substring(5));
 									return getFieldAsBoolean(War3ID.fromString(metaField.getId()), level);
 								}
 							}
@@ -564,7 +565,7 @@ public final class MutableObjectData {
 							if (getAlias().asStringValue().equalsIgnoreCase(use)) {
 								final int index = metaField.getFieldValue("index");
 								if ((key.length() >= 5) && (key.charAt(4) == (('A' + index) - 1))) {
-									final int level = Integer.parseInt(key.substring(5));
+									final int level = SafeParse.parseInt(key.substring(5));
 									return getFieldAsInteger(War3ID.fromString(metaField.getId()), level);
 								}
 							}
@@ -590,7 +591,7 @@ public final class MutableObjectData {
 							if (getAlias().asStringValue().equalsIgnoreCase(use)) {
 								final int index = metaField.getFieldValue("index");
 								if ((key.length() >= 5) && (key.charAt(4) == (('A' + index) - 1))) {
-									final int level = Integer.parseInt(key.substring(5));
+									final int level = SafeParse.parseInt(key.substring(5));
 									return getFieldAsFloat(War3ID.fromString(metaField.getId()), level);
 								}
 							}
@@ -747,12 +748,7 @@ public final class MutableObjectData {
 				return matchingChange.getLongval();
 			}
 			// no luck with custom data, look at the standard data
-			try {
-				return Integer.parseInt(getFieldStringFromSLKs(field, level));
-			}
-			catch (final NumberFormatException e) {
-				return 0;
-			}
+			return SafeParse.parseInt(getFieldStringFromSLKs(field, level));
 		}
 
 		public boolean getFieldAsBoolean(final War3ID field, final int level) {
@@ -771,12 +767,7 @@ public final class MutableObjectData {
 				return matchingChange.isBoolval();
 			}
 			// no luck with custom data, look at the standard data
-			try {
-				return Integer.parseInt(getFieldStringFromSLKs(field, level)) == 1;
-			}
-			catch (final NumberFormatException e) {
-				return false;
-			}
+			return SafeParse.parseInt(getFieldStringFromSLKs(field, level)) == 1;
 		}
 
 		public float getFieldAsFloat(final War3ID field, final int level) {
@@ -791,12 +782,7 @@ public final class MutableObjectData {
 				return matchingChange.getRealval();
 			}
 			// no luck with custom data, look at the standard data
-			try {
-				return Float.parseFloat(getFieldStringFromSLKs(field, level));
-			}
-			catch (final NumberFormatException e) {
-				return 0;
-			}
+			return SafeParse.parseFloat(getFieldStringFromSLKs(field, level));
 		}
 
 		public War3ID getAlias() {
@@ -834,16 +820,11 @@ public final class MutableObjectData {
 	}
 
 	private static int asInt(final String text) {
-		if ("#VALUE!".equals(text)) {
-			return 0;
-		}
-		return text == null ? 0
-				: "".equals(text) ? 0 : "-".equals(text) ? 0 : "_".equals(text) ? 0 : Integer.parseInt(text);
+		return SafeParse.parseInt(text);
 	}
 
 	private static float asFloat(final String text) {
-		return text == null ? 0
-				: "".equals(text) ? 0 : "-".equals(text) ? 0 : "_".equals(text) ? 0 : Float.parseFloat(text);
+		return SafeParse.parseFloat(text);
 	}
 
 	public enum WorldEditorDataType implements CHandle {

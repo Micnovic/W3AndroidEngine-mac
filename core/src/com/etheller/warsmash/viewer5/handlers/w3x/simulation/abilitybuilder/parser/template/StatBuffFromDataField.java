@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.NonStackingStatBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.NonStackingStatBuffType;
@@ -69,14 +70,14 @@ public class StatBuffFromDataField {
 		} else {
 			if (this.getPercentageBooleanField() != null) {
 				try {
-					percentage = Integer.parseInt(abilityData.getData()
+					percentage = ABDataText.parseInt(abilityData.getData()
 							.get(this.getPercentageBooleanField().getIndex())) == 1;
 				} catch (NumberFormatException exc) {
 					percentage = false;
 				}
 			} else if (this.getFlatBooleanField() != null) {
 				try {
-					percentage = !(Integer.parseInt(
+					percentage = !(ABDataText.parseInt(
 							abilityData.getData().get(this.getFlatBooleanField().getIndex())) == 1);
 				} catch (NumberFormatException exc) {
 					percentage = true;
@@ -87,11 +88,11 @@ public class StatBuffFromDataField {
 			boolean targetMelee = false;
 			boolean targetRange = false;
 			if (this.getTargetMeleeField() != null) {
-				targetMelee = Integer.parseInt(
+				targetMelee = ABDataText.parseInt(
 						abilityData.getData().get(this.getTargetMeleeField().getIndex())) == 1;
 			}
 			if (this.getTargetRangeField() != null) {
-				targetRange = Integer.parseInt(
+				targetRange = ABDataText.parseInt(
 						abilityData.getData().get(this.getTargetRangeField().getIndex())) == 1;
 			}
 

@@ -171,6 +171,12 @@ final class MapViewerVision {
 		}
 		final float maxOpacity = mapInfo.getFogMaxOpacity();
 		fog.maxOpacity = ((maxOpacity > 0) && (maxOpacity < 1)) ? maxOpacity : 1f;
+		final float[] heightRange = mapInfo.getFogHeightRange();
+		if (heightRange[1] > heightRange[0]) {
+			fog.heightMin = heightRange[0];
+			fog.heightMax = heightRange[1];
+		}
+		fog.drawOverSky = mapInfo.isFogDrawOverSky();
 		fog.density = mapInfo.getFogDensity();
 		fog.color = new Color((color[0] & 0xFF) / 255f, (color[1] & 0xFF) / 255f, (color[2] & 0xFF) / 255f, 1f);
 		viewer.defaultFogSettings = fog;
@@ -179,12 +185,7 @@ final class MapViewerVision {
 
 	static void resetTerrainFog(final War3MapViewer viewer) {
 		if (viewer.defaultFogSettings != null) {
-			viewer.worldScene.fogSettings.color = viewer.defaultFogSettings.color;
-			viewer.worldScene.fogSettings.style = viewer.defaultFogSettings.style;
-			viewer.worldScene.fogSettings.density = viewer.defaultFogSettings.density;
-			viewer.worldScene.fogSettings.start = viewer.defaultFogSettings.start;
-			viewer.worldScene.fogSettings.end = viewer.defaultFogSettings.end;
-			viewer.worldScene.fogSettings.maxOpacity = viewer.defaultFogSettings.maxOpacity;
+			viewer.worldScene.fogSettings.copyFrom(viewer.defaultFogSettings);
 		}
 	}
 }

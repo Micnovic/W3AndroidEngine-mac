@@ -14,6 +14,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CDamageFlags;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CTargetType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CDamageType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringErrorKeys;
@@ -36,6 +38,8 @@ public class CItem extends CWidget {
 	private War3ID dropId;
 	// Set only by SetItemPlayer; -1 is neutral passive, the owner of every map item.
 	private int playerIndex = -1;
+	// The player color a script gave the model (SetItemColor); -1 leaves the model as it is. Only the picture.
+	private int scriptColor = -1;
 	// What a script set on this one item through the object fields; null reads what the item type says.
 	private War3ID skinId;
 	private String nameOverride;
@@ -83,7 +87,8 @@ public class CItem extends CWidget {
 		this.groundAbilities = null;
 
 		game.updateItemModel(this);
-		if (this.containedInventory != null) {
+		// a worn item has no numbered slot to go back to
+		if ((this.containedInventory != null) && (slot >= 0)) {
 			this.containedInventory.giveItem(game, this.containedUnit, this, slot, false);
 		}
 		
@@ -264,6 +269,14 @@ public class CItem extends CWidget {
 		return this.registeredEnumRectangle;
 	}
 
+	public int getScriptColor() {
+		return this.scriptColor;
+	}
+
+	public void setScriptColor(final int scriptColor) {
+		this.scriptColor = scriptColor;
+	}
+
 	public int getPlayerIndex() {
 		return this.playerIndex;
 	}
@@ -368,6 +381,14 @@ public class CItem extends CWidget {
 
 	public int getStackMax() {
 		return this.itemType.getStackMax();
+	}
+
+	public CEquipmentType getEquipmentType() {
+		return this.itemType.getEquipmentType();
+	}
+
+	public CItemTag getItemTag() {
+		return this.itemType.getItemTag();
 	}
 
 	public boolean isDropOnDeath() {

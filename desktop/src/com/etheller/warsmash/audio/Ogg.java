@@ -92,7 +92,7 @@ public class Ogg {
 			if (pcm == null) {
 				pcm = decode(file.read());
 			}
-			setup(pcm.pcm, pcm.channels, pcm.sampleRate);
+			setup(pcm);
 		}
 	}
 }

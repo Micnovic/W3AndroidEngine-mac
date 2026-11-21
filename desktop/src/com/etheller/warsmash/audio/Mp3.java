@@ -17,6 +17,7 @@
 package com.etheller.warsmash.audio;
 
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
@@ -117,48 +118,53 @@ public class Mp3 {
 		}
 	}
 
-	static public class Sound extends OpenALSound {
+	static OggPcm decode(final InputStream stream) {
 		// Note: This uses a slightly modified version of JLayer.
+		final ByteArrayOutputStream output = new ByteArrayOutputStream(4096);
+		final Bitstream bitstream = new Bitstream(stream);
+		final MP3Decoder decoder = new MP3Decoder();
+		try {
+			OutputBuffer outputBuffer = null;
+			int sampleRate = -1, channels = -1;
+			while (true) {
+				final Header header = bitstream.readFrame();
+				if (header == null) {
+					break;
+				}
+				if (outputBuffer == null) {
+					channels = header.mode() == Header.SINGLE_CHANNEL ? 1 : 2;
+					outputBuffer = new OutputBuffer(channels, false);
+					decoder.setOutputBuffer(outputBuffer);
+					sampleRate = header.getSampleRate();
+				}
+				try {
+					decoder.decodeFrame(header, bitstream);
+				}
+				catch (final Exception ignored) {
+					// JLayer's decoder throws ArrayIndexOutOfBoundsException sometimes!?
+				}
+				bitstream.closeFrame();
+				output.write(outputBuffer.getBuffer(), 0, outputBuffer.reset());
+			}
+			bitstream.close();
+			return new OggPcm(output.toByteArray(), channels, sampleRate);
+		}
+		catch (final Throwable ex) {
+			throw new GdxRuntimeException("Error reading audio data.", ex);
+		}
+	}
 
+	static public class Sound extends OpenALSound {
 		public Sound(final OpenALAudio audio, final FileHandle file) {
 			super(audio);
 			if (audio.noDevice) {
 				return;
 			}
-			final ByteArrayOutputStream output = new ByteArrayOutputStream(4096);
-
-			final Bitstream bitstream = new Bitstream(file.read());
-			final MP3Decoder decoder = new MP3Decoder();
-
-			try {
-				OutputBuffer outputBuffer = null;
-				int sampleRate = -1, channels = -1;
-				while (true) {
-					final Header header = bitstream.readFrame();
-					if (header == null) {
-						break;
-					}
-					if (outputBuffer == null) {
-						channels = header.mode() == Header.SINGLE_CHANNEL ? 1 : 2;
-						outputBuffer = new OutputBuffer(channels, false);
-						decoder.setOutputBuffer(outputBuffer);
-						sampleRate = header.getSampleRate();
-					}
-					try {
-						decoder.decodeFrame(header, bitstream);
-					}
-					catch (final Exception ignored) {
-						// JLayer's decoder throws ArrayIndexOutOfBoundsException sometimes!?
-					}
-					bitstream.closeFrame();
-					output.write(outputBuffer.getBuffer(), 0, outputBuffer.reset());
-				}
-				bitstream.close();
-				setup(output.toByteArray(), channels, sampleRate);
+			OggPcm pcm = audio.takePrefetched(file);
+			if (pcm == null) {
+				pcm = decode(file.read());
 			}
-			catch (final Throwable ex) {
-				throw new GdxRuntimeException("Error reading audio data.", ex);
-			}
+			setup(pcm);
 		}
 	}
 }

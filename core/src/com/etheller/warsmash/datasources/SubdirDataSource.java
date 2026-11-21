@@ -45,6 +45,11 @@ public class SubdirDataSource implements DataSource {
 	}
 
 	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		return this.dataSource.opener(this.subdir + filepath);
+	}
+
+	@Override
 	public boolean has(final String filepath) {
 		return this.dataSource.has(this.subdir + filepath);
 	}
@@ -73,10 +78,25 @@ public class SubdirDataSource implements DataSource {
 	@Override
 	public Collection<String> getListfile(final Predicate<String> accept) {
 		final List<String> results = new ArrayList<>();
-		for (final String x : this.dataSource.getListfile(path -> path.startsWith(this.subdir))) {
-			final String inside = x.substring(this.subdir.length());
-			if (accept.test(inside)) {
-				results.add(inside);
+		final int length = this.subdir.length();
+		final PathFilter filter = PathFilter.of(accept);
+		// Filtered by the source below: a package folder holds nearly every path of the game data, and they were all
+		// gathered into a set first.
+		final PathFilter inFolder = (path, from) -> path.startsWith(this.subdir, from)
+				&& filter.test(path, from + length);
+		for (final String x : this.dataSource.getListfile(inFolder)) {
+			results.add(x.substring(length));
+		}
+		return results;
+	}
+
+	@Override
+	public Collection<String> getListfileByExtension(final String extension) {
+		final List<String> results = new ArrayList<>();
+		final int length = this.subdir.length();
+		for (final String x : this.dataSource.getListfileByExtension(extension)) {
+			if (x.startsWith(this.subdir) && ((x.length() - length) >= extension.length())) {
+				results.add(x.substring(length));
 			}
 		}
 		return results;

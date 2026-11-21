@@ -5,7 +5,6 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -19,15 +18,15 @@ import com.etheller.interpreter.ast.scope.variableevent.CLimitOp;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
+import com.etheller.warsmash.parsers.jass.triggers.UnitGroup;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.creeps.CCreepCastAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.blademaster.CBuffWhirlWindCaster;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.PathingFlags;
-import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedComponent;
-import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedDefault;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitStateListener.CUnitStateNotifier;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityDisableType;
@@ -49,6 +48,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.template.AbstractCAbilityAbilityBuilderAuraTemplate;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff.ABGenericTimedBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.BehaviorAbilityVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
@@ -115,7 +115,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetC
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.BooleanAbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringErrorKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.ResourceType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentModel;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitAcquisition.AutocastTargetFinderEnum;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitAcquisition.AutoAttackTargetFinderEnum;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitOrders.UseAbilityOnTargetByIdVisitor;
@@ -199,6 +198,7 @@ public class CUnit extends CWidget {
 	final EnumSet<CUnitClassification> classifications = EnumSet.noneOf(CUnitClassification.class);
 	final EnumSet<CTargetType> targetedAs = EnumSet.noneOf(CTargetType.class);
 
+	@SavedTransient
 	transient CUnitAnimationListener unitAnimationListener;
 
 	// if you use triggers for this then the transient tag here becomes really
@@ -239,7 +239,7 @@ public class CUnit extends CWidget {
 	static final int GUARD_RETURN_NONE = 0;
 	static final int GUARD_RETURN_LOST = 1;
 	static final int GUARD_RETURN_GIVE_UP = 2;
-	static final War3ID CREEP_SLEEP = War3ID.fromString("Asla");
+	public static final War3ID CREEP_SLEEP = War3ID.fromString("Asla");
 	CAbility finishedSpell;
 	static final float SLEEP_AFTER_WAKE_SECONDS = 2.0f;
 	private Boolean canSleepOverride;
@@ -248,6 +248,7 @@ public class CUnit extends CWidget {
 	private War3ID scriptSkinId;
 	private int scriptPauseCount;
 	private boolean heroGlowAllowed = true;
+	private boolean teamGlowShown = true;
 	static final float DEFAULT_RESCUE_RANGE = 414.5f;
 	static final int RESCUE_REPEAT_TICKS = CTimer.wholeSteps(1);
 	private COrder scriptAnimationOrder = null;
@@ -267,6 +268,7 @@ public class CUnit extends CWidget {
 	final List<CUnitAttackFinalDamageTakenModificationListener> finalDamageTakenModificationListeners = new ArrayList<>();
 	final List<CUnitAttackDamageTakenListener> damageTakenListeners = new ArrayList<>();
 	private float healingReceivedFactor = 1f;
+	private final List<Float> healingReceivedFactors = new ArrayList<>();
 	final Map<CUnitDeathReplacementEffectPriority, List<CUnitDeathReplacementEffect>> deathReplacementEffects = new HashMap<>();
 	final List<CUnitAttackEvasionListener> evasionListeners = new ArrayList<>();
 	final List<CUnitAttackProjReactionListener> attackProjReactionListeners = new ArrayList<>();
@@ -607,7 +609,18 @@ public class CUnit extends CWidget {
 	}
 
 	public void remove(final CSimulation simulation, final CBuff ability) {
-		this.abilities.remove(ability);
+		// By identity first: buffs compare equal across sources, and an equal one earlier in the list is not this one.
+		boolean removed = false;
+		for (int i = 0; i < this.abilities.size(); i++) {
+			if (this.abilities.get(i) == ability) {
+				this.abilities.remove(i);
+				removed = true;
+				break;
+			}
+		}
+		if (!removed) {
+			this.abilities.remove(ability);
+		}
 		simulation.onAbilityRemovedFromUnit(this, ability);
 		ability.onRemove(simulation, this);
 		this.stateNotifier.abilitiesChanged();
@@ -1308,7 +1321,7 @@ public class CUnit extends CWidget {
 		CUnitAggro.queueAttackBack(this, simulation, source, wasHit, help);
 	}
 
-	boolean isFleeing() {
+	public boolean isFleeing() {
 		return CUnitAggro.isFleeing(this);
 	}
 
@@ -1399,10 +1412,16 @@ public class CUnit extends CWidget {
 	}
 
 	public void addStateListener(final CUnitStateListener listener) {
+		if (this.removedFromGame) {
+			return;
+		}
 		this.stateListenersUpdates.add(new StateListenerUpdate(listener, StateListenerUpdateType.ADD));
 	}
 
 	public void removeStateListener(final CUnitStateListener listener) {
+		if (this.removedFromGame) {
+			return;
+		}
 		this.stateListenersUpdates.add(new StateListenerUpdate(listener, StateListenerUpdateType.REMOVE));
 	}
 
@@ -1527,8 +1546,32 @@ public class CUnit extends CWidget {
 		setLife(game, Math.min(getLife() + (lifeToRegain * this.healingReceivedFactor), getMaximumLife()));
 	}
 
-	public void multiplyHealingReceived(final float factor) {
-		this.healingReceivedFactor *= factor;
+	public void addHealingReceivedFactor(final float factor) {
+		this.healingReceivedFactors.add(factor);
+		recomputeHealingReceivedFactor();
+	}
+
+	public void removeHealingReceivedFactor(final float factor) {
+		for (int i = 0; i < this.healingReceivedFactors.size(); i++) {
+			if (Float.compare(this.healingReceivedFactors.get(i), factor) == 0) {
+				this.healingReceivedFactors.remove(i);
+				recomputeHealingReceivedFactor();
+				return;
+			}
+		}
+		// Applied before the factors were tracked (older saved game): undo it the way it was applied.
+		if (factor != 0f) {
+			this.healingReceivedFactor /= factor;
+		}
+	}
+
+	// Recomputed from the active factors, so a zero factor and add/remove pairs leave no Infinity, NaN or drift.
+	private void recomputeHealingReceivedFactor() {
+		float product = 1f;
+		for (int i = 0; i < this.healingReceivedFactors.size(); i++) {
+			product *= this.healingReceivedFactors.get(i);
+		}
+		this.healingReceivedFactor = product;
 	}
 
 	public void restoreMana(final CSimulation game, final float manaToRegain) {
@@ -1726,6 +1769,15 @@ public class CUnit extends CWidget {
 
 	public void setHeroGlowAllowed(final boolean heroGlowAllowed) {
 		this.heroGlowAllowed = heroGlowAllowed;
+	}
+
+	/** Whether the glowing team color part of the model draws (BlzShowUnitTeamGlow); only the picture, never a rule. */
+	public boolean isTeamGlowShown() {
+		return this.teamGlowShown;
+	}
+
+	public void setTeamGlowShown(final boolean teamGlowShown) {
+		this.teamGlowShown = teamGlowShown;
 	}
 
 	public War3ID getScriptSkinId() {
@@ -2174,6 +2226,16 @@ public class CUnit extends CWidget {
 		CUnitEvents.firePickUpItemEvents(this, game, item, absorbingItem);
 	}
 
+	public void onEquipItem(final CSimulation game, final CItem item) {
+		this.stateNotifier.inventoryChanged();
+		fireEquipItemEvents(game, item);
+	}
+
+	public void onUnequipItem(final CSimulation game, final CItem item) {
+		this.stateNotifier.inventoryChanged();
+		fireUnequipItemEvents(game, item);
+	}
+
 	public void onDropItem(final CSimulation game, final CItem droppedItem, final boolean playUserUISounds) {
 		this.stateNotifier.inventoryChanged();
 		if (playUserUISounds) {
@@ -2236,9 +2298,20 @@ public class CUnit extends CWidget {
 			// setting hidden to let things that refer to this before it gets garbage
 			// collected see it as basically worthless
 		}
+		// Its auras no longer tick, so nothing else would take their bonuses off the units around it.
+		for (final CAbility ability : new ArrayList<>(this.abilities)) {
+			if (ability instanceof AbstractCAbilityAbilityBuilderAuraTemplate) {
+				((AbstractCAbilityAbilityBuilderAuraTemplate) ability).emptyAura(simulation, this);
+			}
+		}
 		killPathingInstance();
 		simulation.getWorldCollision().removeUnit(this);
 		this.removedFromGame = true;
+		this.unitAnimationListener = CUnitAnimationListener.NONE;
+		// Its listeners (the selection and info panel on the render side) must not keep it, nor it them.
+		this.stateListenersUpdates.clear();
+		this.stateNotifier = new CUnitStateNotifier();
+		UnitGroup.unitRemoved();
 	}
 
 	/**
@@ -2473,6 +2546,16 @@ public class CUnit extends CWidget {
 
 	public void fireDropItemEvents(final CSimulation game, final CItem item) {
 		CUnitEvents.fireDropItemEvents(this, game, item);
+	}
+
+	public void fireEquipItemEvents(final CSimulation game, final CItem item) {
+		CUnitEvents.fireItemEvents(this, game, item, JassGameEventsWar3.EVENT_UNIT_EQUIP_ITEM,
+				JassGameEventsWar3.EVENT_PLAYER_UNIT_EQUIP_ITEM);
+	}
+
+	public void fireUnequipItemEvents(final CSimulation game, final CItem item) {
+		CUnitEvents.fireItemEvents(this, game, item, JassGameEventsWar3.EVENT_UNIT_UNEQUIP_ITEM,
+				JassGameEventsWar3.EVENT_PLAYER_UNIT_UNEQUIP_ITEM);
 	}
 
 	void fireItemEvents(final CSimulation game, final CItem item, final JassGameEventsWar3 unitEvent,

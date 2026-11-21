@@ -82,7 +82,7 @@ public class CAbilityBlink extends CAbilityPointTargetSpellBase {
 	public boolean doEffect(final CSimulation simulation, final CUnit caster, final AbilityTarget target) {
 		final float casterX = caster.getX();
 		final float casterY = caster.getY();
-		simulation.spawnSpellEffectOnPoint(casterX, casterY, 0, getAlias(), CEffectType.AREA_EFFECT, 0).remove();
+		simulation.spawnSpellEffectOnPoint(casterX, casterY, 0, getAlias(), CEffectType.SPECIAL, 0).remove();
 		final AbilityPointTarget point = blinkPoint(simulation, caster,
 				new AbilityPointTarget(target.getX(), target.getY()));
 		if (point != null) {
@@ -91,7 +91,7 @@ public class CAbilityBlink extends CAbilityPointTargetSpellBase {
 		else {
 			caster.setPointAndCheckUnstuck(target.getX(), target.getY(), simulation);
 		}
-		simulation.spawnSpellEffectOnPoint(caster.getX(), caster.getY(), 0, getAlias(), CEffectType.SPECIAL, 0)
+		simulation.spawnSpellEffectOnPoint(caster.getX(), caster.getY(), 0, getAlias(), CEffectType.AREA_EFFECT, 0)
 				.remove();
 		return false;
 	}

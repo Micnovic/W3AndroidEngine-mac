@@ -25,9 +25,17 @@ import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.units.StandardObjectData;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.AbstractCAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractGenericAliasedAbility;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilitySpell;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.CAbilityType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.AbilityBuilderAbility;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilder;
 
 /**
  * The Reforged ability field natives (BlzGetAbilityIntegerField and the other fields, level fields and level array
@@ -35,9 +43,11 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.A
  * column of the ability data it is, and a value reads from the data of the ability's alias, with the values a
  * script set on this one ability in front. Levels count from 0 here, as common.j documents for these natives.
  *
- * What a set changes besides the value the ability reads back: the mana cost and the cooldown of a level, which
- * the ability uses when it is cast. The other values are kept on the ability and read back, and the engine's
- * ability code takes the numbers it casts with from the ability data of its type, which these sets do not touch.
+ * A set changes what the ability casts with: a spell filled from its data (the spell base classes) is filled again
+ * at once and at every level change, and an ability built on the level data of its type (item bonuses, immolation,
+ * channel, harvesting, cargo) gets a level data of its own built from the data with the
+ * script's values in front, applied at once if the ability is on a unit and at every level change. Other abilities
+ * of the type keep sharing the type's level data.
  */
 final class AbilityFieldNatives {
 	/** One row of the ability meta data. */
@@ -191,11 +201,72 @@ final class AbilityFieldNatives {
 			}
 			elements.set(arrayIndex, value);
 			storeElements(ability, meta, level, elements);
+			refill(ability);
 			return true;
 		}
 		ability.setScriptField(meta.column(level) + "#" + meta.listIndex(level, -1), value);
 		applyCostAndCooldown(ability, meta, level, value);
+		refill(ability);
 		return true;
+	}
+
+	/**
+	 * Spell abilities take their numbers from the data when they are filled, so a set fills the ability again; one
+	 * built on level data of its type gets its level applied again, which reads the script's values.
+	 */
+	private void refill(final AbstractCAbility ability) {
+		if (ability instanceof AbilityBuilderAbility) {
+			refillBuilder(ability);
+		}
+		else if (ability instanceof CAbilitySpell) {
+			final GameObject data = data(ability);
+			if (data != null) {
+				((CAbilitySpell) ability).populate(data, Math.max(1, ((CAbilitySpell) ability).getLevel()));
+			}
+		}
+		else if (ability instanceof CLevelingAbility) {
+			final CSimulation simulation = this.viewer.simulation;
+			final CAbilityType<?> type = simulation.getAbilityData().getAbilityType(ability.getAlias());
+			final int level = ((CLevelingAbility) ability).getLevel();
+			final CUnit owner = (type != null) && type.appliesScriptFields() && (level >= 1) ? owner(simulation, ability)
+					: null;
+			if (owner != null) {
+				type.setLevel(simulation, owner, (CLevelingAbility) ability, level);
+			}
+		}
+	}
+
+	/**
+	 * An ability built from a behavior configuration reads its numbers (cost, cooldown, range, area, durations, data)
+	 * from a list of level data it holds, so a set gives it a copy built from the script's values and fills its
+	 * numbers again. It is not set to its level again: that would run what the configuration does on a level change.
+	 */
+	private void refillBuilder(final AbstractCAbility ability) {
+		final CSimulation simulation = this.viewer.simulation;
+		final CAbilityType<?> type = simulation.getAbilityData().getAbilityType(ability.getAlias());
+		if (!(type instanceof CAbilityTypeAbilityBuilder)) {
+			return;
+		}
+		final AbilityBuilderAbility builder = (AbilityBuilderAbility) ability;
+		builder.setLevelData(((CAbilityTypeAbilityBuilder) type).levelDataFor(ability));
+		final CUnit owner = owner(simulation, ability);
+		if (owner != null) {
+			builder.refreshSpellFields(simulation, owner);
+		}
+	}
+
+	/** The unit the ability is on, or null for an ability nobody has (an item's ability while it lies on the ground). */
+	private static CUnit owner(final CSimulation simulation, final AbstractCAbility ability) {
+		final CItem item = ability.getItem();
+		if ((item != null) && (item.getContainedUnit() != null)) {
+			return item.getContainedUnit();
+		}
+		for (final CUnit unit : simulation.getUnitsIncludingNew()) {
+			if (unit.getAbilities().contains(ability)) {
+				return unit;
+			}
+		}
+		return null;
 	}
 
 	private void applyCostAndCooldown(final AbstractCAbility ability, final Meta meta, final int level,
@@ -338,6 +409,7 @@ final class AbilityFieldNatives {
 	private void storeElements(final AbstractCAbility ability, final Meta meta, final int level,
 			final List<String> elements) {
 		ability.setScriptField(meta.column(level) + "#list", String.join(",", elements));
+		refill(ability);
 	}
 
 	/**

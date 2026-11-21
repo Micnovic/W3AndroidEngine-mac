@@ -7,7 +7,6 @@ import java.nio.ByteOrder;
 import net.warsmash.networking.udp.UdpServerListener;
 import net.warsmash.nio.channels.ChannelOpener;
 import net.warsmash.nio.channels.SocketChannelCallback;
-import net.warsmash.nio.channels.WritableOutput;
 import net.warsmash.nio.channels.WritableSocketOutput;
 import net.warsmash.nio.channels.tcp.TCPClientParser;
 import net.warsmash.nio.util.ExceptionListener;

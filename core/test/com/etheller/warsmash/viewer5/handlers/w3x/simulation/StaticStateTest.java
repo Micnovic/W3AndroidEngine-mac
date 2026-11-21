@@ -81,6 +81,8 @@ class StaticStateTest {
 			"simulation.abilities.skills.human.archmage.CAbilityMassTeleport#TELEPORTED_UNITS",
 			"simulation.abilities.skills.nightelf.units.CAbilityBouncingMissileFilter#KINDS",
 			"simulation.combat.attacks.listeners.CUnitAttackDamageTakenListener#ENEMY_TARGET",
+			// Counts the units removed from a game; only lets a group skip passes that cannot find anything new.
+			"jass.triggers.UnitGroup#removalEpoch",
 			// Which missing destructors were reported already, for the log.
 			"jass.CommonNatives#REPORTED_MISSING_DESTRUCTORS",
 			// Tables of object field accessors, filled once and only read after.
@@ -96,7 +98,7 @@ class StaticStateTest {
 			// Shared immutable small script integers.
 			"interpreter.ast.value.IntegerJassValue#CACHE",
 			// What the saved games list shows of saves that failed to load.
-			"save.SavedGame#FAILED_LOADS", "save.SavedGame#unreportedFailure",
+			"save.SavedGame#FAILED_LOADS", "save.SavedGame#unreportedFailure", "save.SavedGame#CHECKED",
 			// Saving and loading: what is known of classes and of script functions, and the size the last save needed.
 			"save.SavedGameRules#DROPPED_CLASSES", "save.SavedGameRules#NAMEABLE_CLASSES",
 			"save.SavedGameRules#REPLACEABLE_CLASSES", "save.SavedObjectGraph#FIELDS", "save.SavedObjectGraph#FIELD_PLANS",
@@ -128,6 +130,7 @@ class StaticStateTest {
 			"simulation.SimulationChecksum#CATEGORIES", "simulation.sound.SoundFileDuration#MPEG1_BITRATES",
 			"simulation.sound.SoundFileDuration#MPEG2_BITRATES",
 			"simulation.sound.SoundFileDuration#MPEG1_SAMPLE_RATES",
+			"simulation.sound.WavPcm#MS_ADAPT", "simulation.sound.WavPcm#IMA_INDEX", "simulation.sound.WavPcm#IMA_STEP",
 			"jass.ai.AIAttack#SIEGE_UNITS", "save.SavedGameRules#DROPPED_PREFIXES", "movie.Movies#WIDTHS",
 			"movie.Movies#AUDIO_EXTENSIONS", "constants#DEFAULT_JASS_FILE_LIST",
 			"interpreter.JassParser#_decisionToDFA", "interpreter.JassParser#ruleNames",
@@ -138,7 +141,10 @@ class StaticStateTest {
 			"interpreter.ast.value.ArrayJassValue#EMPTY",
 			// The search area of one call, cleared at its start.
 			"simulation.behaviors.cargohold.CargoReach#visited", "simulation.behaviors.cargohold.CargoReach#queue",
-			"simulation.behaviors.cargohold.CargoReach#transportReach"));
+			"simulation.behaviors.cargohold.CargoReach#transportReach",
+			// The ability behaviors a helper thread parses while a map loads, handed to the next simulation's ability
+			// data once; they are the files' contents, not a game's state.
+			"simulation.abilitybuilder.parser.AbilityBuilderParserUtil#PREPARED"));
 
 	private static final Set<String> STATIC_SELECTION_READERS = new HashSet<>(Arrays.asList(
 			// The data source the menu has selected: menus, lobby setup, launcher.
@@ -161,7 +167,7 @@ class StaticStateTest {
 			"mdx.LightInstance#vectorHeap", "mdx.LightInstance#scalarHeap", "mdx.MdxComplexInstance#visibilityHeap",
 			"mdx.MdxComplexInstance#translationHeap", "mdx.MdxComplexInstance#rotationHeap",
 			"mdx.MdxComplexInstance#scaleHeap", "mdx.MdxComplexInstance#colorHeap", "mdx.MdxComplexInstance#alphaHeap",
-			"mdx.MdxComplexInstance#textureIdHeap", "mdx.MdxComplexInstance#attachingModels", "mdx.MdxComplexInstance#boneUploadScratch",
+			"mdx.MdxComplexInstance#textureIdHeap", "mdx.MdxComplexInstance#attachingModels", "mdx.MdxComplexInstance#boneUploadScratch", "mdx.MdxComplexInstance#UV_NOT_ANIMATED", "mdx.MdxComplexInstance#NO_REPLACEABLE_TEXTURES",
 			"mdx.Particle#latitudeHeap",
 			"mdx.Particle#lifeSpanHeap", "mdx.Particle#gravityHeap", "mdx.Particle#speedHeap", "mdx.Particle#tempVector",
 			"mdx.Particle2#widthHeap", "mdx.Particle2#lengthHeap", "mdx.Particle2#latitudeHeap", "mdx.Particle2#variationHeap",
@@ -201,7 +207,7 @@ class StaticStateTest {
 			"w3x.SequenceUtils#SPELL", "w3x.SequenceUtils#SPELL_EATTREE", "w3x.SequenceUtils#SPELL_THROW",
 			"w3x.SequenceUtils#WORK", "w3x.SequenceUtils#COMPLETE", "w3x.SequenceUtils#FAST", "w3x.SequenceUtils#ALTERNATE",
 			// Process-wide switches of the graphics device and the command line, set before the viewers exist.
-			"w3x.DynamicShadowManager#IS_SHADOW_MAPPING", "w3x.environment.Terrain#WIREFRAME_TERRAIN",
+			"w3x.DynamicShadowManager#IS_SHADOW_MAPPING", "w3x.DynamicShadowManager#FLAT_PROBES", "w3x.environment.Terrain#WIREFRAME_TERRAIN",
 			"mdx.MdxViewer#DEFAULT_SHADER_ENV", "w3x.War3MapViewer#defaultTimeScale", "mdx.ClassicEffects#emissionScale",
 			// Key counters that only have to stay unique, and the player's options and replay bundle as read from disk.
 			"w3x.rendersim.RenderImage#nextKey", "w3x.rendersim.RenderUbersplat#nextKey", "w3x.ui.GameOptions#current",
@@ -224,13 +230,14 @@ class StaticStateTest {
 			// starts; scratch of the render thread; the open resource scopes of the screens.
 			"core.GammaOverlay#white", "core.GammaOverlay#whiteContext", "core.GammaOverlay#whiteGeneration",
 			"core.viewer5.RenderScaler#currentTarget", "core.util.FrameLimiter#maxFps", "core.util.FrameLimiter#deadline",
-			"core.util.GraphicsContext#generation", "core.parsers.fdf.frames.StringFrame#shapeRenderer",
+			"core.util.GraphicsContext#generation", "core.parsers.fdf.DynamicFontGeneratorHolder#POOL",
+			"core.parsers.fdf.FontGeneratorHolder#LIVE", "core.parsers.fdf.frames.StringFrame#shapeRenderer",
 			"core.parsers.fdf.frames.FadingSpriteBatch#SAMPLER_NAMES",
 			"core.viewer5.gl.Extensions#angleInstancedArrays", "core.viewer5.gl.Extensions#dynamicShadowExtension",
-			"core.viewer5.gl.Extensions#wireframeExtension", "core.viewer5.gl.Extensions#audio",
+			"core.viewer5.gl.Extensions#wireframeExtension", "core.viewer5.gl.Extensions#audio", "core.viewer5.SoundLoops#PLACED", "core.viewer5.SoundLoops#nextId", "core.viewer5.PositionalLoop#clock",
 			"core.viewer5.gl.Extensions#GL_LINE", "core.viewer5.gl.Extensions#GL_FILL", "core.WarsmashGdxGame#VAO",
 			"core.WarsmashPreviewApplication#VAO", "core.util.RenderMathUtils#sqlerpHeap1",
-			"core.util.RenderMathUtils#sqlerpHeap2", "core.util.SessionResources#OPEN",
+			"core.util.RenderMathUtils#sqlerpHeap2", "core.viewer5.Node#previousWorldHeap", "core.util.SessionResources#OPEN",
 			// Touch input of the one screen and the player's finger; owned by the input code, not by a game.
 			"core.input.touch.OnscreenKeyboard#coveredHeightPixels", "core.input.touch.TouchInputRouter#installed",
 			"core.input.touch.VirtualCursor#active", "core.input.touch.VirtualCursor#x", "core.input.touch.VirtualCursor#y",
@@ -250,6 +257,8 @@ class StaticStateTest {
 			"core.launcher.lan.LanPortraitTable#REFORGED_FOR_CLASSIC",
 			// The launcher's log sink, and what its data folder check remembers of the folder.
 			"core.launcher.LauncherLog#sink", "core.launcher.DataFolderCheck#DESCRIPTIONS",
+			// Whether the player closed the prompt of an unknown update version in this session.
+			"core.launcher.UpdateCheck#unknownDismissed",
 			// The platform's folder chooser, installed once at start.
 			"core.launcher.CustomFolderChooser$Holder#installed",
 			// Where the platform keeps the render scale the launcher and the game's Options menu share.
@@ -260,13 +269,26 @@ class StaticStateTest {
 			"core.launcher.StorageRoot#root",
 			"core.launcher.DataFolderCheck#READABILITY", "core.launcher.DataFolderCheck#OPENED_FILES",
 			"core.launcher.HotkeyCatalog#BUILD_COMMANDS",
+			// The GL memory accounting of a diagnostic switch; counts the platform GL objects, not a game's state.
+			"core.util.GlMemory#ON", "core.util.GlMemory#OWNERS", "core.util.GlMemory#unit", "core.util.GlMemory#vao", "core.util.GlMemory#renderbuffer", "core.util.GlMemory#textureBytes", "core.util.GlMemory#bufferBytes", "core.util.GlMemory#renderbufferBytes", "core.util.GlMemory#unknownFormats",
 			// Counters of the performance report; only counted when the switch is set, and not a game's state.
-			"core.util.PerfStats#ENABLED", "core.util.PerfStats#checkedLocalFile", "core.util.PerfStats#TOTALS",
-			"core.util.PerfStats#STEP_TOTALS", "core.util.PerfStats#FRAME_SECTIONS", "core.util.PerfStats#WORST_SECTIONS",
+			"core.util.PerfStats#ENABLED", "core.util.PerfStats#WINDOW_HISTOGRAM", "core.util.PerfStats#RUN_HISTOGRAM", "core.util.PerfStats#firstFrame", "core.util.PerfStats#frameLoads", "core.util.PerfStats#frameLoadNanos", "core.util.PerfStats#frameTextureNanos", "core.util.PerfStats#slowestLoadNanos", "core.util.PerfStats#slowestLoad", "core.util.PerfStats#checkedLocalFile", "core.util.PerfStats#TOTALS",
+			"core.util.PerfStats#STEP_TOTALS", "core.util.PerfStats#textureBytes", "core.util.PerfStats#evictedTextures", "core.util.PerfStats#FRAME_SECTIONS", "core.util.PerfStats#WORST_SECTIONS",
 			"core.util.PerfStats#stepStart", "core.util.PerfStats#frameStart", "core.util.PerfStats#sectionStart",
 			"core.util.PerfStats#frames", "core.util.PerfStats#frameTotal", "core.util.PerfStats#worstFrame",
 			"core.util.PerfStats#reportStart", "core.util.PerfStats#simulationSteps", "core.util.PerfStats#pathJobs",
-			"core.util.PerfStats#pathIterations", "core.util.PerfStats#interfaceDraws",
+			"core.util.PerfStats#pathIterations", "core.util.PerfStats#pathDiscarded",
+			"core.util.PerfStats#pathDiscardedIterations", "core.util.PerfStats#pathDiscardedNanos", "core.util.PerfStats#interfaceDraws",
+			"core.util.PerfStats#finish", "core.util.PerfStats#drawCalls", "core.util.PerfStats#frameDrawCalls",
+			"core.util.PerfStats#drawCallsWorst", "core.util.PerfStats#lastRenderEnd", "core.util.PerfStats#frameBegun",
+			"core.util.PerfStats#simCpuStart", "core.util.PerfStats#simCpuFrame", "core.util.PerfStats#simCpuTotal",
+			"core.util.PerfStats#simGapTotal", "core.util.PerfStats#cpuStart", "core.util.PerfStats#cpuTotal",
+			"core.util.PerfStats#gcCountAtFrame", "core.util.PerfStats#gcBlockingAtFrame",
+			"core.util.PerfStats#frameGcCount", "core.util.PerfStats#frameGcBlockingNanos",
+			"core.util.PerfStats#gcCountAtReport", "core.util.PerfStats#gcTimeAtReport",
+			"core.util.PerfStats#gcBlockingAtReport", "core.util.PerfStats#allocatedAtReport",
+			"core.util.PerfStats#cpuMethod", "core.util.PerfStats#cpuTarget", "core.util.PerfStats#statMethod",
+			"core.util.PerfStats#probedRuntime",
 			// The engine's settings, read from the ini of the data source the menu and the launcher use (see
 			// gameDataConstantsAreNotReadInGame).
 			"core.util.WarsmashConstants#MAX_PLAYERS", "core.util.WarsmashConstants#GAME_VERSION",
@@ -279,9 +301,11 @@ class StaticStateTest {
 			"core.util.WarsmashConstants#USE_NINE_ITEM_INVENTORY", "core.util.WarsmashConstants#RACE_MANAGER",
 			"core.util.WarsmashConstants#DEFAULT_JASS_FILE_LIST", "core.util.WarsmashConstants#JASS_FILE_LIST",
 			"core.util.WarsmashConstants#ABILITY_COMPATIBILITY",
+			// The GL thread's texture upload buffer, reused for every upload; it holds no game's state.
+			"core.util.UploadStaging#kept", "core.util.UploadStaging#oversized",
 			// Tables, arrays and sets filled once when the class loads and never written again (object data field lists,
 			// launcher menus and names, skin art, anchor priorities, decoder tables, lookup maps).
-			"core.datasources.AssetPathFallback#GRAPHICS_PACKAGES", "core.datasources.GameLanguage#NAMES", "core.datasources.GraphicsSettings#TEXTURE_SIZES",
+			"core.datasources.AssetPathFallback#GRAPHICS_PACKAGES", "core.datasources.GameLanguage#NAMES", "core.datasources.GameLanguage#skinLanguage", "core.datasources.GameLanguage#gameLanguage", "core.util.ImageUtils#PREFETCHED", "core.util.OffHeapBlock#LIVE", "core.util.ImageUtils#prefetchExecutor", "core.util.ImageUtils#recordedTextures", "core.util.ImageUtils#recordingThread", "core.datasources.GraphicsSettings#TEXTURE_SIZES",
 			"core.datasources.GraphicsSettings#RENDER_SCALES", "core.datasources.GraphicsSettings#deviceMemoryMb", "core.datasources.GraphicsSettings#SOFTWARE_RENDERERS", "core.launcher.LauncherOptions#RENDER_SCALES",
 			"core.launcher.LauncherOptions#FRAME_CAPS", "core.launcher.LauncherOptions#FRAME_CAP_NAMES",
 			"core.datasources.LayeredDataSource#OTHER_PICTURES", "core.launcher.CampaignResult#ROWS",

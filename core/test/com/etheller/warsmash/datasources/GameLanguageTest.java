@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.etheller.warsmash.units.DataTable;
+import com.etheller.warsmash.units.Element;
 
 class GameLanguageTest {
 	private static final List<String> MODULES = Arrays.asList("war3.w3mod", "war3.w3mod\\_deprecated.w3mod",
@@ -57,5 +58,28 @@ class GameLanguageTest {
 		assertEquals("", GameLanguage.configured(ini));
 		GameLanguage.apply(ini, "itit");
 		assertEquals("itIT", GameLanguage.configured(ini));
+	}
+
+	@Test
+	void aFlatFolderKeepsItsOtherLanguagesInItsLocalesFolder() {
+		assertEquals(new java.io.File(new java.io.File("C:\\game\\data", "_locales"), "eses.w3mod").getPath(),
+				GameLanguage.childFolder("C:\\game\\data", "esES"));
+		assertNull(GameLanguage.childFolder("C:\\game\\data", ""));
+		assertNull(GameLanguage.childFolder("C:\\game\\data\\_locales\\enus.w3mod", "esES"));
+	}
+
+	@Test
+	void theLanguageInUseIsTheChosenOneElseTheOneTheDataIsMadeFor() {
+		final DataTable ini = new DataTable(null);
+		final Element sources = new Element("DataSources", ini);
+		sources.setField("Prefixes00", "war3.w3mod,war3.w3mod\\_locales\\eses.w3mod");
+		ini.put("DataSources", sources);
+		GameLanguage.useInGame(ini);
+		assertEquals("esES", GameLanguage.inGame());
+		GameLanguage.apply(ini, "frFR");
+		GameLanguage.useInGame(ini);
+		assertEquals("frFR", GameLanguage.inGame());
+		GameLanguage.useInGame(new DataTable(null));
+		assertEquals("enUS", GameLanguage.inGame());
 	}
 }

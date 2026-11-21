@@ -26,7 +26,7 @@ public class CAbilityTypeHarvest extends CAbilityType<CAbilityTypeHarvestLevelDa
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeHarvestLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeHarvestLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityHarvest heroAbility = ((CAbilityHarvest) existingAbility);
 
 		heroAbility.setDamageToTree(levelData.getDamageToTree());

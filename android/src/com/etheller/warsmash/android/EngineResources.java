@@ -49,7 +49,8 @@ final class EngineResources {
 		final File manifest = new File(appFolder, MANIFEST);
 		final String stamp = packageStamp(context);
 		final List<String> previous = readManifest(manifest);
-		if ((previous != null) && !previous.isEmpty() && previous.get(0).equals(stamp) && target.isDirectory()) {
+		if ((previous != null) && !previous.isEmpty() && previous.get(0).equals(stamp) && target.isDirectory()
+				&& target.canWrite()) {
 			return;
 		}
 		final Set<String> shipped = new LinkedHashSet<>();
@@ -68,6 +69,10 @@ final class EngineResources {
 		stale.removeAll(shipped);
 		if (manifest.exists() && !manifest.delete()) {
 			throw new IOException("Unable to reset " + manifest);
+		}
+		if (target.exists() && !target.isDirectory()) {
+			// Something that is not a folder stands where the resources go.
+			moveAside(appFolder, target);
 		}
 		try {
 			copyAll(context, shipped, target);

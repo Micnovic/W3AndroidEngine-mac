@@ -15,6 +15,7 @@ import com.etheller.warsmash.launcher.EngineSettings;
 import com.etheller.warsmash.launcher.GameCatalog;
 import com.etheller.warsmash.launcher.GlueText;
 import com.etheller.warsmash.launcher.LaunchGuard;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.LauncherBoard;
 import com.etheller.warsmash.launcher.SkinArt;
@@ -144,6 +145,15 @@ final class LanPages {
 		}
 
 		@Override
+		public void mapIssue(final File map, final java.util.function.Consumer<MapIssue> done) {
+			if ((map == null) || (LanPages.this.s.catalog == null)) {
+				done.accept(MapIssue.NONE);
+				return;
+			}
+			LanPages.this.s.catalog.mapIssue(map.getAbsolutePath(), done);
+		}
+
+		@Override
 		public boolean hasMapNamed(final String name) {
 			final List<GameCatalog.MapEntry> maps = LanPages.this.s.maps;
 			if (maps == null) {
@@ -261,7 +271,6 @@ final class LanPages {
 	// -------------------------------------------------------------------- page
 
 	private static final int RED = 0xFFFF6060;
-	private static final int GREEN = 0xFF50D850;
 
 	void page() {
 		final Gui g = this.s.gui;
@@ -277,7 +286,7 @@ final class LanPages {
 		}
 		final String failed = this.model.takeMapFailure();
 		if ((failed != null) && (this.s.dialog == LauncherScreen.Dialog.NONE)) {
-			this.noticeTitle = LanText.mapFailedTitle();
+			this.noticeTitle = this.model.mapFailureTitle();
 			this.noticeLine = failed;
 			this.s.dialog = LauncherScreen.Dialog.LAN_NOTICE;
 		}
@@ -630,6 +639,7 @@ final class LanPages {
 			settings.map = shared.info;
 			settings.maxSlots = shared.playerSlots;
 			settings.syncWarning = shared.usesSync;
+			settings.issue = shared.issue;
 			settings.gameName = this.gameName.toString();
 			settings.speed = this.speed;
 			settings.observers = this.observers;
@@ -1134,6 +1144,7 @@ final class LanPages {
 				settings.map = shared.info;
 				settings.maxSlots = shared.playerSlots;
 				settings.syncWarning = shared.usesSync;
+				settings.issue = shared.issue;
 				problem = this.model.changeMap(settings);
 			}
 			if (problem != null) {

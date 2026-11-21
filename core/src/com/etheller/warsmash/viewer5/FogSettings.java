@@ -17,11 +17,36 @@ public class FogSettings {
 	public float end;
 	/** Largest share of the fog colour that fog may reach (w3i v39+); 1 is the classic unlimited fog. */
 	public float maxOpacity = 1f;
+	/**
+	 * Height fog range of a w3i v39+ map: full fog at and below heightMin, none at and above heightMax (an assumed
+	 * Reforged-style falloff, not measured). Off unless heightMax > heightMin, as for every older map.
+	 */
+	public float heightMin;
+	public float heightMax;
+	/** w3i v39+: draw the fog over the sky too (the sky scene then uses the world fog). */
+	public boolean drawOverSky;
+
+	public boolean hasHeightFog() {
+		return this.heightMax > this.heightMin;
+	}
+
+	public void copyFrom(final FogSettings other) {
+		this.color = other.color;
+		this.style = other.style;
+		this.density = other.density;
+		this.start = other.start;
+		this.end = other.end;
+		this.maxOpacity = other.maxOpacity;
+		this.heightMin = other.heightMin;
+		this.heightMax = other.heightMax;
+		this.drawOverSky = other.drawOverSky;
+	}
 
 	/** The fog alpha is not a colour for the shaders; they read it as the opacity cap. */
 	public void uploadUniforms(final ShaderProgram shader) {
 		shader.setUniformf("u_fogColor", this.color.r, this.color.g, this.color.b, this.maxOpacity);
 		shader.setUniformf("u_fogParams", this.style.ordinal(), this.start, this.end, this.density * EXP_DENSITY_SCALE);
+		shader.setUniformf("u_fogHeight", hasHeightFog() ? 1f : 0f, this.heightMin, this.heightMax, 0f);
 	}
 
 	public void setStyleByIndex(final int styleValue) {

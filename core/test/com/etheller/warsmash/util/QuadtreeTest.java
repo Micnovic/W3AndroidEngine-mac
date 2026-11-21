@@ -1,5 +1,7 @@
 package com.etheller.warsmash.util;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
 
 import com.badlogic.gdx.math.Rectangle;
@@ -14,6 +16,28 @@ class QuadtreeTest {
 			this.name = name;
 			this.bounds = bounds;
 		}
+	}
+
+	@Test
+	void testUnitLeavingAndEnteringTheWorld() {
+		final Quadtree<Thing> tree = new Quadtree<>(new Rectangle(0, 0, 1024, 1024));
+		final Thing[] things = new Thing[10];
+		for (int i = 0; i < things.length; i++) {
+			things[i] = new Thing("Thing" + i, new Rectangle(10 + (i * 20f), 100f, 0.002f, 0.002f));
+			tree.add(things[i], things[i].bounds);
+		}
+		// Off the west edge, then back in: neither move may throw, and the unit is found again once inside.
+		tree.translate(things[0], things[0].bounds, -50f, 0f);
+		tree.translate(things[0], things[0].bounds, -50f, 0f);
+		tree.translate(things[0], things[0].bounds, 200f, 0f);
+		final int[] found = new int[1];
+		tree.intersect(new Rectangle(90f, 90f, 40f, 40f), (thing) -> {
+			if (thing == things[0]) {
+				found[0]++;
+			}
+			return false;
+		});
+		assertEquals(1, found[0]);
 	}
 
 	@Test

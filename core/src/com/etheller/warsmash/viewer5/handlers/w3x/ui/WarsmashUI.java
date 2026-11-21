@@ -1,6 +1,5 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
-import java.util.List;
 
 import com.badlogic.gdx.audio.Music;
 import com.etheller.interpreter.ast.scope.GlobalScope;

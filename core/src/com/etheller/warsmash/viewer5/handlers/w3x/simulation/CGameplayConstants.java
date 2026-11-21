@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CDefenseType;
 
@@ -751,7 +752,7 @@ public class CGameplayConstants {
 		final int[] result = new int[tableSize];
 		for (int i = 0; i < tableSize; i++) {
 			if (i < splitTxt.length) {
-				result[i] = Integer.parseInt(splitTxt[i]);
+				result[i] = ABDataText.parseInt(splitTxt[i]);
 			} else {
 				result[i] = (formulaA * result[i - 1]) + (formulaB * (i + firstLevel)) + formulaC;
 			}
@@ -798,7 +799,7 @@ public class CGameplayConstants {
 		final String[] splitTxt = txt.split(",");
 		final float[] result = new float[splitTxt.length];
 		for (int i = 0; i < splitTxt.length; i++) {
-			result[i] = Float.parseFloat(splitTxt[i].trim());
+			result[i] = ABDataText.parseFloat(splitTxt[i]);
 		}
 		return result;
 	}
@@ -807,7 +808,7 @@ public class CGameplayConstants {
 		final String[] splitTxt = txt.split(",");
 		final int[] result = new int[splitTxt.length];
 		for (int i = 0; i < splitTxt.length; i++) {
-			result[i] = Integer.parseInt(splitTxt[i]);
+			result[i] = ABDataText.parseInt(splitTxt[i]);
 		}
 		return result;
 	}

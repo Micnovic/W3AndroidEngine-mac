@@ -6,13 +6,10 @@ import java.util.Map;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABAction;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
 
 public class CAbilityAbilityBuilderAuraTemplate extends AbstractCAbilityAbilityBuilderAuraTemplate {
-	private CBuff buff;
-
 	private List<ABAction> addToAuraActions;
 	private List<ABAction> updateAuraLevelActions;
 	private List<ABAction> removeFromAuraActions;
@@ -30,8 +27,8 @@ public class CAbilityAbilityBuilderAuraTemplate extends AbstractCAbilityAbilityB
 	@Override
 	public void setLevel(CSimulation game, CUnit unit, int level) {
 		super.setLevel(game, unit, level);
-		targetsAllowed = levelData.get(getLevel()).getTargetsAllowed();
-		range = levelData.get(getLevel()).getCastRange();
+		targetsAllowed = levelData.get(getLevel() - 1).getTargetsAllowed();
+		range = levelData.get(getLevel() - 1).getCastRange();
 	}
 
 	@Override
@@ -47,7 +44,6 @@ public class CAbilityAbilityBuilderAuraTemplate extends AbstractCAbilityAbilityB
 				action.runAction(game, unit, localStore, 0);
 			}
 		}
-		unit.add(game, buff);
 	}
 
 	@Override
@@ -61,7 +57,6 @@ public class CAbilityAbilityBuilderAuraTemplate extends AbstractCAbilityAbilityB
 
 	@Override
 	public void removeUnitFromAura(CSimulation game, CUnit unit) {
-		unit.remove(game, buff);
 		if (removeFromAuraActions != null) {
 			for (ABAction action : removeFromAuraActions) {
 				action.runAction(game, unit, localStore, 0);

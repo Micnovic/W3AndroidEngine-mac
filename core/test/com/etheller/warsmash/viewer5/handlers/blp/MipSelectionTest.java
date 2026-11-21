@@ -1,6 +1,8 @@
 package com.etheller.warsmash.viewer5.handlers.blp;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -74,6 +76,33 @@ class MipSelectionTest {
 	}
 
 	@Test
+	void skippedLevelsDropTheLargestOfTexturesTheLimitLeavesWhole() {
+		// 512 within a 1024 limit: one level skipped.
+		assertEquals(1, MipLevels.firstWithin(512, 512, MipLevels.sizeRule(1024, 1), 10));
+		assertEquals(1, MipLevels.firstWithin(512, 256, MipLevels.sizeRule(0, 1), 10));
+		// 2048 lowered to 512 by the limit is not lowered again.
+		assertEquals(2, MipLevels.firstWithin(2048, 2048, MipLevels.sizeRule(512, 1), 12));
+		// Never below 128 pixels: a 256 texture goes to 128, a 128 one stays.
+		assertEquals(1, MipLevels.firstWithin(256, 64, MipLevels.sizeRule(0, 1), 9));
+		assertEquals(0, MipLevels.firstWithin(128, 128, MipLevels.sizeRule(0, 1), 8));
+		assertEquals(3, MipLevels.firstWithin(1024, 1024, MipLevels.sizeRule(0, 3), 11));
+		assertEquals(2, MipLevels.firstWithin(512, 512, MipLevels.sizeRule(0, 3), 10));
+		// A file without smaller levels keeps its only one.
+		assertEquals(0, MipLevels.firstWithin(512, 512, MipLevels.sizeRule(0, 1), 1));
+		// No skipping: the plain limit.
+		assertEquals(MipLevels.firstWithin(2048, 1024, 512, 12), MipLevels.firstWithin(2048, 1024,
+				MipLevels.sizeRule(512, 0), 12));
+		assertEquals(512, MipLevels.sizeRule(512, 0));
+	}
+
+	@Test
+	void smallTexturesKeepTheirLevelsWhateverIsSkipped() throws IOException {
+		assertEquals(16, BlpDecoder.decode(blp(16, 5), MipLevels.sizeRule(0, 1), true).getLevels().getWidth(0));
+		assertEquals(16, DdsDecoder.decode(dds(16, 5, true, Integer.MAX_VALUE), MipLevels.sizeRule(0, 2), true)
+				.getLevels().getWidth(0));
+	}
+
+	@Test
 	void firstLevelWithinALimit() {
 		assertEquals(0, MipLevels.firstWithin(2048, 1024, 0, 12));
 		assertEquals(1, MipLevels.firstWithin(2048, 1024, 1024, 12));
@@ -81,6 +110,42 @@ class MipSelectionTest {
 		assertEquals(0, MipLevels.firstWithin(512, 512, 1024, 10));
 		assertEquals(2, MipLevels.firstWithin(2048, 2048, 64, 3));
 		assertEquals(12, MipLevels.levelCount(2048, 1024));
+	}
+
+	@Test
+	void arrayBackedAndOtherBuffersDecodeAlike() throws IOException {
+		for (final int length : new int[] { Integer.MAX_VALUE, 128 + 128 + 17, 128 + 50 }) {
+			final ByteBuffer file = dds(16, 5, true, length);
+			final byte[] shifted = new byte[file.limit() + 7];
+			file.duplicate().get(shifted, 3, file.limit());
+			// a buffer that starts inside its array
+			final ByteBuffer slice = ByteBuffer.wrap(shifted, 3, file.limit()).slice();
+			final MipLevels expected = DdsDecoder.decode(file.asReadOnlyBuffer(), 0, true).getLevels();
+			for (final ByteBuffer other : new ByteBuffer[] { file, slice }) {
+				final MipLevels levels = DdsDecoder.decode(other, 0, true).getLevels();
+				assertEquals(expected.count(), levels.count(), "levels at " + length);
+				for (int level = 0; level < levels.count(); level++) {
+					assertArrayEquals(expected.getArray(level), levels.getArray(level), "level " + level);
+				}
+			}
+		}
+	}
+
+	@Test
+	void levelsAddedAsArraysBecomeBuffersOnlyWhenAsked() {
+		final MipLevels levels = new MipLevels();
+		final byte[] rgba = { 1, 2, 3, 4, 5, 6, 7, 8 };
+		levels.add(2, 1, rgba);
+		assertSame(rgba, levels.getArray(0));
+		final ByteBuffer buffer = levels.getRgba(0);
+		assertEquals(true, buffer.isDirect());
+		assertEquals(0, buffer.position());
+		assertEquals(8, buffer.remaining());
+		assertEquals(6, buffer.get(5));
+		assertSame(buffer, levels.getRgba(0));
+		assertArrayEquals(rgba, levels.getArray(0));
+		assertEquals(1, levels.count());
+		assertEquals(8, levels.byteCount());
 	}
 
 	private static void assertColor(final MipLevels levels, final int level, final int red, final int green,

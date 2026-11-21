@@ -184,6 +184,18 @@ public class MdlTokenInputStream {
 		return values;
 	}
 
+	public short[] readUInt16Array(final short[] values) {
+		read(); // {
+
+		for (int i = 0, l = values.length; i < l; i++) {
+			values[i] = (short) readInt();
+		}
+
+		read(); // }
+
+		return values;
+	}
+
 	public short[] readUInt8Array(final short[] values) {
 		read(); // {
 

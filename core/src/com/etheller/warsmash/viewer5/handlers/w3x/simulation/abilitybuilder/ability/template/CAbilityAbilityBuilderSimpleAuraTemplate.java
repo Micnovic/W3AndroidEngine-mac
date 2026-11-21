@@ -9,18 +9,20 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
 
 public class CAbilityAbilityBuilderSimpleAuraTemplate extends AbstractCAbilityAbilityBuilderAuraTemplate {
-	private CBuff buff;
-
 	private Map<Integer,List<War3ID>> abilityIdsToAddPerLevel;
 	private List<War3ID> levellingAbilityIdsToAdd;
 
-	private Map<Integer,List<CAbility>> abilitiesToAddPerLevel;
-	private List<CLevelingAbility> levellingAbilitiesToAdd;
+	/** Each unit in the aura gets its own ability instances, keyed by the unit's handle id (lookup only). */
+	private final Map<Integer, UnitAuraAbilities> abilitiesByUnit = new HashMap<>();
+
+	private static final class UnitAuraAbilities {
+		private final Map<Integer, List<CAbility>> perLevel = new HashMap<>();
+		private final List<CLevelingAbility> leveling = new ArrayList<>();
+	}
 
 	public CAbilityAbilityBuilderSimpleAuraTemplate(int handleId, War3ID code, War3ID alias,
 			List<CAbilityTypeAbilityBuilderLevelData> levelData, Map<String, Object> localStore,
@@ -33,8 +35,8 @@ public class CAbilityAbilityBuilderSimpleAuraTemplate extends AbstractCAbilityAb
 	@Override
 	public void setLevel(CSimulation game, CUnit unit, int level) {
 		super.setLevel(game, unit, level);
-		targetsAllowed = levelData.get(getLevel()).getTargetsAllowed();
-		range = levelData.get(getLevel()).getCastRange();
+		targetsAllowed = levelData.get(getLevel() - 1).getTargetsAllowed();
+		range = levelData.get(getLevel() - 1).getCastRange();
 	}
 
 	@Override
@@ -43,80 +45,71 @@ public class CAbilityAbilityBuilderSimpleAuraTemplate extends AbstractCAbilityAb
 	}
 
 	@Override
-	protected void onAuraStarted(CSimulation game, CUnit unit) {
-		this.abilitiesToAddPerLevel = new HashMap<>();
-		this.levellingAbilitiesToAdd = new ArrayList<>();
-		if (abilityIdsToAddPerLevel != null) {
-			for (Integer i : abilityIdsToAddPerLevel.keySet()) {
-				List<CAbility> list = new ArrayList<>();
-				abilitiesToAddPerLevel.put(i, list);
-				for (War3ID abilityId : abilityIdsToAddPerLevel.get(i)) {
+	protected boolean tracksLevelChanges() {
+		return true;
+	}
+
+	private List<CAbility> levelAbilities(CSimulation game, UnitAuraAbilities held, int level) {
+		List<CAbility> list = held.perLevel.get(level);
+		if (list == null) {
+			list = new ArrayList<>();
+			held.perLevel.put(level, list);
+			List<War3ID> ids = abilityIdsToAddPerLevel == null ? null : abilityIdsToAddPerLevel.get(level);
+			if (ids != null) {
+				for (War3ID abilityId : ids) {
 					list.add(game.getAbilityData().getAbilityType(abilityId)
 							.createAbility(game.getHandleIdAllocator().createId()));
 				}
 			}
+		}
+		return list;
+	}
+
+	@Override
+	public void addUnitToAura(CSimulation game, CUnit unit) {
+		auraGroup.add(unit);
+		UnitAuraAbilities held = new UnitAuraAbilities();
+		abilitiesByUnit.put(unit.getHandleId(), held);
+		for (CAbility ability : levelAbilities(game, held, getLevel())) {
+			unit.add(game, ability);
 		}
 		if (levellingAbilityIdsToAdd != null) {
 			for (War3ID abilityId : levellingAbilityIdsToAdd) {
 				CAbility abil = game.getAbilityData().getAbilityType(abilityId)
 						.createAbility(game.getHandleIdAllocator().createId());
 				if (abil instanceof CLevelingAbility) {
-					levellingAbilitiesToAdd.add((CLevelingAbility) abil);
+					held.leveling.add((CLevelingAbility) abil);
+					unit.add(game, abil);
 				}
 			}
 		}
 	}
 
 	@Override
-	protected boolean tracksLevelChanges() {
-		return true;
-	}
-
-	@Override
-	public void addUnitToAura(CSimulation game, CUnit unit) {
-		auraGroup.add(unit);
-		if (abilitiesToAddPerLevel != null) {
-			for (CAbility ability : abilitiesToAddPerLevel.get(getLevel())) {
-				unit.add(game, ability);
-			}
-		}
-		if (levellingAbilitiesToAdd != null) {
-			for (CAbility ability : levellingAbilitiesToAdd) {
-				unit.add(game, ability);
-			}
-		}
-		unit.add(game, buff);
-	}
-
-	@Override
 	public void updateLevelOfAura(CSimulation game, CUnit unit, int prevLevel, int curLevel) {
-		if (abilitiesToAddPerLevel != null) {
-			for (CAbility ability : abilitiesToAddPerLevel.get(prevLevel)) {
-				unit.remove(game, ability);
-			}
+		UnitAuraAbilities held = abilitiesByUnit.get(unit.getHandleId());
+		if (held == null) {
+			return;
 		}
-		if (abilitiesToAddPerLevel != null) {
-			for (CAbility ability : abilitiesToAddPerLevel.get(curLevel)) {
-				unit.add(game, ability);
-			}
+		for (CAbility ability : levelAbilities(game, held, prevLevel)) {
+			unit.remove(game, ability);
 		}
-		if (levellingAbilitiesToAdd != null) {
-			for (CLevelingAbility ability : levellingAbilitiesToAdd) {
-				ability.setLevel(game, unit, curLevel);
-			}
+		for (CAbility ability : levelAbilities(game, held, curLevel)) {
+			unit.add(game, ability);
+		}
+		for (CLevelingAbility ability : held.leveling) {
+			ability.setLevel(game, unit, curLevel);
 		}
 	}
 
 	@Override
 	public void removeUnitFromAura(CSimulation game, CUnit unit) {
-		unit.remove(game, buff);
-		if (abilitiesToAddPerLevel != null) {
-			for (CAbility ability : abilitiesToAddPerLevel.get(getLevel())) {
+		UnitAuraAbilities held = abilitiesByUnit.remove(unit.getHandleId());
+		if (held != null) {
+			for (CAbility ability : levelAbilities(game, held, getLevel())) {
 				unit.remove(game, ability);
 			}
-		}
-		if (levellingAbilitiesToAdd != null) {
-			for (CAbility ability : levellingAbilitiesToAdd) {
+			for (CAbility ability : held.leveling) {
 				unit.remove(game, ability);
 			}
 		}

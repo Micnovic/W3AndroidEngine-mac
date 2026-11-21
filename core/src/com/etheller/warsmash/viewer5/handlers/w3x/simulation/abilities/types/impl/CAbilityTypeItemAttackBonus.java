@@ -25,7 +25,7 @@ public class CAbilityTypeItemAttackBonus extends CAbilityType<CAbilityTypeItemAt
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeItemAttackBonusLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeItemAttackBonusLevelData levelData = getLevelData(existingAbility, level - 1);
 		if (existingAbility instanceof CAbilityItemAttackBonus) {
 			((CAbilityItemAttackBonus) existingAbility).setDamageBonus(game, unit, levelData.getDamageBonus());
 		}

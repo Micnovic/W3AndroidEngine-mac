@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.util.Locale;
 
 import com.etheller.warsmash.launcher.LauncherStrings;
+import com.etheller.warsmash.launcher.MapIssue;
 
 import net.warsmash.lan.client.MapDownload;
 import net.warsmash.lan.protocol.LanData;
@@ -263,6 +264,15 @@ public final class LanText {
 		default:
 			return t("lan_map_failed_other");
 		}
+	}
+
+	/** Why the engine cannot play a map, in the words the Custom Game page uses. */
+	public static String mapIssue(final MapIssue issue) {
+		return issue.message == null ? "" : t(issue.message);
+	}
+
+	public static String mapIssueTitle() {
+		return t("lan_map_unplayable_title");
 	}
 
 	public static String mapFailedTitle() {

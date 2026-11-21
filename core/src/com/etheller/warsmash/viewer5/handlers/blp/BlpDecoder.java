@@ -136,7 +136,7 @@ public final class BlpDecoder {
 		return data.getInt((headerSize - 64) + (level * 4));
 	}
 
-	private static ByteBuffer decodeLevel(final ByteBuffer data, final boolean blp1, final int headerSize,
+	private static byte[] decodeLevel(final ByteBuffer data, final boolean blp1, final int headerSize,
 			final int width, final int height, final int mipOffset, final int mipSize) throws IOException {
 		if (data.getInt(4) == CONTENT_JPEG) {
 			return decodeJpeg(data, headerSize, width, height, mipOffset, mipSize);
@@ -158,7 +158,7 @@ public final class BlpDecoder {
 					pixels[i] = (byte) 0xFF;
 				}
 			}
-			return direct(pixels);
+			return pixels;
 		}
 		default: {
 			final byte[] pixels = bytes(data, mipOffset, width * height * 4);
@@ -170,7 +170,7 @@ public final class BlpDecoder {
 					pixels[i + 3] = (byte) 0xFF;
 				}
 			}
-			return direct(pixels);
+			return pixels;
 		}
 		}
 	}
@@ -182,7 +182,7 @@ public final class BlpDecoder {
 	 * many retail images (the campaign loading screen emblems and markers) say 0
 	 * there and still carry their transparency in it.
 	 */
-	private static ByteBuffer decodeJpeg(final ByteBuffer data, final int headerSize, final int width,
+	private static byte[] decodeJpeg(final ByteBuffer data, final int headerSize, final int width,
 			final int height, final int mipOffset, final int mipSize) throws IOException {
 		final int jpegHeaderSize = data.getInt(headerSize);
 		if ((jpegHeaderSize < 0) || (mipSize < 0) || ((headerSize + 4 + jpegHeaderSize) > data.limit())
@@ -197,26 +197,24 @@ public final class BlpDecoder {
 		final JpegDecoder image = JpegDecoder.decode(jpeg);
 		final byte[] components = image.getComponents();
 		final int componentCount = image.getComponentCount();
-		final ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder());
+		final byte[] rgba = new byte[width * height * 4];
+		int target = 0;
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				if ((x < image.getWidth()) && (y < image.getHeight())) {
 					final int source = ((y * image.getWidth()) + x) * componentCount;
-					rgba.put(components[source + Math.min(2, componentCount - 1)]);
-					rgba.put(components[source + Math.min(1, componentCount - 1)]);
-					rgba.put(components[source]);
-					rgba.put(componentCount > 3 ? components[source + 3] : (byte) 0xFF);
+					rgba[target] = components[source + Math.min(2, componentCount - 1)];
+					rgba[target + 1] = components[source + Math.min(1, componentCount - 1)];
+					rgba[target + 2] = components[source];
+					rgba[target + 3] = componentCount > 3 ? components[source + 3] : (byte) 0xFF;
 				}
-				else {
-					rgba.putInt(0);
-				}
+				target += 4;
 			}
 		}
-		rgba.position(0);
 		return rgba;
 	}
 
-	private static ByteBuffer decodePaletted(final ByteBuffer data, final int paletteOffset, final int width,
+	private static byte[] decodePaletted(final ByteBuffer data, final int paletteOffset, final int width,
 			final int height, final int mipOffset, final int alphaBits) throws IOException {
 		if ((paletteOffset + PALETTE_SIZE) > data.limit()) {
 			throw new IOException("Truncated BLP palette");
@@ -231,7 +229,7 @@ public final class BlpDecoder {
 			pixels[(i * 4) + 2] = data.get(paletteEntry);
 			pixels[(i * 4) + 3] = (byte) alpha(indices, pixelCount, alphaBits, i);
 		}
-		return direct(pixels);
+		return pixels;
 	}
 
 	private static int alpha(final byte[] data, final int alphaOffset, final int alphaBits, final int pixel) {
@@ -276,10 +274,4 @@ public final class BlpDecoder {
 		return out;
 	}
 
-	private static ByteBuffer direct(final byte[] pixels) {
-		final ByteBuffer rgba = ByteBuffer.allocateDirect(pixels.length).order(ByteOrder.nativeOrder());
-		rgba.put(pixels);
-		rgba.position(0);
-		return rgba;
-	}
 }

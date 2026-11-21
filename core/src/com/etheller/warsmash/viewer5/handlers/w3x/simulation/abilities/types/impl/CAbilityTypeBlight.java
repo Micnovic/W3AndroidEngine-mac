@@ -26,7 +26,7 @@ public class CAbilityTypeBlight extends CAbilityType<CAbilityTypeBlightLevelData
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeBlightLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeBlightLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityBlight heroAbility = ((CAbilityBlight) existingAbility);
 
 		heroAbility.setCreatesBlight(levelData.isCreatesBlight());

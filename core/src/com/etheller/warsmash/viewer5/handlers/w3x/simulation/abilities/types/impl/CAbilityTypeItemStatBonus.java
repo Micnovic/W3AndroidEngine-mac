@@ -26,7 +26,7 @@ public class CAbilityTypeItemStatBonus extends CAbilityType<CAbilityTypeItemStat
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeItemStatBonusLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeItemStatBonusLevelData levelData = getLevelData(existingAbility, level - 1);
 		if (existingAbility instanceof CAbilityItemStatBonus) {
 			((CAbilityItemStatBonus) existingAbility).setStats(game, unit, levelData.getStrength(), levelData.getAgility(), levelData.getIntelligence());
 		}

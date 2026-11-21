@@ -103,10 +103,10 @@ public class CAbilityMassTeleport extends CAbilityTargetSpellBase {
 				return (teleportingUnits.size() + 1) >= numberOfUnitsTeleported;
 			});
 			for (final CUnit teleportingUnit : teleportingUnits) {
-				simulation.spawnSpellEffectOnPoint(teleportingUnit.getX(), teleportingUnit.getY(), 0, getAlias(),
-						CEffectType.SPECIAL, 0).remove();
+				simulation.spawnTemporarySpellEffectOnPoint(teleportingUnit.getX(), teleportingUnit.getY(), 0, getAlias(),
+						CEffectType.SPECIAL, 0);
 			}
-			simulation.spawnSpellEffectOnPoint(casterX, casterY, 0, getAlias(), CEffectType.SPECIAL, 0).remove();
+			simulation.spawnTemporarySpellEffectOnPoint(casterX, casterY, 0, getAlias(), CEffectType.SPECIAL, 0);
 			caster.setPointAndCheckUnstuck(targetX, targetY, simulation);
 			if (useTeleportClustering) {
 				for (final CUnit teleportingUnit : teleportingUnits) {
@@ -121,11 +121,11 @@ public class CAbilityMassTeleport extends CAbilityTargetSpellBase {
 				}
 			}
 			for (final CUnit teleportingUnit : teleportingUnits) {
-				simulation.spawnSpellEffectOnPoint(teleportingUnit.getX(), teleportingUnit.getY(), 0, getAlias(),
-						CEffectType.SPECIAL, 0).remove();
+				simulation.spawnTemporarySpellEffectOnPoint(teleportingUnit.getX(), teleportingUnit.getY(), 0, getAlias(),
+						CEffectType.SPECIAL, 0);
 			}
-			simulation.spawnSpellEffectOnPoint(caster.getX(), caster.getY(), 0, getAlias(), CEffectType.SPECIAL, 0)
-					.remove();
+			simulation.spawnTemporarySpellEffectOnPoint(caster.getX(), caster.getY(), 0, getAlias(),
+					CEffectType.SPECIAL, 0);
 			return false;
 		}
 		return true;

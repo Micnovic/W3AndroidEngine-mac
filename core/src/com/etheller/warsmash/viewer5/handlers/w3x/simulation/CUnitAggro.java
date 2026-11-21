@@ -239,6 +239,9 @@ final class CUnitAggro {
 			source = nearestHelpTarget(self, simulation, source);
 		}
 		final boolean foundMatchingReturnFireAttack = attackBack(self, simulation, source);
+		if (help && foundMatchingReturnFireAttack) {
+			self.aggro.fightFromHelpCall = true;
+		}
 		// Measured on 1.29: a unit that goes for the caster of an area that hurt it never gives the fight up.
 		if (fromArea && foundMatchingReturnFireAttack && self.aggro.postFight) {
 			self.aggro.postFightFromArea = true;

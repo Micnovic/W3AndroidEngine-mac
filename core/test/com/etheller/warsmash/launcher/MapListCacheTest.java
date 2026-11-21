@@ -95,4 +95,21 @@ class MapListCacheTest {
 		assertTrue(maps(ini, data, list).isEmpty());
 		assertNotEquals(header, Files.readAllLines(list.toPath()).get(0));
 	}
+
+	@Test
+	void aChangedDataSourceMakesTheKeptListAgain() throws Exception {
+		final File first = new File(this.temp, "first.w3mod");
+		final File second = new File(this.temp, "second.w3mod");
+		touch(new File(first, "Maps/Download/a.w3x"), 1_000_000);
+		touch(new File(second, "Maps/Download/a.w3x"), 1_000_000);
+		final File list = new File(this.temp, "cache/maps.txt");
+		assertTrue(maps(ini(first), first, list).isEmpty());
+		final String header = Files.readAllLines(list.toPath()).get(0);
+		Files.write(list.toPath(), (header + "\nMaps/Download/a.w3x\t2\tKept\t0\tNONE\n").getBytes(StandardCharsets.UTF_8));
+		assertEquals(1, maps(ini(first), first, list).size());
+
+		// The same map names, sizes and times in another folder are another game data, so the kept list is not theirs.
+		assertTrue(maps(ini(second), second, list).isEmpty());
+		assertNotEquals(header, Files.readAllLines(list.toPath()).get(0));
+	}
 }

@@ -92,7 +92,8 @@ public class Trigger implements CAllocatedHandle {
 		// Every condition runs, even after one has failed (1.29).
 		boolean result = true;
 		for (final TriggerBooleanExpression condition : new ArrayList<>(this.conditions)) {
-			if (!condition.evaluate(globalScope, triggerScope)) {
+			// A null boolexpr evaluates false.
+			if ((condition == null) || !condition.evaluate(globalScope, triggerScope)) {
 				result = false;
 			}
 		}

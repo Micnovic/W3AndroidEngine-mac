@@ -50,6 +50,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.launcher.DataContentCheck;
 import com.etheller.warsmash.launcher.DataFolderCheck;
 import com.etheller.warsmash.launcher.DataPackage;
@@ -495,7 +496,8 @@ public class DataFolderActivity extends Activity {
 		place(panel, this.statusBox, x, board.statusY, w, board.statusH);
 
 		this.continueButton = button(board.buttonText * 1.12f, view -> {
-			if (this.writeFailed || (this.kind != DataFolderCheck.Kind.NONE)) {
+			// A second tap before the window is gone would open the launcher twice.
+			if (!isFinishing() && (this.writeFailed || (this.kind != DataFolderCheck.Kind.NONE))) {
 				this.writeFailed = false;
 				start();
 			}
@@ -683,7 +685,9 @@ public class DataFolderActivity extends Activity {
 		case FOUND_INCOMPLETE:
 			showStatus("!", GOLD, Color.rgb(0x2A, 0x20, 0x12), Color.rgb(0x6A, 0x54, 0x26),
 					problemText(this.contentProblems.get(0)),
-					getString(R.string.data_folder_incomplete_detail, this.description + incompleteMore()));
+					getString(this.contentProblems.get(0) == DataContentCheck.Problem.UNSUPPORTED_VERSION
+							? R.string.data_folder_old_version_detail : R.string.data_folder_incomplete_detail,
+							this.description + incompleteMore()));
 			break;
 		case IMPORTING:
 			showImport(job);
@@ -818,7 +822,11 @@ public class DataFolderActivity extends Activity {
 		final Context app = getApplicationContext();
 		new Thread(() -> {
 			try (DataPackage dataPackage = source.open()) {
-				job.summary = dataPackage.graphicsSet != null
+				job.summary = !dataPackage.language.isEmpty()
+						? app.getString(R.string.data_folder_import_language, name,
+								GameLanguage.displayName(dataPackage.language), dataPackage.fileCount(),
+								Formatter.formatShortFileSize(app, dataPackage.totalBytes))
+						: dataPackage.graphicsSet != null
 						? app.getString(R.string.data_folder_import_set, name, dataPackage.setName(),
 								dataPackage.fileCount(), Formatter.formatShortFileSize(app, dataPackage.totalBytes))
 						: app.getString(R.string.data_folder_import_package, name,
@@ -918,6 +926,9 @@ public class DataFolderActivity extends Activity {
 			return getString(R.string.data_folder_import_no_game_data, name);
 		case NO_CLASSIC:
 			return getString(R.string.data_folder_import_no_classic, name, failure.file);
+		case NO_CLASSIC_LANGUAGE:
+			return getString(R.string.data_folder_import_no_classic_language, name,
+					GameLanguage.displayName(failure.file));
 		case CANCELLED:
 			return getString(R.string.data_folder_import_cancelled);
 		case IO:

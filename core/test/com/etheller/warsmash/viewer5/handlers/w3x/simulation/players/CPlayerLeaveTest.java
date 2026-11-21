@@ -9,7 +9,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
-import com.etheller.warsmash.parsers.jass.scope.CommonTriggerExecutionScope;
 import com.etheller.warsmash.testing.TestObjects;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.JassGameEventsWar3;

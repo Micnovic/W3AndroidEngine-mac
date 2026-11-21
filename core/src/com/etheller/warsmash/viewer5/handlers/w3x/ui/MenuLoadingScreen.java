@@ -317,6 +317,17 @@ final class MenuLoadingScreen {
 		}
 	}
 
+	/** The game has taken over the screen: what the loading screen drew with is freed. */
+	void releaseTextures() {
+		clearReforgedLoading();
+		if (this.loadingMinimapUnmanagedTexture != null) {
+			this.loadingMinimapTexture.setTexture((Texture) null);
+			this.loadingMinimapUnmanagedTexture.dispose();
+			this.loadingMinimapUnmanagedTexture = null;
+			this.loadingPreviewTexture = null;
+		}
+	}
+
 	boolean isMapDone() {
 		return this.loadingMapDone;
 	}
@@ -401,6 +412,8 @@ final class MenuLoadingScreen {
 		else if (!this.previewingLoading) {
 			fillCampaignLoadingScreen(worldEditData, campaignBackground, mapInfo, wts);
 			this.loadingBarStart = 0;
+			// The bar still holds the last mission's full tap-to-continue state until the first progress arrives.
+			setLoadingRatio(0);
 		}
 		// A previewed screen has been shown since the menu started building; only its bar goes on.
 		this.previewingLoading = false;

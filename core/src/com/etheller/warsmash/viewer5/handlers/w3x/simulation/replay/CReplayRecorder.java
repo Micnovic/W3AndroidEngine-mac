@@ -6,31 +6,35 @@ import java.util.function.ToIntFunction;
 
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandLog;
 
 /**
  * Records a game into a replay: after every step the commands the game's command log got since the last step, every
- * {@link CReplayHeader#getChecksumInterval()} steps the game's checksum, the game cache files the game reads and
+ * {@link CReplayHeader#getChecksumInterval()} steps the game's checksum (see {@link ChecksumSteps}), the game cache files the game reads and
  * the local values its scripts read.
  * A replay that cannot be written any more stops recording; the game goes on.
  */
 public final class CReplayRecorder {
 	private final CSimulation game;
 	private final CReplayWriter writer;
-	private final int checksumInterval;
-	private final ToIntFunction<CSimulation> checksum;
+	private final ChecksumSteps checksum;
 	private int writtenCommands;
 	private int lastRecordedStep;
 	private boolean endPending;
 	private boolean stopped;
 	private boolean ended;
 
+	/** A recorder that makes the game's checksum all at once at every {@code checksumInterval} steps. */
 	public CReplayRecorder(final CSimulation game, final CReplayWriter writer, final int checksumInterval,
 			final ToIntFunction<CSimulation> checksum) {
+		this(game, writer, ChecksumSteps.whole(checksumInterval, checksum));
+	}
+
+	public CReplayRecorder(final CSimulation game, final CReplayWriter writer, final ChecksumSteps checksum) {
 		this.game = game;
 		this.writer = writer;
-		this.checksumInterval = checksumInterval;
 		this.checksum = checksum;
 		this.writtenCommands = game.getPlayerCommandLog().size();
 		this.lastRecordedStep = game.getGameTurnTick();
@@ -44,8 +48,9 @@ public final class CReplayRecorder {
 		try {
 			writeNewCommands();
 			final int tick = this.game.getGameTurnTick();
-			if ((tick % this.checksumInterval) == 0) {
-				this.writer.checksum(tick, this.checksum.applyAsInt(this.game));
+			if (this.checksum.afterStep(this.game)) {
+				// Named by the step it was finished at, which is where a playback has it too.
+				this.writer.checksum(tick, this.checksum.value());
 			}
 			this.lastRecordedStep = tick;
 		}

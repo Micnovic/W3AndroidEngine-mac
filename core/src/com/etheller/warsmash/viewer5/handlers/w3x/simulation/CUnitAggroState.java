@@ -7,6 +7,8 @@ final class CUnitAggroState {
 	CUnit spellMissileSource;
 	boolean pendingAttackBackWasHit;
 	boolean pendingAttackBackHelp;
+	// The current fight began as an answer to a call for help, not as the unit's own acquisition.
+	boolean fightFromHelpCall;
 	boolean pendingAttackBackFromArea;
 	int fleeMoveResetCount = -1;
 	CUnit.CreepCamp creepCamp;

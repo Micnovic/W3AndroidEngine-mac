@@ -15,22 +15,35 @@ public class AudioContext {
 	/** Which places of the world the player hears; null hears everywhere. */
 	public SoundVisibility visibility;
 
-	private static final int MAX_LOOPS = 64;
+	// A loop out of hearing holds no voice, so the many ambient loops of a map all fit.
+	private static final int MAX_LOOPS = 512;
 	private final List<PositionalLoop> loops = new ArrayList<>();
 
 	void addLoop(final PositionalLoop loop) {
 		if (this.loops.size() >= MAX_LOOPS) {
-			this.loops.remove(0);
+			this.loops.get(0).stop();
 		}
 		this.loops.add(loop);
 	}
 
+	void removeLoop(final PositionalLoop loop) {
+		this.loops.remove(loop);
+	}
+
+	/** Ends every loop of this context, as when the game it belongs to is over. */
+	public void endLoops() {
+		for (final PositionalLoop loop : new ArrayList<>(this.loops)) {
+			loop.stop();
+		}
+		this.loops.clear();
+	}
+
 	/**
 	 * Sets the loudness and side of the world loops from where the camera is now, and silences those out of range or
-	 * in fog. Stopped loops are not reported here; setting the level of one does nothing, so they age out of the list.
+	 * in fog, and gives or takes their voices of the sound device.
 	 */
 	public void updateLoops() {
-		for (int i = 0, n = this.loops.size(); i < n; i++) {
+		for (int i = 0; i < this.loops.size(); i++) {
 			this.loops.get(i).update();
 		}
 	}

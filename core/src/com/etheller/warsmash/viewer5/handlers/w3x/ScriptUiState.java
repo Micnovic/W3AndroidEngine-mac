@@ -1,5 +1,12 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CheckpointSaves;
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.CommandButtonEffect;
+
 /** The switches of the game interface a map script flips with the Reforged natives; local to this machine. */
 public final class ScriptUiState {
 	private boolean cursorEnabled = true;
@@ -8,6 +15,14 @@ public final class ScriptUiState {
 	private boolean targetIndicatorEnabled = true;
 	private boolean originFramesHidden;
 	private boolean uiAutoPosition = true;
+	private boolean terrainShown = true;
+	private boolean skyBoxShown = true;
+	private boolean clientActive = true;
+	private boolean pauseThematicMusicOnFocusLost;
+	private String minimapTerrainTexture;
+	private final List<CommandButtonEffect> commandButtonEffects = new ArrayList<>();
+	private int commandButtonEffectsVersion;
+	private final CheckpointSaves checkpointSaves = new CheckpointSaves();
 	private Runnable frameFlush;
 
 	/** Called by the interface every frame, for the Frame API to lay out the frames a script changed. */
@@ -67,5 +82,76 @@ public final class ScriptUiState {
 
 	public void setUiAutoPosition(final boolean uiAutoPosition) {
 		this.uiAutoPosition = uiAutoPosition;
+	}
+
+	public boolean isTerrainShown() {
+		return this.terrainShown;
+	}
+
+	public void setTerrainShown(final boolean terrainShown) {
+		this.terrainShown = terrainShown;
+	}
+
+	public boolean isSkyBoxShown() {
+		return this.skyBoxShown;
+	}
+
+	public void setSkyBoxShown(final boolean skyBoxShown) {
+		this.skyBoxShown = skyBoxShown;
+	}
+
+	/** Whether the window or app has the user's attention; the backend tells it on every focus change. */
+	public boolean isClientActive() {
+		return this.clientActive;
+	}
+
+	public void setClientActive(final boolean clientActive) {
+		this.clientActive = clientActive;
+	}
+
+	public boolean isPauseThematicMusicOnFocusLost() {
+		return this.pauseThematicMusicOnFocusLost;
+	}
+
+	public void setPauseThematicMusicOnFocusLost(final boolean pause) {
+		this.pauseThematicMusicOnFocusLost = pause;
+	}
+
+	/** Whether the thematic music must stand still now: the map asked for it and the client has no focus. */
+	public boolean isMusicHeldByFocus() {
+		return this.pauseThematicMusicOnFocusLost && !this.clientActive;
+	}
+
+	/** The picture a script put in place of the minimap's terrain (BlzChangeMinimapTerrainTex), or null. */
+	public String getMinimapTerrainTexture() {
+		return this.minimapTerrainTexture;
+	}
+
+	public void setMinimapTerrainTexture(final String minimapTerrainTexture) {
+		this.minimapTerrainTexture = minimapTerrainTexture;
+	}
+
+	public List<CommandButtonEffect> getCommandButtonEffects() {
+		return Collections.unmodifiableList(this.commandButtonEffects);
+	}
+
+	public void addCommandButtonEffect(final CommandButtonEffect effect) {
+		this.commandButtonEffects.add(effect);
+		this.commandButtonEffectsVersion++;
+	}
+
+	public void removeCommandButtonEffect(final CommandButtonEffect effect) {
+		if (this.commandButtonEffects.remove(effect)) {
+			this.commandButtonEffectsVersion++;
+		}
+	}
+
+	/** Changes with every effect added or destroyed, for the command card to be filled again. */
+	public int getCommandButtonEffectsVersion() {
+		return this.commandButtonEffectsVersion;
+	}
+
+	public CheckpointSaves getCheckpointSaves() {
+		return this.checkpointSaves;
 	}
 }

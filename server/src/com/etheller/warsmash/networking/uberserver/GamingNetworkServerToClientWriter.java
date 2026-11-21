@@ -5,7 +5,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 
 import net.warsmash.networking.util.AbstractWriter;
-import net.warsmash.nio.channels.WritableOutput;
 import net.warsmash.nio.channels.WritableSocketOutput;
 import net.warsmash.uberserver.*;
 

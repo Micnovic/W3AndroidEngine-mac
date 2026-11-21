@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.Pixmap.Format;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.glutils.PixmapTextureData;
+import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.input.touch.TouchInputRouter;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.fdf.datamodel.AnchorDefinition;
@@ -28,6 +29,7 @@ import com.etheller.warsmash.parsers.fdf.frames.SingleStringFrame;
 import com.etheller.warsmash.parsers.fdf.frames.SpriteFrame;
 import com.etheller.warsmash.parsers.fdf.frames.TextureFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
+import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.util.ImageUtils;
 import com.etheller.warsmash.util.Log;
@@ -121,6 +123,10 @@ final class MeleeUICommands {
 	private ArgbImage cursorModelPathing;
 	private PixmapTextureData cursorModelUnderneathPathingRedGreenPixmapTextureData;
 	private CUnitType cursorBuildingUnitType;
+	private final Rectangle ghostCellArea = new Rectangle();
+	private static final int GHOST_CELL_FREE = Color.rgba8888(0, 1, 0, 0.45f);
+	private static final int GHOST_CELL_BLOCKED = Color.rgba8888(1, 0, 0, 0.7f);
+	private static final int DEFAULT_GHOST_ALPHA = 96;
 	final CursorTargetSetupVisitor cursorTargetSetupVisitor = new CursorTargetSetupVisitor();
 	final ActiveCommandUnitTargetFilter activeCommandUnitTargetFilter = new ActiveCommandUnitTargetFilter();
 	private final RallyPositioningVisitor rallyPositioningVisitor = new RallyPositioningVisitor();
@@ -295,6 +301,16 @@ final class MeleeUICommands {
 				autocastFrame.setHeight(GameUI.convertY(this.ui.uiViewport, MeleeUI.DEFAULT_COMMAND_CARD_ICON_WIDTH));
 				commandCardIcon.set(iconFrame, activeHighlightFrame, cooldownFrame, autocastFrame, numberOverlayFrame,
 						numberOverlayStringFrame);
+				if (this.ui.rootFrame.hasSkinField("CommandButtonEffect")) {
+					final SpriteFrame effectFrame = (SpriteFrame) this.ui.rootFrame.createFrameByType("SPRITE",
+							"SmashCommandButton_" + commandButtonIndex + "_Effect", this.ui.rootFrame, "", 0);
+					effectFrame.addSetPoint(new SetPoint(FramePoint.CENTER, commandCardIcon, FramePoint.CENTER, 0, 0));
+					this.ui.rootFrame.setSpriteFrameModel(effectFrame,
+							this.ui.rootFrame.getSkinField("CommandButtonEffect"));
+					effectFrame.setWidth(GameUI.convertX(this.ui.uiViewport, MeleeUI.DEFAULT_COMMAND_CARD_ICON_WIDTH));
+					effectFrame.setHeight(GameUI.convertY(this.ui.uiViewport, MeleeUI.DEFAULT_COMMAND_CARD_ICON_WIDTH));
+					commandCardIcon.setEffectFrame(effectFrame);
+				}
 				this.ui.commandCard[j][i] = commandCardIcon;
 				commandCardIcon.clear();
 				commandButtonIndex++;
@@ -717,6 +733,7 @@ final class MeleeUICommands {
 			if (MeleeUICommands.this.ui.cursorModelInstance != null) {
 				MeleeUICommands.this.ui.cursorModelInstance.detach();
 				MeleeUICommands.this.ui.cursorModelInstance = null;
+				MeleeUICommands.this.ui.releaseBuildingPathingPreview();
 				MeleeUICommands.this.ui.cursorFrame.setVisible(true);
 			}
 			MeleeUICommands.this.ui.cursorFrame.setSequence("Target");
@@ -730,6 +747,12 @@ final class MeleeUICommands {
 			boolean justLoaded = false;
 			final War3MapViewer viewer = MeleeUICommands.this.ui.war3MapViewer;
 			if (MeleeUICommands.this.ui.cursorModelInstance == null) {
+				// An area target chosen right before this building still has its marker on the ground.
+				MeleeUICommands.this.ui.releaseBuildingPathingPreview();
+				if (MeleeUICommands.this.ui.placementCursor != null) {
+					MeleeUICommands.this.ui.placementCursor.destroy(Gdx.gl30, viewer.terrain.centerOffset);
+					MeleeUICommands.this.ui.placementCursor = null;
+				}
 				final War3ID buildingTypeId = new War3ID(previewBuildUnitId);
 				MeleeUICommands.this.cursorBuildingUnitType = viewer.simulation.getUnitData()
 						.getUnitType(buildingTypeId);
@@ -746,6 +769,8 @@ final class MeleeUICommands {
 				MeleeUICommands.this.ui.cursorModelInstance.scale(new float[] { scalingValue, scalingValue,
 						scalingValue });
 				MeleeUICommands.this.ui.cursorModelInstance.setAnimationSpeed(0f);
+				// The ghost is see-through, so the grid under it shows which cells block the building.
+				MeleeUICommands.this.ui.cursorModelInstance.setVertexColor(1f, 1f, 1f, placementGhostAlpha(viewer));
 				justLoaded = true;
 				final CUnitType buildingUnitType = MeleeUICommands.this.cursorBuildingUnitType;
 				MeleeUICommands.this.cursorModelPathing = buildingUnitType.getBuildingPathingPixelMap();
@@ -765,7 +790,7 @@ final class MeleeUICommands {
 					MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenSplatModel = new SplatModel(Gdx.gl30,
 							greenPixmap, new ArrayList<>(), viewer.terrain.centerOffset, new ArrayList<>(), true, false,
 							true, false);
-					MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenSplatModel.color[3] = 0.20f;
+					MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenSplatModel.color[3] = 1f;
 				}
 			}
 			viewer.getClickLocation(MeleeUI.clickLocationTemp, this.baseMouseX,
@@ -808,19 +833,33 @@ final class MeleeUICommands {
 								.getHeight(); j++) {
 							MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap.drawPixel(i,
 									MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap
-											.getHeight() - 1 - j, Color.rgba8888(1, 0, 0, 1.0f));
+											.getHeight() - 1 - j, GHOST_CELL_BLOCKED);
 						}
 					}
 				}
 				else if (!canBeBuiltOnThem) {
+					// The units that keep the building off the ground are looked up per cell only when one stands
+					// in the footprint, with the same rules as the build order's check.
+					final CUnit worker = MeleeUICommands.this.ui.activeCommandUnit.getSimulationUnit();
+					final CSimulation simulation = viewer.simulation;
+					MeleeUICommands.this.ghostCellArea.set(MeleeUI.clickLocationTemp.x - halfRenderWidth,
+							MeleeUI.clickLocationTemp.y - halfRenderHeight, halfRenderWidth * 2, halfRenderHeight * 2);
+					final boolean unitsInFootprint = PathingGrid.unitPlacementPathing(
+							MeleeUICommands.this.ghostCellArea, simulation.getWorldCollision(), worker, simulation,
+							worker.getPlayerIndex()) != 0;
 					for (int i = 0; i < MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap
 							.getWidth(); i++) {
 						for (int j = 0; j < MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap
 								.getHeight(); j++) {
 							boolean blocked = false;
-							final short pathing = pathingGrid.getPathing(
-									(MeleeUI.clickLocationTemp.x + (i * 32)) - halfRenderWidth,
-									(MeleeUI.clickLocationTemp.y + (j * 32)) - halfRenderHeight);
+							final float cellMinX = (MeleeUI.clickLocationTemp.x + (i * 32)) - halfRenderWidth;
+							final float cellMinY = (MeleeUI.clickLocationTemp.y + (j * 32)) - halfRenderHeight;
+							short pathing = pathingGrid.getPathing(cellMinX, cellMinY);
+							if (unitsInFootprint) {
+								MeleeUICommands.this.ghostCellArea.set(cellMinX, cellMinY, 32, 32);
+								pathing |= PathingGrid.unitPlacementPathing(MeleeUICommands.this.ghostCellArea,
+										simulation.getWorldCollision(), worker, simulation, worker.getPlayerIndex());
+							}
 							for (final CBuildingPathingType preventedType : MeleeUICommands.this.cursorBuildingUnitType
 									.getPreventedPathingTypes()) {
 								if (PathingFlags.isPathingFlag(pathing, preventedType)) {
@@ -833,7 +872,7 @@ final class MeleeUICommands {
 									blocked = true;
 								}
 							}
-							final int color = blocked ? Color.rgba8888(1, 0, 0, 1.0f) : Color.rgba8888(0, 1, 0, 1.0f);
+							final int color = blocked ? GHOST_CELL_BLOCKED : GHOST_CELL_FREE;
 							MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap.drawPixel(i,
 									MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap
 											.getHeight() - 1 - j, color);
@@ -847,7 +886,7 @@ final class MeleeUICommands {
 								.getHeight(); j++) {
 							MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap.drawPixel(i,
 									MeleeUICommands.this.ui.cursorModelUnderneathPathingRedGreenPixmap
-											.getHeight() - 1 - j, Color.rgba8888(0, 1, 0, 1.0f));
+											.getHeight() - 1 - j, GHOST_CELL_FREE);
 						}
 					}
 				}
@@ -914,6 +953,7 @@ final class MeleeUICommands {
 		public Void accept(final CUnit target) {
 			final RenderUnit renderUnit = MeleeUICommands.this.ui.war3MapViewer.getRenderPeer(target);
 			final MdxModel model = (MdxModel) renderUnit.instance.model;
+			model.finishPending();
 			int index = -1;
 			for (int i = 0; i < model.attachments.size(); i++) {
 				final Attachment attachment = model.attachments.get(i);
@@ -1208,7 +1248,40 @@ final class MeleeUICommands {
 					autoCastActive, menuButton, tip, uberTip, hotkey, goldCost, lumberCost, foodCost, manaCost,
 					this.ui.selectedUnit.getSimulationUnit().getMana() < manaCost, cooldownRemaining, cooldownMax,
 					numberOverlay);
+			this.ui.commandCard[y][x].setButtonEffect(hasButtonEffect(abilityHandleId, orderId));
 		}
+	}
+
+	/** Whether a command button effect of a map script points at this button of the selected unit. */
+	private boolean hasButtonEffect(final int abilityHandleId, final int orderId) {
+		final List<CommandButtonEffect> effects = this.ui.war3MapViewer.scriptUiState.getCommandButtonEffects();
+		if (effects.isEmpty()) {
+			return false;
+		}
+		final CUnit unit = this.ui.selectedUnit.getSimulationUnit();
+		int alias = 0;
+		CAbilityHero hero = null;
+		for (final CAbility ability : unit.getAbilities()) {
+			if (ability.getHandleId() == abilityHandleId) {
+				alias = ability.getAlias().getValue();
+				if (ability instanceof CAbilityHero) {
+					hero = (CAbilityHero) ability;
+				}
+				break;
+			}
+		}
+		for (final CommandButtonEffect effect : effects) {
+			if (effect.matches(alias, orderId)) {
+				return true;
+			}
+			// A skill to learn is first reached through the hero's skill button.
+			if ((effect.getKind() == CommandButtonEffect.Kind.LEARN) && (hero != null)
+					&& (orderId == OrderIds.skillmenu) && (hero.getSkillPoints() > 0)
+					&& hero.getSkillsAvailable().contains(new War3ID(effect.getId()))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void clearAndRepopulateCommandCard() {
@@ -1322,6 +1395,15 @@ final class MeleeUICommands {
 
 	public boolean hasActiveCommand() {
 		return this.ui.activeCommand != null;
+	}
+
+	/** The see-through of a building ghost, as the game data gives it to the ghosts of ordered buildings. */
+	static float placementGhostAlpha(final War3MapViewer viewer) {
+		final Element placement = viewer.miscData == null ? null : viewer.miscData.get("Placement");
+		final int alpha = (placement != null) && placement.hasField("PaidStructureColor")
+				? placement.getFieldValue("PaidStructureColor", 0)
+				: DEFAULT_GHOST_ALPHA;
+		return Math.max(0, Math.min(255, alpha)) / 255f;
 	}
 
 	public boolean isPlacingBuilding() {

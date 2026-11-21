@@ -103,7 +103,7 @@ class CPathfindingEquivalenceTest {
 			final CWorldCollision collision = new CWorldCollision(new Rectangle(0, 0, width * CELL, height * CELL),
 					64f);
 			final CSimulation simulation = TestObjects.allocate(CSimulation.class);
-			final CPathfindingProcessor.SharedGraph graph = new CPathfindingProcessor.SharedGraph(grid);
+			final CPathfindingProcessor.SharedGraph graph = new CPathfindingProcessor.SharedGraph();
 			final LegacyPathfindingProcessor.SharedGraph legacyGraph = new LegacyPathfindingProcessor.SharedGraph(
 					grid);
 			final CPathfindingProcessor[] processors = { new CPathfindingProcessor(grid, collision, graph),

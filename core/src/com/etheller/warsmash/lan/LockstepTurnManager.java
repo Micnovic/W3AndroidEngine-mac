@@ -10,6 +10,7 @@ import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayRecording;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.SimulationChecksum;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandCodec;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandRecorder;
@@ -90,6 +91,11 @@ public final class LockstepTurnManager implements GameTurnManager {
 		default boolean simPaused() {
 			return false;
 		}
+
+		/** How the game's checksum is made as it steps; null for {@link #checksum()} all at once at each interval. */
+		default ChecksumSteps checksumSteps(final int interval) {
+			return null;
+		}
 	}
 
 	private static final int MAX_TURNS_PER_PAUSED_FRAME = 64;
@@ -101,6 +107,7 @@ public final class LockstepTurnManager implements GameTurnManager {
 	private final Turns turns;
 	private final Game game;
 	private final int checksumInterval;
+	private final ChecksumSteps checksumSteps;
 	private ReplayRecording recording;
 	private int allowedUntil = -1;
 	private int turnsApplied;
@@ -123,6 +130,23 @@ public final class LockstepTurnManager implements GameTurnManager {
 		this.turns = turns;
 		this.game = game;
 		this.checksumInterval = checksumInterval;
+		final ChecksumSteps own = game.checksumSteps(checksumInterval);
+		this.checksumSteps = own != null ? own : new ChecksumSteps() {
+			@Override
+			public boolean afterStep(final CSimulation unused) {
+				return (LockstepTurnManager.this.game.tick() % LockstepTurnManager.this.checksumInterval) == 0;
+			}
+
+			@Override
+			public int startTick() {
+				return LockstepTurnManager.this.game.tick();
+			}
+
+			@Override
+			public int value() {
+				return checksum();
+			}
+		};
 	}
 
 	/** The manager of a LAN game that is played in the viewer. */
@@ -187,6 +211,11 @@ public final class LockstepTurnManager implements GameTurnManager {
 	/**
 	 * How the game's checksum is made. The recording asks for the same ones the host is sent, so they are made once.
 	 */
+	public ChecksumSteps checksumSteps() {
+		return this.checksumSteps;
+	}
+
+	/** The game's checksum of this step, made once for the host and a recording. */
 	public ToIntFunction<CSimulation> checksumFunction() {
 		return simulation -> checksum();
 	}
@@ -367,8 +396,8 @@ public final class LockstepTurnManager implements GameTurnManager {
 		if (this.recording != null) {
 			this.recording.afterStep();
 		}
-		if ((gameTurnTick % this.checksumInterval) == 0) {
-			this.turns.checksum(gameTurnTick, checksum());
+		if (this.checksumSteps.afterStep(this.simulation)) {
+			this.turns.checksum(this.checksumSteps.startTick(), this.checksumSteps.value());
 		}
 		if (gameTurnTick == (this.allowedUntil + 1)) {
 			this.turns.processed(this.lastTurnNumber);
@@ -495,6 +524,11 @@ public final class LockstepTurnManager implements GameTurnManager {
 		@Override
 		public int checksum() {
 			return SimulationChecksum.compute(this.simulation);
+		}
+
+		@Override
+		public ChecksumSteps checksumSteps(final int interval) {
+			return SimulationChecksum.sliced(interval);
 		}
 
 		@Override

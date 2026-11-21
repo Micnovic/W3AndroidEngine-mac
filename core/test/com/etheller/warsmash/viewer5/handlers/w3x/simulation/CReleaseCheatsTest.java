@@ -63,6 +63,17 @@ public class CReleaseCheatsTest {
 	}
 
 	@Test
+	public void tenthLevelTaurenChieftainOnlyPlaysItsSong() {
+		final CSimulation game = game(0);
+		assertEquals(Code.TENTHLEVELTAURENCHIEFTAIN, CReleaseCheats.parse("TenthLevelTaurenChieftain").getCode());
+		assertEquals("PH1", Code.TENTHLEVELTAURENCHIEFTAIN.musicName());
+		assertNull(Code.GREEDISGOOD.musicName());
+		assertEquals(Result.IGNORED, CReleaseCheats.preview(game, 0, "tenthleveltaurenchieftain"));
+		assertEquals(Result.IGNORED, CReleaseCheats.apply(game, 0, "tenthleveltaurenchieftain"));
+		assertEquals(0, game.getPlayer(0).getGold());
+	}
+
+	@Test
 	public void resourceCheatsGiveEveryPlayerAndDefaultTo500() {
 		final CSimulation game = game(0);
 		assertEquals(Result.ENABLED, CReleaseCheats.apply(game, 0, "greedisgood"));

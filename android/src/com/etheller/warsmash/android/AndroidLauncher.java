@@ -1,5 +1,6 @@
 package com.etheller.warsmash.android;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -14,6 +15,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -67,6 +72,8 @@ import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.movie.Movies;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.DataTable;
+import com.etheller.warsmash.datasources.IndependentStream;
+import com.etheller.warsmash.util.DataSourceFileHandle;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.AudioContext;
@@ -78,6 +85,7 @@ import com.etheller.warsmash.viewer5.gl.DynamicShadowExtension;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.gl.WireframeExtension;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedGame;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.WavPcm;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CSaveStorage;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.GameOptions;
 
@@ -88,7 +96,8 @@ public class AndroidLauncher extends AndroidApplication {
 	/** The texture size limit of this device when the player chose none: by screen size and memory. */
 	static int defaultTextureSize(final Context context) {
 		final boolean tablet = context.getResources().getConfiguration().smallestScreenWidthDp >= 600;
-		return GraphicsSettings.defaultTextureSize(true, tablet, totalMemoryMb(context));
+		return GraphicsSettings.defaultTextureSize(true, tablet, GraphicsSettings
+				.tierMemoryMb(System.getProperty(GraphicsSettings.MEMORY_TIER_PROPERTY), totalMemoryMb(context)));
 	}
 
 	static long totalMemoryMb(final Context context) {
@@ -104,6 +113,8 @@ public class AndroidLauncher extends AndroidApplication {
 	static final String EXTRA_SEED = "seed";
 	/** Profile of a test run started with a map, like the desktop -Dwarsmash.profile; never stored as current. */
 	static final String EXTRA_TEST_PROFILE = "testprofile";
+	/** Memory tier a run started with a map plays as ("low", "medium", "high"), like the desktop -Dwarsmash.memtier. */
+	static final String EXTRA_MEMORY_TIER = "memtier";
 	private AndroidPointerSource pointerSource;
 	/** Started by the launcher: the game begins at once and the launcher comes back when it ends. */
 	private boolean fromLauncher;
@@ -117,6 +128,7 @@ public class AndroidLauncher extends AndroidApplication {
 	private static final String CONTEXT_LOSS_SAVE = "context-loss" + CSaveStorage.SAVE_EXTENSION;
 	/** Goes on with the game once the movies it asked for have played. */
 	private Runnable afterMovies;
+	private GameAudioFocus audioFocus;
 	private Movies.Player moviePlayer;
 	private WarsmashGdxMultiScreenGame game;
 	private final Handler loadWatch = new Handler(Looper.getMainLooper());
@@ -199,6 +211,14 @@ public class AndroidLauncher extends AndroidApplication {
 		}
 		catch (final IOException e) {
 			Log.e(TAG, "Unable to read " + iniFile, e);
+			if (this.fromLauncher) {
+				// The launcher waits for this game's result; without one the player is left on the home screen.
+				final GameResult failed = withoutGame("error");
+				failed.map = getIntent().getStringExtra(LaunchContract.EXTRA_MAP_FILE);
+				failed.reason = GameResult.describeFailure(e);
+				gameEnded(failed);
+				return;
+			}
 			finish();
 			return;
 		}
@@ -231,6 +251,14 @@ public class AndroidLauncher extends AndroidApplication {
 		final boolean testBuild = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
 		LanProperties.apply(this.fromLauncher || !testBuild ? null : warsmashIni.get("Emulator"));
 		CCampaignProgress.setAllMissionsOpen(testBuild);
+		// The process outlives the run, so a later game must not inherit a test run's tier.
+		final String memoryTier = this.fromLauncher || !testBuild ? null : getIntent().getStringExtra(EXTRA_MEMORY_TIER);
+		if (memoryTier != null) {
+			System.setProperty(GraphicsSettings.MEMORY_TIER_PROPERTY, memoryTier);
+		}
+		else {
+			System.clearProperty(GraphicsSettings.MEMORY_TIER_PROPERTY);
+		}
 		GraphicsSettings.applyDefaultTextureSize(warsmashIni, defaultTextureSize(this));
 		GraphicsSettings.setDeviceMemoryMb(totalMemoryMb(this));
 		final Element touchSettings = warsmashIni.get("Touch");
@@ -341,13 +369,18 @@ public class AndroidLauncher extends AndroidApplication {
 					final GameResult failed = withoutGame("error");
 					failed.map = launch.mapFile;
 					failed.reason = menu.mapLoadFailureReason();
+					failed.issue = menu.mapLoadFailureIssue();
 					gameEnded(failed);
 				}
 			});
 		}
 		else if (save != null) {
 			menuScreen.setStartupMap(continuedMap);
-			menuScreen.whenLoaded(menu -> menu.startSavedGame(save));
+			menuScreen.whenLoaded(menu -> {
+				if (!menu.startSavedGame(save)) {
+					menu.showMapLoadError();
+				}
+			});
 		}
 		if (!this.fromLauncher) {
 			menuScreen.setReforgedLoadingScreens(LaunchRequest.SKIN_REFORGED.equals(chosenSkin()));
@@ -513,6 +546,9 @@ public class AndroidLauncher extends AndroidApplication {
 		// The backend pauses only the music and sounds it made itself.
 		PreparedMusic.pauseAll();
 		PooledSounds.pauseAll();
+		if (this.audioFocus != null) {
+			this.audioFocus.release();
+		}
 		this.loadWatch.removeCallbacks(this.loadWatcher);
 		super.onPause();
 		// The game cannot draw or step while the app is away; the session service keeps the connection, and the
@@ -525,6 +561,10 @@ public class AndroidLauncher extends AndroidApplication {
 		super.onResume();
 		this.loadWatch.post(this.loadWatcher);
 		LanSessions.appState(false);
+		if (this.audioFocus == null) {
+			this.audioFocus = new GameAudioFocus(this);
+		}
+		this.audioFocus.acquire();
 		PreparedMusic.resumeAll();
 		PooledSounds.resumeAll();
 	}
@@ -591,11 +631,16 @@ public class AndroidLauncher extends AndroidApplication {
 			launched = null;
 		}
 		Movies.removePlayer(this.moviePlayer);
+		if (this.audioFocus != null) {
+			this.audioFocus.release();
+			this.audioFocus = null;
+		}
 		// Exit Program in the game menu closes the program; the launcher hears that it was no crash.
 		if (this.fromLauncher && isFinishing()) {
 			writeResult(withoutGame("exit"));
 		}
-		if (isFinishing()) {
+		// A start dropped for a game already running (or without a valid token) must not end that game's session.
+		if (isFinishing() && (this.fromLauncher || this.initialized)) {
 			endLanSession();
 		}
 		if (!this.initialized) {
@@ -757,6 +802,19 @@ public class AndroidLauncher extends AndroidApplication {
 				return looping ? buffer.loop(volume, pitch, 0) : buffer.play(volume, pitch, 0);
 			}
 
+			// A SoundPool cannot seek, so only streamed sounds (the long loops) tell a length and carry on in time.
+			@Override
+			public float duration(final Sound buffer) {
+				return buffer instanceof StreamedSound ? ((StreamedSound) buffer).seconds() : 0;
+			}
+
+			@Override
+			public void seek(final Sound buffer, final long id, final float seconds) {
+				if (buffer instanceof StreamedSound) {
+					((StreamedSound) buffer).seek(id, seconds);
+				}
+			}
+
 			@Override
 			public long playPanned(final Sound buffer, final float volume, final float pitch, final float pan,
 					final boolean looping) {
@@ -808,6 +866,48 @@ public class AndroidLauncher extends AndroidApplication {
 				}
 			}
 
+			// A sound whose copy is not made yet is copied out of the game data, and handed to the pool, on a helper
+			// thread; the game data is read there only where it can be (a file its data source opens on any thread).
+			@Override
+			public boolean newSoundLater(final FileHandle file, final Consumer<Sound> ready) {
+				final IndependentStream.Opener opener = helperOpener(file, this.prefetched);
+				if (opener == null) {
+					return false;
+				}
+				SOUND_PREPARER.execute(() -> {
+					Sound made = null;
+					try {
+						made = PooledSounds.get()
+								.newSound(cachedCopy(soundCache, file, opener).file().getPath());
+					}
+					catch (final RuntimeException e) {
+						Log.w(TAG, "Unable to prepare " + file.path(), e);
+					}
+					final Sound result = made;
+					Gdx.app.postRunnable(() -> ready.accept(result));
+				});
+				return true;
+			}
+
+			@Override
+			public Sound newSoundIfReady(final FileHandle file) {
+				return helperOpener(file, this.prefetched) != null ? null : newSound(file);
+			}
+
+			/** @return how a helper thread reads the file, null when the sound is made on the calling thread */
+			private IndependentStream.Opener helperOpener(final FileHandle file, final Map<String, Sound> prefetched) {
+				if (!(file instanceof DataSourceFileHandle) || (Gdx.audio instanceof DisabledAndroidAudio)
+						|| prefetched.containsKey(file.path()) || hasCopy(soundCache, file)) {
+					return null;
+				}
+				try {
+					return ((DataSourceFileHandle) file).opener();
+				}
+				catch (final RuntimeException e) {
+					return null;
+				}
+			}
+
 			@Override
 			public void finishLoading(final long maxMillis) {
 				PooledSounds.get().finishLoading(maxMillis);
@@ -826,30 +926,81 @@ public class AndroidLauncher extends AndroidApplication {
 		};
 	}
 
+	private static final ExecutorService SOUND_PREPARER = Executors.newFixedThreadPool(2, runnable -> {
+		final Thread thread = new Thread(runnable, "SoundPrepare");
+		thread.setDaemon(true);
+		return thread;
+	});
+	// One copy is made by one thread at a time: the game thread asking for a sound a helper is copying waits for it.
+	private static final Map<String, Object> COPY_LOCKS = new ConcurrentHashMap<>();
+
+	private static boolean hasCopy(final File cacheFolder, final FileHandle file) {
+		final File copy = new File(cacheFolder, SoundCache.copyName(file.path()));
+		return copy.isFile() && (copy.length() > 0);
+	}
+
 	private static FileHandle cachedCopy(final File cacheFolder, final FileHandle file) {
-		final File copy = new File(cacheFolder, file.path().replaceAll("[^A-Za-z0-9._-]", "_"));
+		return cachedCopy(cacheFolder, file, null);
+	}
+
+	/** @param opener reads the file when it is not read by the file's own handle, which is bound to its thread */
+	private static FileHandle cachedCopy(final File cacheFolder, final FileHandle file,
+			final IndependentStream.Opener opener) {
+		final File copy = new File(cacheFolder, SoundCache.copyName(file.path()));
 		SoundCache.use(copy);
-		if (copy.isFile() && (copy.length() > 0)) {
-			SoundCache.touch(copy);
+		synchronized (COPY_LOCKS.computeIfAbsent(copy.getName(), name -> new Object())) {
+			if (copy.isFile() && (copy.length() > 0)) {
+				SoundCache.touch(copy);
+			}
+			else {
+				makeCopy(cacheFolder, file, opener, copy);
+			}
 		}
-		else {
-			cacheFolder.mkdirs();
-			final File partial = new File(cacheFolder, copy.getName() + ".part");
-			try (InputStream in = file.read(); OutputStream out = new FileOutputStream(partial)) {
-				final byte[] buffer = new byte[16384];
+		return Gdx.files.absolute(copy.getAbsolutePath());
+	}
+
+	private static void makeCopy(final File cacheFolder, final FileHandle file, final IndependentStream.Opener opener,
+			final File copy) {
+		cacheFolder.mkdirs();
+		final File partial = new File(cacheFolder, copy.getName() + ".part");
+		try (InputStream in = opener != null ? opener.open() : file.read();
+				OutputStream out = new FileOutputStream(partial)) {
+			if (in == null) {
+				throw new IOException("The file is gone from its data source");
+			}
+			final byte[] buffer = new byte[16384];
+			if (file.extension().equalsIgnoreCase("wav")) {
+				// The device's decoders play only some of the encodings a wav can hold (not ADPCM, A-law or
+				// 8 bit on every device), so the copy is made 16 bit PCM.
+				final ByteArrayOutputStream whole = new ByteArrayOutputStream();
+				int read;
+				while ((read = in.read(buffer)) != -1) {
+					whole.write(buffer, 0, read);
+				}
+				byte[] bytes = whole.toByteArray();
+				try {
+					bytes = WavPcm.toPcm16(bytes);
+				}
+				catch (final IOException | RuntimeException e) {
+					Log.w("Warsmash", "Unable to convert " + file.path() + ": " + e);
+				}
+				out.write(bytes);
+			}
+			else {
 				int read;
 				while ((read = in.read(buffer)) != -1) {
 					out.write(buffer, 0, read);
 				}
 			}
-			catch (final IOException e) {
-				throw new GdxRuntimeException("Unable to copy " + file.path(), e);
-			}
-			if (!partial.renameTo(copy)) {
-				throw new GdxRuntimeException("Unable to store " + copy);
-			}
-			SoundCache.copied(cacheFolder, copy.length());
 		}
-		return Gdx.files.absolute(copy.getAbsolutePath());
+		catch (final IOException | RuntimeException e) {
+			partial.delete();
+			throw new GdxRuntimeException("Unable to copy " + file.path(), e);
+		}
+		if (!partial.renameTo(copy)) {
+			partial.delete();
+			throw new GdxRuntimeException("Unable to store " + copy);
+		}
+		SoundCache.copied(cacheFolder, copy.length());
 	}
 }

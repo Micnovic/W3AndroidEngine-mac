@@ -72,7 +72,7 @@ class CPathfindingProcessorTest {
 		final CSimulation simulation = TestObjects.allocate(CSimulation.class);
 		final CWorldCollision collision = new CWorldCollision(new Rectangle(0, 0, SIZE * CELL, SIZE * CELL), 64f);
 		final CPathfindingProcessor processor = new CPathfindingProcessor(grid, collision,
-				new CPathfindingProcessor.SharedGraph(grid));
+				new CPathfindingProcessor.SharedGraph());
 		final Result result = new Result();
 		processor.findNaiveSlowPath(null, null, startX, startY, new CPathPoint(goalX, goalY), MovementType.FOOT,
 				collisionSize, true, new RecordingMove(result));

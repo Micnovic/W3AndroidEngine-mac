@@ -37,7 +37,10 @@ public final class ReplayPlayback implements GameTurnManager, ReplaySession {
 		this.viewer = viewer;
 		this.replay = replay;
 		this.file = file;
-		this.player = new CReplayPlayer(replay, viewer.simulation, SimulationChecksum::compute);
+		this.player = replay.getHeader().isWholeChecksums()
+				? new CReplayPlayer(replay, viewer.simulation, SimulationChecksum::compute)
+				: new CReplayPlayer(replay, viewer.simulation,
+						SimulationChecksum.sliced(replay.getHeader().getChecksumInterval()));
 		CGameCache.restoreSnapshot(replay.getHeader().getGameCaches());
 		CGameCache.setDisk(this.player.recordedDisk());
 		viewer.setReplaySession(this);

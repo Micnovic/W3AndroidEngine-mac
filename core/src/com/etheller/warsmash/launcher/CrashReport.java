@@ -21,6 +21,7 @@ public final class CrashReport {
 	public static final int LOG_LINES = 2000;
 	private static final String PREFIX = "crash-";
 	private static final String SUFFIX = ".txt";
+	private static final String SNAPSHOT_PREFIX = "log-";
 	private static final String RENDERER_MARK = "Renderer: ";
 	private static final DateTimeFormatter NAME_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT);
 	private static final DateTimeFormatter TEXT_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z",
@@ -53,8 +54,53 @@ public final class CrashReport {
 	}
 
 	public static boolean isCrashLog(final String name) {
-		return (name != null) && name.startsWith(PREFIX) && name.endsWith(SUFFIX) && (name.indexOf('/') < 0)
-				&& (name.indexOf('\\') < 0) && (name.length() > (PREFIX.length() + SUFFIX.length()));
+		return isPlainName(name, PREFIX);
+	}
+
+	/** The name of a log snapshot the player shares on demand, made at this time. */
+	public static String snapshotName(final long timeMillis, final ZoneId zone) {
+		return SNAPSHOT_PREFIX + NAME_TIME.format(Instant.ofEpochMilli(timeMillis).atZone(zone)) + SUFFIX;
+	}
+
+	public static boolean isSnapshot(final String name) {
+		return isPlainName(name, SNAPSHOT_PREFIX);
+	}
+
+	/** Every file the share provider may serve: crash logs and snapshots. */
+	public static boolean isShareable(final String name) {
+		return isCrashLog(name) || isSnapshot(name);
+	}
+
+	private static boolean isPlainName(final String name, final String prefix) {
+		return (name != null) && name.startsWith(prefix) && name.endsWith(SUFFIX) && (name.indexOf('/') < 0)
+				&& (name.indexOf('\\') < 0) && (name.length() > (prefix.length() + SUFFIX.length()));
+	}
+
+	/**
+	 * The text shared from the launcher at any time: the same facts a crash log carries (without an error), the app log
+	 * of this run, and the newest crash log when there is one.
+	 */
+	public static String snapshotText(final Details details, final String latestCrashLog, final ZoneId zone) {
+		final StringBuilder out = new StringBuilder(8192);
+		out.append("Warsmash log\n");
+		line(out, "Time", TEXT_TIME.format(Instant.ofEpochMilli(details.time).atZone(zone)));
+		line(out, "App version", details.appVersion);
+		line(out, "Commit", details.commit);
+		line(out, "Device", details.device);
+		line(out, "Android", details.androidVersion);
+		line(out, "GPU", details.renderer);
+		line(out, "Graphics", details.graphics);
+		out.append("\nApp log of this run (newest last)\n");
+		if (details.log != null) {
+			final int from = Math.max(0, details.log.size() - LOG_LINES);
+			for (int i = from; i < details.log.size(); i++) {
+				out.append(details.log.get(i)).append('\n');
+			}
+		}
+		if ((latestCrashLog != null) && !latestCrashLog.isEmpty()) {
+			out.append("\nLatest saved crash log\n").append(latestCrashLog).append('\n');
+		}
+		return out.toString();
 	}
 
 	/** The names that go once only the newest {@code keep} crash logs may stay; other files are never listed. */

@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.mdx;
 
+import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.RenderMathUtils;
 import com.hiveworkshop.rms.parsers.mdlx.AnimationMap;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxGenericObject;
@@ -11,6 +12,7 @@ public class GenericObject extends AnimatedObject implements GenericIndexed {
 	public final int objectId;
 	public final int parentId;
 	public final float[] pivot;
+	private Vector3 pivotVector;
 	public final int dontInheritTranslation;
 	public final int dontInheritRotation;
 	public final int dontInheritScaling;
@@ -106,6 +108,7 @@ public class GenericObject extends AnimatedObject implements GenericIndexed {
 			hasScaleAnim = hasScaleAnim || scale;
 		}
 
+		variants.shareUnset(model);
 		this.variants = variants;
 		this.hasTranslationAnim = hasTranslationAnim;
 		this.hasRotationAnim = hasRotationAnim;
@@ -155,12 +158,38 @@ public class GenericObject extends AnimatedObject implements GenericIndexed {
 		boolean[] scale;
 		boolean[] generic;
 
+		void shareUnset(final MdxModel model) {
+			this.translation = shared(this.translation, model);
+			this.rotation = shared(this.rotation, model);
+			this.scale = shared(this.scale, model);
+			this.generic = shared(this.generic, model);
+		}
+
+		private static boolean[] shared(final boolean[] flags, final MdxModel model) {
+			for (final boolean flag : flags) {
+				if (flag) {
+					return flags;
+				}
+			}
+			return model.noFlags(flags.length);
+		}
+
 		public Variants(final int sequencesCount) {
 			this.translation = new boolean[sequencesCount];
 			this.rotation = new boolean[sequencesCount];
 			this.scale = new boolean[sequencesCount];
 			this.generic = new boolean[sequencesCount];
 		}
+	}
+
+	/** The pivot for the nodes of the model's instances, which only read it: they share this one. */
+	Vector3 pivotVector() {
+		Vector3 vector = this.pivotVector;
+		if (vector == null) {
+			vector = new Vector3(this.pivot[0], this.pivot[1], this.pivot[2]);
+			this.pivotVector = vector;
+		}
+		return vector;
 	}
 
 	@Override

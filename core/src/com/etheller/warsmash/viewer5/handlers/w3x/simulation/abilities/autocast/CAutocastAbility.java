@@ -16,6 +16,11 @@ public interface CAutocastAbility {
 
 	boolean isAutoCastOn();
 
+	// False for Spell Steal: a unit called into a fight by a neighbour does not autocast it there.
+	default boolean autocastsWhenCalledIntoFight() {
+		return true;
+	}
+
 	void setAutoCastOn(final CSimulation simulation, final CUnit caster, final boolean autoCastOn,
 			final boolean notify);
 

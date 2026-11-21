@@ -170,6 +170,21 @@ class LanFaultTest {
 	}
 
 	@Test
+	void aCommandTooLongToTravelIsRefusedAndTheNextOnesStillArrive() throws Exception {
+		this.env.startHost();
+		final Node a = this.env.joinAndWait("A");
+		final Node b = this.env.joinAndWait("B");
+		this.env.startGame(a, b);
+		waitFor("traffic", () -> a.client.lastTurn() > 2);
+		assertEquals(-1, a.client.sendCommand(new byte[LanProtocol.MAX_COMMAND_BYTES + 1]));
+		assertEquals(1, a.client.sendCommand(command(1, 1)));
+		assertEquals(2, a.client.sendCommand(command(1, 2)));
+		waitFor("commands executed", () -> a.client.pendingCommands() == 0);
+		assertTrue(a.rec.disconnects.isEmpty(), "the link stays up: " + a.rec.disconnects);
+		assertEquals(LanProtocol.PRESENCE_PLAYING, this.env.host.presenceOf(a.client.participantId()));
+	}
+
+	@Test
 	void aGameWhoseOnlyActivePlayerLeavesStaysOpenForTheAbsentOne() throws Exception {
 		this.env.timings.absentAfterMs = 300;
 		this.env.startHost();

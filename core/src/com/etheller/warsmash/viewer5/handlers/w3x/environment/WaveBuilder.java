@@ -25,7 +25,7 @@ public class WaveBuilder {
 	private float[] locations;
 
 	private final Map<String, MdxModel> models;
-	private final War3MapW3e w3eFile;
+	private final char tileset;
 	private final War3MapW3i w3iFile;
 
 	public WaveBuilder(final int[] mapSize, final DataTable waterTable, final War3MapViewer viewer,
@@ -37,7 +37,7 @@ public class WaveBuilder {
 		this.corners = corners;
 		this.centerOffset = centerOffset;
 		this.waterHeightOffset = waterHeightOffset;
-		this.w3eFile = w3eFile;
+		this.tileset = w3eFile.getTileset();
 		this.w3iFile = w3iFile;
 		this.models = new HashMap<>();
 	}
@@ -46,8 +46,7 @@ public class WaveBuilder {
 		final int columns = this.mapSize[0];
 		final int rows = this.mapSize[1];
 		final float wavesDepth = 25f / 128f;
-		final char tileset = this.w3eFile.getTileset();
-		final Element waterRow = this.waterTable.get(tileset + "Sha");
+		final Element waterRow = this.waterTable.get(this.tileset + "Sha");
 		if (waterRow == null) {
 			return;
 		}

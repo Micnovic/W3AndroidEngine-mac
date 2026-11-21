@@ -41,7 +41,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignCatalog;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignMenuData;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.CampaignMission;
 
-/** The Campaign page with its difficulty box, and the Missions of the campaign chosen. */
+/** The Campaign page, and the Missions of the campaign chosen with its version and difficulty menus. */
 final class CampaignPage extends LauncherViews {
 	/** A section header of the campaign list is this part of a row high. */
 	private static final float SECTION_HEIGHT = 0.62f;
@@ -84,15 +84,23 @@ final class CampaignPage extends LauncherViews {
 	/** The campaign's scene, its model at 22 % from the left, darkening to the right where the list is. */
 	private void sceneBehind(final FrameLayout view, final CampaignCatalog.Entry entry) {
 		final String scene = entry != null ? CampaignChoice.campaignScene(entry.getSection()) : "roc_prologue";
-		final float focus = 0.22f;
-		final Bitmap still = this.activity.art.poster(scene);
-		final Drawable drawable = still != null ? new LauncherKit.CoverDrawable(still, focus, 0)
-				: this.activity.homePage.sceneStill();
 		final LauncherBoard b = this.activity.board;
+		// The Reforged pictures are composed for a page like this one; only the classic scenes are placed.
+		final float bandMid = (b.railW + b.contentX + b.campaignListX()) / 2 / b.width;
+		final float[] frame = this.activity.art.reforged() ? new float[] { 0.22f, 1, 1 }
+				: CampaignChoice.bandFrame(scene, b.width / b.height, CampaignChoice.RECORDING_ASPECT, bandMid, 0.40f);
+		final float focus = frame[0];
+		final Bitmap still = this.activity.art.poster(scene);
+		// The poster has its own width, so its crop is not the recording's.
+		final float stillFocus = (still == null) || this.activity.art.reforged() ? focus
+				: CampaignChoice.bandFocus(scene, b.width / b.height, still.getWidth() / (float) still.getHeight(),
+						bandMid, frame[1]);
+		final Drawable drawable = still != null ? new LauncherKit.CoverDrawable(still, stillFocus, 0)
+				: this.activity.homePage.sceneStill();
 		view.addView(this.activity.sceneBackdrop(drawable, scene, focus, LauncherActivity.LAYER_PAGE,
 				entry != null ? entry.getData().getBackground() : "TutorialBackdrop", null,
-				entry != null ? entry.getData().getBackgroundFogSettings() : null, 0, 0, 0, b.width, b.height, -1), 0,
-				new FrameLayout.LayoutParams(MATCH, MATCH));
+				entry != null ? entry.getData().getBackgroundFogSettings() : null, 0, 0, 0, b.width, b.height, -1,
+				frame[1], frame[2]), 0, new FrameLayout.LayoutParams(MATCH, MATCH));
 		final View shade = new View(this.activity);
 		shade.setBackground(gradient(false, new int[] { Color.TRANSPARENT, Color.TRANSPARENT,
 			Color.argb(0xC7, 0, 0, 0) }, new float[] { 0, 0.4f, 1 }));
@@ -290,69 +298,7 @@ final class CampaignPage extends LauncherViews {
 		else {
 			reveal(chosenRow);
 		}
-		// The Reforged campaign screen asks for the version and difficulty on the chosen campaign's page.
-		if (!(this.activity.art.reforged() && this.activity.art.has(SkinArt.CHAPTER_OPEN))) {
-			addDifficulty(content);
-		}
 		this.activity.setPage(view, LauncherActivity.PAGE_CAMPAIGN);
-	}
-
-	/**
-	 * The difficulty box at the bottom left: the label and its menu in one line, the description under them; with
-	 * the Reforged maps in the data, the campaign version's menu in a box of its own above it.
-	 */
-	private void addDifficulty(final FrameLayout content) {
-		final boolean t = this.activity.board.tablet;
-		final boolean versions = (this.activity.campaigns != null) && this.activity.campaigns.catalog.hasReforgedMaps();
-		final float edge = t ? 38 : 14;
-		final float pad = t ? 24 : 12;
-		final float inner = edge + pad;
-		final float menuH = t ? 98 : 96;
-		final float menuW = t ? 400 : 230;
-		final float labelSize = t ? 36 : 24;
-		final float w = t ? 820 : 508;
-		final float h = t ? 340 : 233;
-		final float y = t ? 1092 : 349;
-		final FrameLayout box = new FrameLayout(this.activity);
-		box.setBackground(editFrame(edge));
-		place(content, box, 0, y, w, h);
-		final TextView label = text(glueLabel("SELECT_DIFFICULTY_LEVEL", "Difficulty Level:"), labelSize,
-				this.activity.art.gold());
-		label.setGravity(Gravity.CENTER_VERTICAL);
-		place(box, label, inner, inner, w - (2 * inner) - menuW - 12, menuH);
-		final String current = this.activity.preferences.getString(KEY_DIFFICULTY, DIFFICULTIES[0][0]);
-		int selected = 0;
-		for (int i = 0; i < DIFFICULTIES.length; i++) {
-			if (DIFFICULTIES[i][0].equals(current)) {
-				selected = i;
-			}
-		}
-		place(box, dropdown(glueList(DIFFICULTIES, 1), selected, true, menuH, t ? 34 : 26,
-				choice -> this.activity.preferences.edit().putString(KEY_DIFFICULTY, DIFFICULTIES[choice][0]).apply()),
-				w - inner - menuW, inner, menuW, menuH);
-		place(box, lines(glueLabel("DIFFICULTY_TEXT", ""), t ? 26 : 19, this.activity.art.text(), 3), inner,
-				inner + menuH + (t ? 16 : 10), w - (2 * inner), -1);
-		if (!versions) {
-			return;
-		}
-		// The version box stands above the difficulty box, which keeps its place in the design.
-		final float versionH = (2 * inner) + menuH;
-		final FrameLayout versionBox = new FrameLayout(this.activity);
-		versionBox.setBackground(editFrame(edge));
-		place(content, versionBox, 0, y - versionH - (t ? 24 : 8), w, versionH);
-		final TextView versionLabel = text(glueLabel("CAMPAIGN_VERSION", getString(R.string.launcher_campaign_maps)),
-				labelSize, this.activity.art.gold());
-		versionLabel.setGravity(Gravity.CENTER_VERTICAL);
-		// "Campaign Version:" is longer than the difficulty's label; its menu is narrower.
-		final float versionMenuW = t ? 320 : menuW;
-		place(versionBox, versionLabel, inner, inner, w - (2 * inner) - versionMenuW - 12, menuH);
-		final String profile = this.activity.profiles.current();
-		final int version = LaunchContract.CAMPAIGN_MAPS_CLASSIC.equals(this.activity.profiles.campaignMaps(profile))
-				? 1 : 0;
-		place(versionBox, dropdown(glueList(CAMPAIGN_MAPS, 1), version, true, menuH, t ? 34 : 26,
-				choice -> this.activity.profiles.setCampaignMaps(profile, CAMPAIGN_MAPS[choice][0])),
-				w - inner - versionMenuW,
-				inner, versionMenuW, menuH);
 	}
 
 	void showMissions() {
@@ -413,12 +359,11 @@ final class CampaignPage extends LauncherViews {
 		final float rowH = reforged ? chapterRowH() : campaignRowH();
 		final float listH = b.contentH + campaignExtra();
 		float listY = 0;
-		if (reforged) {
-			// As on the Reforged campaign screen, a short chapter list stands level with the campaign's name.
-			final float middle = addCampaignBlock(content, entry);
-			final float total = shown.size() * rowH;
-			listY = Math.max(0, Math.min(listH - total, middle - (total / 2)));
-		}
+		// The campaign's name with the version and difficulty menus stand left of the list in both looks; a short
+		// chapter list stands level with the name.
+		final float middle = addCampaignBlock(content, entry);
+		final float total = shown.size() * rowH;
+		listY = Math.max(0, Math.min(listH - total, middle - (total / 2)));
 		final LinearLayout rows = scrollList(content, campaignListX(), listY, campaignListW(), listH - listY);
 		View chosenRow = null;
 		for (int i = 0; i < shown.size(); i++) {
@@ -445,9 +390,6 @@ final class CampaignPage extends LauncherViews {
 		}
 		if (chosenRow != null) {
 			reveal(chosenRow);
-		}
-		if (!reforged) {
-			addClassicName(content, data);
 		}
 		action(view, 0, glueLabel("BACK", getString(R.string.launcher_back)), v -> showCampaign());
 		this.activity.setPage(view, LauncherActivity.PAGE_MISSIONS);
@@ -565,9 +507,13 @@ final class CampaignPage extends LauncherViews {
 		final float left = t ? 24 : 0;
 		final float right = campaignListX() - (t ? 48 : 16);
 		final float y = ((this.activity.board.contentH + campaignExtra()) - shield - gap - menuH) * 0.5f;
-		place(content, image(version == 0 ? SkinArt.VERSION_REFORGED : SkinArt.VERSION_CLASSIC,
-				ImageView.ScaleType.FIT_CENTER), left, y, shield, shield);
-		final float tx = left + shield + (t ? 20 : 10);
+		// The classic skin has no pictures of the Reforged interface: without the shield the texts start at the edge.
+		final String shieldArt = version == 0 ? SkinArt.VERSION_REFORGED : SkinArt.VERSION_CLASSIC;
+		final boolean shielded = this.activity.art.has(shieldArt);
+		if (shielded) {
+			place(content, image(shieldArt, ImageView.ScaleType.FIT_CENTER), left, y, shield, shield);
+		}
+		final float tx = left + (shielded ? shield + (t ? 20 : 10) : (t ? 24 : 8));
 		final TextView header = fitted(text(upper(glueLabel(data.getHeader(), data.getHeader())), headerSize,
 				this.activity.art.gold()), headerSize, right - tx);
 		place(content, header, tx, y + (shield * 0.1f), right - tx, -1);
@@ -608,14 +554,16 @@ final class CampaignPage extends LauncherViews {
 					mx, menuY, difficultyW, menuH);
 			mx += difficultyW + gap;
 		}
-		final float folderW = t ? 120 : 96;
-		final LauncherKit.GlueButton saves = button("", menuH, textSize,
-				v -> this.activity.showPage(LauncherActivity.PAGE_LOAD));
-		saves.setContentDescription(glueLabel("KEY_LOAD_SAVED_GAME", "Load Saved Game"));
-		place(content, saves, mx, menuY, folderW, menuH);
-		final float icon = menuH * 0.5f;
-		place(content, image(SkinArt.ICON_FOLDER_GOLD, ImageView.ScaleType.FIT_CENTER), mx + ((folderW - icon) / 2),
-				menuY + ((menuH - icon) / 2), icon, icon);
+		if (this.activity.art.has(SkinArt.ICON_FOLDER_GOLD)) {
+			final float folderW = t ? 120 : 96;
+			final LauncherKit.GlueButton saves = button("", menuH, textSize,
+					v -> this.activity.showPage(LauncherActivity.PAGE_LOAD));
+			saves.setContentDescription(glueLabel("KEY_LOAD_SAVED_GAME", "Load Saved Game"));
+			place(content, saves, mx, menuY, folderW, menuH);
+			final float icon = menuH * 0.5f;
+			place(content, image(SkinArt.ICON_FOLDER_GOLD, ImageView.ScaleType.FIT_CENTER),
+					mx + ((folderW - icon) / 2), menuY + ((menuH - icon) / 2), icon, icon);
+		}
 		return y + (shield * 0.5f);
 	}
 

@@ -424,6 +424,17 @@ public final class LanConnection implements LanLoop.Handler {
 		});
 	}
 
+	/** Loop thread only: as {@link #closeAfterFlush} for a loop that is shutting down, without the timer. */
+	void drainAndClose(final String reason) {
+		if (this.closed) {
+			return;
+		}
+		if (this.closeAfterFlushReason == null) {
+			this.closeAfterFlushReason = reason;
+		}
+		maybeFinishClose();
+	}
+
 	private void maybeFinishClose() {
 		if (this.closeAfterFlushReason != null && !this.closed && this.outQueue.isEmpty()
 				&& this.outDelayed.isEmpty() && !this.lingering) {

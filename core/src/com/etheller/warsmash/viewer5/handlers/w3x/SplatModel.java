@@ -11,6 +11,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.BufferUtils;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.RenderMathUtils;
 import com.etheller.warsmash.viewer5.ViewerTextureRenderable;
 
@@ -35,6 +36,7 @@ public class SplatModel implements Comparable<SplatModel> {
 	private final boolean noDepthTest;
 	private final boolean highPriority;
 	private final boolean aboveWater;
+	private boolean released;
 
 	public SplatModel(final GL30 gl, final ViewerTextureRenderable texture, final List<float[]> locations,
 			final float[] centerOffset, final List<Consumer<SplatMover>> unitMapping, final boolean unshaded,
@@ -79,6 +81,15 @@ public class SplatModel implements Comparable<SplatModel> {
 		this.batches.clear();
 	}
 
+	/**
+	 * Frees the buffers of a batch taken off the ground for good (a selection that ended). A unit can still hold one of
+	 * its movers for a while; moving it then does nothing.
+	 */
+	public void release(final GL30 gl) {
+		this.released = true;
+		dispose(gl);
+	}
+
 	public void compact(final GL30 gl, final float[] centerOffset) {
 		// delete all the batches
 		dispose(gl);
@@ -117,6 +128,10 @@ public class SplatModel implements Comparable<SplatModel> {
 			int start = vertices.size();
 			final SplatMover splatMover = (this.splatInstances == null) ? null
 					: this.splatInstances.get(idx).reset(start * 3 * 4, indices.size() * 6 * 2, idx);
+			// The movers only upload their height when it changes, so a rebuild keeps the height they have.
+			final float absoluteHeight = ((splatMover != null) && splatMover.heightIsAbsolute)
+					? splatMover.absoluteHeightValue
+					: NO_ABS_HEIGHT;
 
 			final int numVertsToCrate = splatMover == null ? newVerts : maxPossibleVerts;
 			if (numVertsToCrate > MAX_VERTICES) {
@@ -144,7 +159,7 @@ public class SplatModel implements Comparable<SplatModel> {
 					vertices.add(vertex);
 					final float[] uv = new float[] { (x - x0) / uvXScale, 1.0f - ((y - y0) / uvYScale) };
 					uvs.add(uv);
-					final float[] absHeight = new float[] { NO_ABS_HEIGHT };
+					final float[] absHeight = new float[] { absoluteHeight };
 					absoluteHeights.add(absHeight);
 					if (splatMover != null) {
 						splatMover.vertices.add(vertex);
@@ -169,7 +184,7 @@ public class SplatModel implements Comparable<SplatModel> {
 					vertices.add(vertex);
 					final float[] uv = new float[] { (x - x0) / uvXScale, 1.0f - ((y - y0) / uvYScale) };
 					uvs.add(uv);
-					final float[] absHeight = new float[] { NO_ABS_HEIGHT };
+					final float[] absHeight = new float[] { absoluteHeight };
 					absoluteHeights.add(absHeight);
 					splatMover.vertices.add(vertex);
 					splatMover.uvs.add(uv);
@@ -266,6 +281,7 @@ public class SplatModel implements Comparable<SplatModel> {
 			gl.glBindBuffer(GL30.GL_ELEMENT_ARRAY_BUFFER, b.faceBuffer);
 
 			// Draw
+			PerfStats.draw();
 			gl.glDrawElements(GL30.GL_TRIANGLES, b.elements, GL30.GL_UNSIGNED_SHORT, 0);
 		}
 
@@ -395,6 +411,10 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void move(final float deltaX, final float deltaY, final float[] centerOffset) {
+			if (((deltaX == 0) && (deltaY == 0)) || this.splatModel.released) {
+				// Units and items move their splats every frame; one standing still would upload the same data again.
+				return;
+			}
 			this.locs[0] += deltaX;
 			this.locs[2] += deltaX;
 			this.locs[1] += deltaY;
@@ -405,6 +425,9 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void setLocation(final float x, final float y, final float[] centerOffset) {
+			if (this.splatModel.released) {
+				return;
+			}
 			final float width = this.locs[2] - this.locs[0];
 			final float height = this.locs[3] - this.locs[1];
 			this.locs[0] = x - (width / 2);
@@ -508,12 +531,12 @@ public class SplatModel implements Comparable<SplatModel> {
 			}
 			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.uvsOffset + ((this.startOffset / 3) * 2),
 					4 * 2 * this.uvs.size(), scratchFloats(this.uvs));
-			if (this.heightIsAbsolute) {
-				updateAbsoluteHeightParams();
-			}
 		}
 
 		public void destroy(final GL30 gl, final float[] centerOffset) {
+			if (this.splatModel.released) {
+				return;
+			}
 			this.splatModel.locations.remove(this.index);
 			this.splatModel.splatInstances.remove(this.index);
 			this.splatModel.compact(gl, centerOffset);
@@ -522,6 +545,10 @@ public class SplatModel implements Comparable<SplatModel> {
 		public void hide() {
 			// does not remove the shadow, just makes it not show, so it would still be
 			// using GPU resources
+			if (this.splatModel.released) {
+				this.hidden = true;
+				return;
+			}
 			final GL30 gl = Gdx.gl30;
 			for (final float[] vertex : this.vertices) {
 				for (int i = 0; i < vertex.length; i++) {
@@ -553,15 +580,21 @@ public class SplatModel implements Comparable<SplatModel> {
 			// It tries to only update if it is located at a new position... but here we are
 			// forcing it visible again by putting the position outside the map
 			this.ix0 = this.ix1 = this.iy0 = this.iy1 = Integer.MIN_VALUE;
-			move(0, 0, centerOffset);
 			this.hidden = false;
+			if (!this.splatModel.released) {
+				updateAfterMove(centerOffset);
+			}
 		}
 
 		public void setHeightAbsolute(final boolean absolute, final float absoluteHeightValue) {
+			final boolean changed = (absolute != this.heightIsAbsolute)
+					|| (absolute && (absoluteHeightValue != this.absoluteHeightValue));
 			this.absoluteHeightValue = absoluteHeightValue;
-			if (absolute != this.heightIsAbsolute) {
+			if (changed) {
 				this.heightIsAbsolute = absolute;
-				updateAbsoluteHeightParams();
+				if (!this.splatModel.released) {
+					updateAbsoluteHeightParams();
+				}
 			}
 		}
 
@@ -573,7 +606,7 @@ public class SplatModel implements Comparable<SplatModel> {
 			}
 			gl.glBindBuffer(GL30.GL_ARRAY_BUFFER, this.vertexBuffer);
 			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.absHeightsOffset + (this.startOffset / 3),
-					this.absoluteHeights.size() * 4, RenderMathUtils.wrap(this.absoluteHeights));
+					this.absoluteHeights.size() * 4, scratchFloats(this.absoluteHeights));
 		}
 	}
 

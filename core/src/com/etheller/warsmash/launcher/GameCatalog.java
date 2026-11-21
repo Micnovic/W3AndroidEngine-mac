@@ -83,7 +83,7 @@ public class GameCatalog {
 		/** Why a mission cannot be played on the campaign maps the profile has chosen; NONE when it can. */
 		public MapIssue issue(final CampaignCatalog.Entry entry, final int mission, final String campaignMaps) {
 			final String file = this.catalog.missionMapFilename(entry, mission,
-					LaunchRequest.CAMPAIGN_MAPS_REFORGED.equals(campaignMaps));
+					LaunchRequest.CAMPAIGN_MAPS_REFORGED.equals(LaunchRequest.playedMaps(this.catalog, campaignMaps)));
 			final MapIssue issue = file == null ? null : this.mapIssues.get(file.toLowerCase(Locale.ROOT));
 			return issue != null ? issue : MapIssue.NONE;
 		}
@@ -289,7 +289,8 @@ public class GameCatalog {
 	private volatile List<MapListCache.Skipped> skipped = Collections.emptyList();
 	private Element tilesets;
 	private DataTable worldEditData;
-	private boolean closed;
+	/** Read by the LAN threads that extract maps through {@link #virtualMaps()} too. */
+	private volatile boolean closed;
 
 	/**
 	 * @param saves   the engine's Save folder
@@ -357,7 +358,15 @@ public class GameCatalog {
 	}
 
 	private <T> void run(final Work<T> work, final Consumer<T> done) {
+		run(work, done, null);
+	}
+
+	/** @param closed runs instead of done when the catalog is closed before the answer; may be null */
+	private <T> void run(final Work<T> work, final Consumer<T> done, final Runnable closed) {
 		if (this.closed) {
+			if (closed != null) {
+				closed.run();
+			}
 			return;
 		}
 		this.worker.execute(() -> {
@@ -373,6 +382,9 @@ public class GameCatalog {
 			this.main.accept(() -> {
 				if (!this.closed) {
 					done.accept(answer);
+				}
+				else if (closed != null) {
+					closed.run();
 				}
 			});
 		});
@@ -567,19 +579,31 @@ public class GameCatalog {
 		}, done);
 	}
 
+	/**
+	 * Why a map about to be started cannot be played by the engine; {@link MapIssue#NONE} when it can, null when the
+	 * catalog was closed before the answer.
+	 */
+	public void mapIssue(final String path, final Consumer<MapIssue> done) {
+		run(() -> MapIssue.ofFile(data(), path), issue -> done.accept(issue == null ? MapIssue.NONE : issue),
+				() -> done.accept(null));
+	}
+
 	/** A map of the list prepared for a LAN game it hosts. */
 	public static final class LanMap {
 		public final File file;
 		public final net.warsmash.lan.protocol.LanData.MapInfo info;
 		public final int playerSlots;
 		public final boolean usesSync;
+		/** Why the engine cannot play the map; the map is then not offered, only told. */
+		public final MapIssue issue;
 
 		LanMap(final File file, final net.warsmash.lan.protocol.LanData.MapInfo info, final int playerSlots,
-				final boolean usesSync) {
+				final boolean usesSync, final MapIssue issue) {
 			this.file = file;
 			this.info = info;
 			this.playerSlots = playerSlots;
 			this.usesSync = usesSync;
+			this.issue = issue;
 		}
 	}
 
@@ -591,6 +615,10 @@ public class GameCatalog {
 	public void lanMap(final String path, final net.warsmash.lan.maps.LanMapIndex index,
 			final Consumer<LanMap> done) {
 		run(() -> {
+			final MapIssue named = MapIssue.ofName(path);
+			if (named != MapIssue.NONE) {
+				return new LanMap(null, null, 0, false, named);
+			}
 			final File file = data().getFile(path);
 			final net.warsmash.lan.protocol.LanData.MapInfo info = index.describe(file);
 			final String problem = net.warsmash.lan.maps.MapRules.checkInfo(info);
@@ -614,7 +642,7 @@ public class GameCatalog {
 						break;
 					}
 				}
-				return new LanMap(file, info, Math.max(1, Math.min(players, 24)), sync);
+				return new LanMap(file, info, Math.max(1, Math.min(players, 24)), sync, MapIssue.of(map));
 			}
 			finally {
 				map.close();
@@ -877,7 +905,7 @@ public class GameCatalog {
 							describe(entry, header);
 							entry.length = replay.getLastTick() * WarsmashConstants.SIMULATION_STEP_TIME;
 							final GraphicsSet graphics = GameReplays.playbackGraphics(data(), this.ini,
-									header.getMapPath());
+									header.getMapPath(), header.isCampaignGame());
 							final DataSource replayData = GraphicsSettings.gameData(data(), this.ini, graphics);
 							if (GameReplays.isThisEngine(header) && !dataChecksums.containsKey(graphics)) {
 								dataChecksums.put(graphics, GameReplays.dataChecksum(replayData));

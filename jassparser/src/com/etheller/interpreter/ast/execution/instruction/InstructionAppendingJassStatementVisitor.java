@@ -119,6 +119,15 @@ public class InstructionAppendingJassStatementVisitor
 		return this.localsOpCost;
 	}
 
+	/** Conversions of the parameters at function entry. */
+	public void addParameterConversions(final List<JassParameter> parameters) {
+		for (final JassParameter parameter : parameters) {
+			if (parameter.getType() == JassType.REAL) {
+				this.instructions.add(new ParameterAsRealInstruction(getLocalId(parameter.getIdentifier())));
+			}
+		}
+	}
+
 	public int getLocalId(final String name) {
 		final Integer localId = this.nameToLocalId.get(name);
 		if (localId == null) {
@@ -324,6 +333,9 @@ public class InstructionAppendingJassStatementVisitor
 		}
 		else if (this.returnType instanceof HandleJassType) {
 			this.instructions.add(new IntegerAsHandleInstruction((HandleJassType) this.returnType));
+		}
+		else if (this.returnType == JassType.REAL) {
+			this.instructions.add(IntegerBitsAsRealInstruction.INSTANCE);
 		}
 		this.instructions.add(ReturnInstruction.RETURN_VALUE);
 		return null;

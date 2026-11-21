@@ -19,12 +19,12 @@ public class CBuffHealingModifier extends CBuffTimed {
 
 	@Override
 	protected void onBuffAdd(final CSimulation game, final CUnit unit) {
-		unit.multiplyHealingReceived(this.healingFactor);
+		unit.addHealingReceivedFactor(this.healingFactor);
 	}
 
 	@Override
 	protected void onBuffRemove(final CSimulation game, final CUnit unit) {
-		unit.multiplyHealingReceived(1f / this.healingFactor);
+		unit.removeHealingReceivedFactor(this.healingFactor);
 	}
 
 	@Override

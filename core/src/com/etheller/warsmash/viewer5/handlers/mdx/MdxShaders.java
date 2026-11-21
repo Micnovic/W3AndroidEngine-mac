@@ -43,6 +43,7 @@ public class MdxShaders {
 			"    varying vec3 v_worldTangent;\r\n" + //
 			"    varying vec3 v_worldBinormal;\r\n" + //
 			"    varying vec3 v_worldEye;\r\n" + //
+			"    varying float v_fogZ;\r\n" + //
 			"    \r\n" + //
 			"    \r\n" + //
 			"    void main() {\r\n" + //
@@ -254,6 +255,7 @@ public class MdxShaders {
 			"      v_worldTangent = tangent;\r\n" + //
 			"      v_worldBinormal = binormal;\r\n" + //
 			"      v_worldEye = u_eyePos - position;\r\n" + //
+			"      v_fogZ = position.z;\r\n" + //
 			"      // v_lightDirWorld = normalize(lightDir);\r\n" + //
 			"      \r\n" + //
 			// TODO ONLY_TANGENTS
@@ -276,9 +278,9 @@ public class MdxShaders {
 				"uniform sampler2D u_environmentMap;\r\n" + //
 				"uniform float u_filterMode;\r\n" + //
 				"uniform vec4 u_fogColor;\r\n" + //
-				"uniform vec4 u_fogParams;\r\n" + //
+				"uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    varying float v_fogZ;\r\n" + //
 				"uniform vec4 u_vertexColor;\r\n" + //
-				"uniform vec2 u_iblParams;\r\n" + //
+				"uniform vec3 u_iblParams;\r\n" + //
 				"// uniform sampler2D u_lutMap;\r\n" + //
 				"// uniform sampler2D u_envDiffuseMap;\r\n" + //
 				"// uniform sampler2D u_envSpecularMap;\r\n" + //
@@ -315,8 +317,8 @@ public class MdxShaders {
 				"}\r\n" + //
 				"vec4 getDiffuseColor() {\r\n" + //
 				"  vec4 color = texture2D(u_diffuseMap, v_uv);\r\n" + //
-				"  // 1bit Alpha\r\n" + //
-				"  if (u_filterMode == 1.0 && color.a < 0.75) {\r\n" + //
+				"  // 1bit Alpha, soft while the instance fades\r\n" + //
+				"  if (u_vertexColor.a == 1.0 && u_filterMode == 1.0 && color.a < 0.75) {\r\n" + //
 				"    discard;\r\n" + //
 				"  }\r\n" + //
 				"  return color;\r\n" + //
@@ -581,8 +583,8 @@ public class MdxShaders {
 				"  float smoothness = 1.0 - roughness;\r\n" + //
 				"  vec3 fresnel = specTint + (vec3(1.0) - specTint) * pow(1.0 - nDotV, 5.0) * smoothness;\r\n" + //
 				"  vec3 iblDiffuse = envDiffuse * iblScale;\r\n" + //
-				"  vec3 iblSpecular = envSpecular * fresnel * (smoothness * smoothness) * iblScale;\r\n" + //
-				"  vec3 color = clamp(specularSum, 0.0, 1.0) + diffuse * (lambertFactorSum + iblDiffuse * aoFactor) + iblSpecular * aoFactor + emissive;\r\n" + //
+				"  vec3 iblSpecular = envSpecular * fresnel * (smoothness * smoothness) * iblScale * u_iblParams.z;\r\n" + //
+				"  vec3 color = clamp(specularSum, 0.0, 1.0) * u_iblParams.z + diffuse * (lambertFactorSum + iblDiffuse * aoFactor) + iblSpecular * aoFactor + emissive;\r\n" + //
 				// The fog of war shade and the unit tint come in the vertex color, as with the classic models.
 				"  color *= u_vertexColor.rgb;\r\n" + //
 				Shaders.fogSystem(false, null) + //
@@ -640,6 +642,7 @@ public class MdxShaders {
 				"    varying vec4 v_color;\r\n" + //
 				"    varying vec4 v_uvTransRot;\r\n" + //
 				"    varying float v_uvScale;\r\n" + //
+				"    varying float v_fogZ;\r\n" + //
 				"    uniform sampler2D u_lightTexture;\r\n" + //
 				"    uniform float u_lightCount;\r\n" + //
 				"    uniform float u_lightTextureHeight;\r\n" + //
@@ -686,6 +689,7 @@ public class MdxShaders {
 				"      v_uvTransRot = vec4(u_uvTrans, u_uvRot);\r\n" + //
 				"      v_uvScale = u_uvScale;\r\n" + //
 				"      gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"      if(!u_unshaded) {\r\n" + //
 				Shaders.lightSystem("normal", "position", "u_lightTexture", "u_lightTextureHeight", "u_lightCount",
 						false)
@@ -701,7 +705,7 @@ public class MdxShaders {
 			"    uniform float u_filterMode;\r\n" + //
 			"    uniform bool u_unfogged;\r\n" + //
 			"    uniform vec4 u_fogColor;\r\n" + //
-			"    uniform vec4 u_fogParams;\r\n" + //
+			"    uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    varying float v_fogZ;\r\n" + //
 			"    varying vec2 v_uv;\r\n" + //
 			"    varying vec4 v_color;\r\n" + //
 			"    varying vec4 v_uvTransRot;\r\n" + //
@@ -799,6 +803,7 @@ public class MdxShaders {
 				"    attribute vec3 a_leftRightTop;\r\n" + //
 				"    varying vec2 v_texcoord;\r\n" + //
 				"    varying vec4 v_color;\r\n" + //
+				"    varying float v_fogZ;\r\n" + //
 				"    float getCell(vec3 interval, float factor) {\r\n" + //
 				"      float start = interval[0];\r\n" + //
 				"      float end = interval[1];\r\n" + //
@@ -887,6 +892,7 @@ public class MdxShaders {
 				"        }\r\n" + //
 				"        position =  a_p0 + (vertices[int(a_position)] * scale);\r\n" + //
 				"        gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"      } else {\r\n" + //
 				"        // Get the normal to the tail in camera space.\r\n" + //
 				"        // This allows to build a 2D rectangle around the 3D tail.\r\n" + //
@@ -902,6 +908,7 @@ public class MdxShaders {
 				"          position = a_p0 + boundary;\r\n" + //
 				"        }\r\n" + //
 				"        gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"        lightingNormal = normalize(u_cameraZ);\r\n" + //
 				"      }\r\n" + //
 				"      if(!u_unshaded) {\r\n" + //
@@ -934,6 +941,7 @@ public class MdxShaders {
 				"      v_texcoord[1] /= u_rows;\r\n" + //
 				"      v_color = a_color;\r\n" + //
 				"      gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"    }\r\n" + //
 				"    void splat() {\r\n" + //
 				"      float factor = u_lifeSpan - a_health;\r\n" + //
@@ -969,6 +977,7 @@ public class MdxShaders {
 				"      v_texcoord[1] /= u_rows;\r\n" + //
 				"      v_color = mix(u_colors[index], u_colors[index + 1], factor) / 255.0;\r\n" + //
 				"      gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"      if(!u_unshaded) {\r\n" + //
 				Shaders.lightSystem("lightingNormal", "position", "u_lightTexture", "u_lightTextureHeight",
 						"u_lightCount", false)
@@ -1003,6 +1012,7 @@ public class MdxShaders {
 				"      }\r\n" + //
 				"      v_color = color / 255.0;\r\n" + //
 				"      gl_Position = u_mvp * vec4(position, 1.0);\r\n" + //
+				"      v_fogZ = position.z;\r\n" + //
 				"    }\r\n" + //
 				"    void main() {\r\n" + //
 				"      if (u_emitter == EMITTER_PARTICLE2) {\r\n" + //
@@ -1026,7 +1036,7 @@ public class MdxShaders {
 			"    varying vec4 v_color;\r\n" + //
 			"    uniform bool u_unfogged;\r\n" + //
 			"    uniform vec4 u_fogColor;\r\n" + //
-			"    uniform vec4 u_fogParams;\r\n" + //
+			"    uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    varying float v_fogZ;\r\n" + //
 			"    void main() {\r\n" + //
 			"      vec4 texel = texture2D(u_texture, v_texcoord);\r\n" + //
 			"      vec4 color = texel * v_color;\r\n" + //

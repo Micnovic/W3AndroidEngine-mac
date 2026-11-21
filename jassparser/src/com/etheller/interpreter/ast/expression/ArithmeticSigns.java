@@ -5,6 +5,7 @@ import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.CodeJassValue;
 import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
+import com.etheller.interpreter.ast.util.JassStrings;
 import com.etheller.interpreter.ast.value.JassType;
 import com.etheller.interpreter.ast.value.JassValue;
 import com.etheller.interpreter.ast.value.RealJassValue;
@@ -42,7 +43,7 @@ public enum ArithmeticSigns implements ArithmeticSign {
 		@Override
 		public JassValue apply(final String left, final String right) {
 			// A null string joins as "" (Java would write "null").
-			return new StringJassValue((left == null ? "" : left) + (right == null ? "" : right));
+			return new StringJassValue(JassStrings.concat(left == null ? "" : left, right == null ? "" : right));
 		}
 
 		@Override

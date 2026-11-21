@@ -125,7 +125,7 @@ class CPathfindingSaveTest {
 		final CWorldCollision collision = new CWorldCollision(new Rectangle(0, 0, SIZE * CELL, SIZE * CELL), 64f);
 		final CSimulation simulation = TestObjects.allocate(CSimulation.class);
 		final Holder live = new Holder();
-		live.graph = new CPathfindingProcessor.SharedGraph(grid);
+		live.graph = new CPathfindingProcessor.SharedGraph();
 		live.processor = new CPathfindingProcessor(grid, collision, live.graph);
 		live.results = new ArrayList<>();
 		for (int i = 0; i < 4; i++) {

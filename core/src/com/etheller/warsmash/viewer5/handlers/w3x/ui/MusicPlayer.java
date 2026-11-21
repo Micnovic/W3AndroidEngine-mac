@@ -17,9 +17,17 @@ public interface MusicPlayer {
 
 	public void resumeMusic();
 
+	/** Plays the track once, not remembered by the game; the default music follows it. */
+	default void playMusicOnce(final String musicField) {
+	}
+
 	public void setVolume(int volume);
 
 	public void optionsChanged();
+
+	/** Holds the music still while the window has no focus, for a map that asked for it. */
+	default void setPausedByFocus(final boolean paused) {
+	}
 
 	MusicPlayer DO_NOTHING = new MusicPlayer() {
 		@Override

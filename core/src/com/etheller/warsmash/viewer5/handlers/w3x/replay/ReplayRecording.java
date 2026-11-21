@@ -2,10 +2,10 @@ package com.etheller.warsmash.viewer5.handlers.w3x.replay;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.replay.CReplayHeader;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.replay.CReplayRecorder;
@@ -23,13 +23,12 @@ public final class ReplayRecording implements ReplaySession {
 	private boolean notSaved;
 
 	ReplayRecording(final CSimulation simulation, final CReplayHeader header, final FileHandle written,
-			final FileHandle target, final ToIntFunction<CSimulation> checksum) throws IOException {
+			final FileHandle target, final ChecksumSteps checksum) throws IOException {
 		this.written = written;
 		this.target = target;
 		written.parent().mkdirs();
 		final CReplayWriter writer = new CReplayWriter(new BufferedOutputStream(written.write(false)), header);
-		this.recorder = new CReplayRecorder(simulation, writer, header.getChecksumInterval(),
-				checksum);
+		this.recorder = new CReplayRecorder(simulation, writer, checksum);
 		CGameCache.setDisk(this.recorder.recordingDisk(CGameCache.profileDisk()));
 	}
 

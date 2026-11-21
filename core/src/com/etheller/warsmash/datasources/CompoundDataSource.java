@@ -7,16 +7,16 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
 
+import com.badlogic.gdx.utils.IntSet;
 import com.etheller.warsmash.util.Log;
 
 public class CompoundDataSource implements DataSource {
@@ -74,7 +74,8 @@ public class CompoundDataSource implements DataSource {
 	}
 
 	private volatile DataSource graphicsIndependent;
-	Map<String, File> cache = new HashMap<>();
+	// Lookups (has, findFirst) also come from the threads that prepare models for the game thread.
+	Map<String, File> cache = new ConcurrentHashMap<>();
 	// Index of the source that has each path, or MISSING. The sources do not change while this instance lives,
 	// and the same paths are asked for many times (prefixes, extensions, aliases).
 	private static final int MISSING = -1;
@@ -83,17 +84,26 @@ public class CompoundDataSource implements DataSource {
 
 	// Data prepared as a folder has many files only under their alias target, and only CASC resolves aliases itself.
 	// The path as asked wins, so CASC sources behave as before.
-	private Map<String, String> fileAliases = Collections.emptyMap();
+	private volatile Map<String, String> fileAliases = Collections.emptyMap();
+	/** The hash codes of the alias sources, so that a path without an alias is answered without normalizing it. */
+	private volatile IntSet aliasHashes = new IntSet();
 
 	private void loadFileAliases() {
 		this.fileAliases = Collections.emptyMap();
+		this.aliasHashes = new IntSet();
 		final int index = findSourceIndex("filealiases.json");
 		if (index == MISSING) {
 			return;
 		}
 		try (InputStream stream = this.mpqList.get(index).getResourceAsStream("filealiases.json")) {
 			if (stream != null) {
-				this.fileAliases = CascDataSource.cachedFileAliases(stream);
+				final Map<String, String> aliases = CascDataSource.cachedFileAliases(stream);
+				final IntSet hashes = new IntSet(aliases.size());
+				for (final String source : aliases.keySet()) {
+					hashes.add(source.hashCode());
+				}
+				this.aliasHashes = hashes;
+				this.fileAliases = aliases;
 			}
 		}
 		catch (final IOException | RuntimeException e) {
@@ -102,10 +112,15 @@ public class CompoundDataSource implements DataSource {
 	}
 
 	private String resolveAlias(final String filepath) {
-		if (this.fileAliases.isEmpty()) {
+		final Map<String, String> fileAliases = this.fileAliases;
+		if (fileAliases.isEmpty()) {
 			return null;
 		}
-		return this.fileAliases.get(CascDataSource.normalizePath(filepath));
+		final int hash = CascDataSource.normalizedHash(filepath);
+		if ((hash != CascDataSource.NOT_ASCII) && !this.aliasHashes.contains(hash)) {
+			return null;
+		}
+		return fileAliases.get(CascDataSource.normalizePath(filepath));
 	}
 
 	private int findSourceIndex(final String filepath) {
@@ -244,6 +259,24 @@ public class CompoundDataSource implements DataSource {
 	}
 
 	@Override
+	public IndependentStream.Opener opener(final String filepath) {
+		// the source that getResourceAsStream reads the file from
+		String path = filepath;
+		int index = findSourceIndex(path);
+		if (index == MISSING) {
+			path = resolveAlias(filepath);
+			if (path == null) {
+				return null;
+			}
+			index = findSourceIndex(path);
+			if (index == MISSING) {
+				return null;
+			}
+		}
+		return this.mpqList.get(index).opener(path);
+	}
+
+	@Override
 	public boolean has(final String filepath) {
 		if (this.cache.containsKey(filepath)) {
 			return true;
@@ -328,6 +361,15 @@ public class CompoundDataSource implements DataSource {
 		final Set<String> accepted = new LinkedHashSet<>();
 		for (final DataSource mpqGuy : this.mpqList) {
 			accepted.addAll(mpqGuy.getListfile(accept));
+		}
+		return accepted;
+	}
+
+	@Override
+	public Collection<String> getListfileByExtension(final String extension) {
+		final Set<String> accepted = new LinkedHashSet<>();
+		for (final DataSource mpqGuy : this.mpqList) {
+			accepted.addAll(mpqGuy.getListfileByExtension(extension));
 		}
 		return accepted;
 	}

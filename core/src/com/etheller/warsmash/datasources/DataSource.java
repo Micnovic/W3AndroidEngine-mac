@@ -70,9 +70,51 @@ public interface DataSource {
 	}
 
 	/**
+	 * The file as {@link #getResourceAsStream} would open it, but opened only when the returned opener is called, on
+	 * any thread: a helper thread may open and read it while the game thread uses the data source. The lookup is done
+	 * here.
+	 *
+	 * @return null when the file is missing, or when it can be opened only on the thread that uses the data source (an
+	 *         archive read through one shared channel)
+	 */
+	default IndependentStream.Opener opener(final String filepath) {
+		return null;
+	}
+
+	/**
 	 * @return a list of data source contents, or null if no list is provided
 	 */
 	Collection<String> getListfile();
+
+	/**
+	 * A filter of listed paths that can also judge the end of a path, path.substring(from), without that substring
+	 * where its answer does not need it: a folder of a data source asks about the part of each of its paths after the
+	 * folder name, and the game data have some hundred thousand paths.
+	 */
+	interface PathFilter extends Predicate<String> {
+		/** @return test(path.substring(from)) */
+		boolean test(String path, int from);
+
+		@Override
+		default boolean test(final String path) {
+			return test(path, 0);
+		}
+
+		/** The paths whose part after the start offset is at least as long as the extension and ends in it. */
+		static PathFilter endingWith(final String extension) {
+			final int length = extension.length();
+			return (path, from) -> ((path.length() - from) >= length)
+					&& path.regionMatches(true, path.length() - length, extension, 0, length);
+		}
+
+		/** The filter as a PathFilter, which for any other filter makes the substring. */
+		static PathFilter of(final Predicate<String> accept) {
+			if (accept instanceof PathFilter) {
+				return (PathFilter) accept;
+			}
+			return (path, from) -> accept.test(from == 0 ? path : path.substring(from));
+		}
+	}
 
 	/**
 	 * The listed paths that the filter accepts. A data source made of several others answers this without merging
@@ -92,6 +134,15 @@ public interface DataSource {
 			}
 		}
 		return accepted;
+	}
+
+	/**
+	 * The listed paths that end in the extension, in any case, as {@link #getListfile(Predicate)} gives them for that
+	 * test; a data source that lists a game's files at once answers this from a list it keeps, which the filters of
+	 * every folder laid over it each walked the whole of.
+	 */
+	default Collection<String> getListfileByExtension(final String extension) {
+		return getListfile(PathFilter.endingWith(extension));
 	}
 
 	/**

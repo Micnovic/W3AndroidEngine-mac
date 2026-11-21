@@ -45,12 +45,10 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 	private static final String RED = "red"; // replaced from 'uclr'
 	private static final String GREEN = "green"; // replaced from 'uclg'
 	private static final String BLUE = "blue"; // replaced from 'uclb'
-	private static final String MOVE_HEIGHT = "moveHeight"; // replaced from 'umvh'
 	private static final String ORIENTATION_INTERPOLATION = "orientInterp"; // replaced from 'uori'
 	public static final String ANIM_PROPS = "animProps"; // replaced from 'uani'
 	public static final String ATTACHMENT_ANIM_PROPS = "Attachmentanimprops"; // replaced from 'uaap'
 	private static final String BLEND_TIME = "blend"; // replaced from 'uble'
-	private static final String BUILD_SOUND_LABEL = "BuildingSoundLabel"; // replaced from 'ubsl'
 	private static final String UNIT_SELECT_HEIGHT = "selZ"; // replaced from 'uslz'
 
 	private final DataTable unitAckSoundsTable;
@@ -141,8 +139,22 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 		return unitSoundset;
 	}
 
+	/**
+	 * While the game goes on, the models of a type first needed are read on a helper thread and its units wait for
+	 * them (see {@link com.etheller.warsmash.viewer5.ModelViewer#setDeferModelLoads}).
+	 */
 	@Override
-	protected final RenderUnitType createTypeData(War3ID key, GameObject row) {
+	protected final RenderUnitType createTypeData(final War3ID key, final GameObject row) {
+		final boolean deferBefore = this.mapViewer.setDeferModelLoadsInGame(true);
+		try {
+			return createTypeDataNow(row);
+		}
+		finally {
+			this.mapViewer.setDeferModelLoadsInGame(deferBefore);
+		}
+	}
+
+	private RenderUnitType createTypeDataNow(final GameObject row) {
 		final String path = getUnitModelPath(row);
 		final String unitSpecialArtPath = row.getFieldAsString(UNIT_SPECIAL, 0);
 		MdxModel specialArtModel;

@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -19,32 +20,75 @@ import com.badlogic.gdx.utils.JsonValue;
  */
 public final class UpdateCheck {
 	public static final String RELEASES_URL = "https://api.github.com/repos/nikoltu/W3AndroidEngine/releases/latest";
-	/** A system property that makes the check answer with a release of this tag, without the network (for testing). */
+	/**
+	 * A system property that makes the check answer with a release of this tag, without the network (for testing).
+	 * "ratelimit" answers as when the API limit is reached and the web route fails too, "ratelimit:v0.4.99" as when
+	 * only the API limit is reached and the web route names that tag.
+	 */
 	public static final String FAKE_PROPERTY = "warsmash.fakeUpdate";
+	private static final String FAKE_RATE_LIMIT = "ratelimit";
 	private static final String RELEASES_PAGE = ProjectInfo.SOURCE_URL + "/releases";
+	/** Redirects to the page of the latest release's tag; the web route has no API limit. */
+	private static final String LATEST_PAGE = RELEASES_PAGE + "/latest";
+	private static final String TAG_MARKER = "/releases/tag/";
 	private static final String USER_AGENT = "W3AndroidEngine-launcher";
 	private static final int BUFFER = 64 * 1024;
+	/** The API's answer when its limit is reached, before the web route is tried. */
+	private static final Release RATE_LIMITED = unknownRelease();
+	/** Set when the player has closed the prompt of an unknown version; it is not offered again in this session. */
+	private static volatile boolean unknownDismissed;
 
-	/** A published release: its tag, the page that shows it, and its APK if it has one. */
+	/**
+	 * A published release: its tag, the page that shows it, and its APK if it has one. A release of unknown version
+	 * has an empty tag and the releases page: the check could not learn the version, so the player is sent to GitHub.
+	 */
 	public static final class Release {
 		public final String tag;
 		public final String pageUrl;
 		public final String apkName;
 		public final String apkUrl;
 		public final long apkSize;
+		private final boolean unknown;
+		/** Learned from the web page: no APK is known, but the page is worth opening for any build. */
+		private final boolean pageOnly;
 
 		Release(final String tag, final String pageUrl, final String apkName, final String apkUrl,
 				final long apkSize) {
+			this(tag, pageUrl, apkName, apkUrl, apkSize, false, false);
+		}
+
+		private Release(final String tag, final String pageUrl, final String apkName, final String apkUrl,
+				final long apkSize, final boolean unknown, final boolean pageOnly) {
 			this.tag = tag;
 			this.pageUrl = pageUrl;
 			this.apkName = apkName;
 			this.apkUrl = apkUrl;
 			this.apkSize = apkSize;
+			this.unknown = unknown;
+			this.pageOnly = pageOnly;
 		}
 
 		public boolean hasApk() {
 			return (this.apkUrl != null) && (this.apkSize > 0);
 		}
+
+		/** Whether the version of the release could not be learned (it cannot be compared or skipped). */
+		public boolean isUnknown() {
+			return this.unknown;
+		}
+	}
+
+	static Release unknownRelease() {
+		return new Release("", RELEASES_PAGE, null, null, 0, true, false);
+	}
+
+	/** The player closed the prompt of an unknown version: it is not offered again until the app starts anew. */
+	public static void dismissUnknown() {
+		unknownDismissed = true;
+	}
+
+	static void resetSession() {
+		unknownDismissed = false;
 	}
 
 	/** Download progress; the download stops when {@link #cancelled()} says so. */
@@ -164,8 +208,10 @@ public final class UpdateCheck {
 	 * Whether the prompt shows for an installed build. Only a release with a higher version (hotfix number included)
 	 * than the installed build is ever offered, so a build of the release's own version (a debug build included) is
 	 * never told to update to itself. An official build with an unknown version gets nothing; an unofficial one (built
-	 * by someone else, signed with another key) whose version is unknown is offered a release that has an APK.
-	 * Skipping a release silences it either way.
+	 * by someone else, signed with another key) whose version is unknown is offered a release that has an APK, or one
+	 * known from the web page alone.
+	 * Skipping a release silences it either way. A release of unknown version is offered to every build, once per
+	 * session.
 	 */
 	public static boolean offers(final String installed, final Release release, final String skipped,
 			final boolean officialBuild) {
@@ -197,7 +243,13 @@ public final class UpdateCheck {
 
 	private static boolean offers(final int[] installed, final Release release, final String skipped,
 			final boolean officialBuild) {
-		if ((release == null) || ((skipped != null) && !skipped.isEmpty() && (compare(release.tag, skipped) == 0))) {
+		if (release == null) {
+			return false;
+		}
+		if (release.unknown) {
+			return !unknownDismissed;
+		}
+		if ((skipped != null) && !skipped.isEmpty() && (compare(release.tag, skipped) == 0)) {
 			return false;
 		}
 		final int[] latest = rank(release.tag);
@@ -207,7 +259,7 @@ public final class UpdateCheck {
 		if (officialBuild) {
 			return (installed != null) && (compareRanks(latest, installed) > 0);
 		}
-		return release.hasApk() && ((installed == null) || (compareRanks(latest, installed) > 0));
+		return (release.hasApk() || release.pageOnly) && ((installed == null) || (compareRanks(latest, installed) > 0));
 	}
 
 	/** The latest release from the API's answer; null when it is a draft, a prerelease or not a release. */
@@ -225,7 +277,9 @@ public final class UpdateCheck {
 		if (assets != null) {
 			for (JsonValue asset = assets.child; asset != null; asset = asset.next) {
 				final String assetName = asset.getString("name", "");
-				if (assetName.toLowerCase(Locale.ROOT).endsWith(".apk")) {
+				// The name becomes a file name in the download folder.
+				if (assetName.toLowerCase(Locale.ROOT).endsWith(".apk") && (assetName.indexOf('/') < 0)
+						&& (assetName.indexOf('\\') < 0) && !assetName.startsWith(".")) {
 					name = assetName;
 					url = asset.getString("browser_download_url", null);
 					size = asset.getLong("size", 0);
@@ -244,18 +298,120 @@ public final class UpdateCheck {
 		return connection;
 	}
 
-	/** The latest release, or null on any failure (no network, rate limit, no release); the launcher goes on. */
+	/** Whether the answer of the API means its request limit is reached. */
+	static boolean isRateLimited(final int code, final String remaining, final String body) {
+		if (code == 429) {
+			return true;
+		}
+		return (code == 403) && (((remaining != null) && "0".equals(remaining.trim()))
+				|| ((body != null) && body.toLowerCase(Locale.ROOT).contains("rate limit")));
+	}
+
+	/**
+	 * The release a redirect to {@code .../releases/tag/<tag>} names, without APK information; null when the address
+	 * has no usable tag.
+	 */
+	static Release releaseFromLocation(final String location) {
+		if (location == null) {
+			return null;
+		}
+		final int at = location.indexOf(TAG_MARKER);
+		if (at < 0) {
+			return null;
+		}
+		final String rest = location.substring(at + TAG_MARKER.length());
+		int end = rest.length();
+		for (final char stop : new char[] { '?', '#', '/' }) {
+			final int found = rest.indexOf(stop);
+			if (found >= 0) {
+				end = Math.min(end, found);
+			}
+		}
+		final String raw = rest.substring(0, end);
+		if (raw.isEmpty()) {
+			return null;
+		}
+		try {
+			final String tag = URLDecoder.decode(raw.replace("+", "%2B"), "UTF-8");
+			return parse(tag) == null ? null : new Release(tag, RELEASES_PAGE + "/tag/" + raw, null, null, 0, false, true);
+		}
+		catch (final IOException | IllegalArgumentException e) {
+			return null;
+		}
+	}
+
+	/** The latest release, or null on any failure (no network, no release); the launcher goes on. */
 	public static Release fetchLatest(final int timeoutMillis) {
 		final String fake = System.getProperty(FAKE_PROPERTY);
 		if ((fake != null) && !fake.isEmpty()) {
+			if (fake.startsWith(FAKE_RATE_LIMIT)) {
+				final Release named = fake.startsWith(FAKE_RATE_LIMIT + ":")
+						? releaseFromLocation(TAG_MARKER + fake.substring(FAKE_RATE_LIMIT.length() + 1))
+						: null;
+				return named != null ? named : unknownRelease();
+			}
 			return parse(fake) == null ? null : new Release(fake, RELEASES_PAGE, null, null, 0);
 		}
+		final long started = System.currentTimeMillis();
+		final Release api = fetchFromApi(timeoutMillis);
+		if (api != RATE_LIMITED) {
+			return api;
+		}
+		// The limit is per address and lasts up to an hour; the player is still told, from the web page or at least
+		// by a pointer to GitHub.
+		LauncherLog.i("Update check: the API limit is reached");
+		final int left = (int) Math.max(500, timeoutMillis - (System.currentTimeMillis() - started));
+		final Release web = fetchFromWebPage(left);
+		return web != null ? web : unknownRelease();
+	}
+
+	private static Release fetchFromWebPage(final int timeoutMillis) {
+		HttpURLConnection connection = null;
+		try {
+			connection = open(LATEST_PAGE, timeoutMillis);
+			connection.setInstanceFollowRedirects(false);
+			final int code = connection.getResponseCode();
+			if ((code < 300) || (code > 399)) {
+				return null;
+			}
+			return releaseFromLocation(connection.getHeaderField("Location"));
+		}
+		catch (final IOException | RuntimeException e) {
+			LauncherLog.i("Update check by the web page failed: " + e);
+			return null;
+		}
+		finally {
+			if (connection != null) {
+				connection.disconnect();
+			}
+		}
+	}
+
+	private static String errorText(final HttpURLConnection connection) {
+		try (InputStream in = connection.getErrorStream()) {
+			if (in == null) {
+				return null;
+			}
+			final char[] buffer = new char[4096];
+			final int read = new InputStreamReader(in, StandardCharsets.UTF_8).read(buffer);
+			return read > 0 ? new String(buffer, 0, read) : null;
+		}
+		catch (final IOException e) {
+			return null;
+		}
+	}
+
+	/** The API's latest release; null on any failure; {@link #RATE_LIMITED} when its request limit is reached. */
+	private static Release fetchFromApi(final int timeoutMillis) {
 		HttpURLConnection connection = null;
 		try {
 			connection = open(RELEASES_URL, timeoutMillis);
 			connection.setRequestProperty("Accept", "application/vnd.github+json");
-			if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
-				return null;
+			final int code = connection.getResponseCode();
+			if (code != HttpURLConnection.HTTP_OK) {
+				final String remaining = connection.getHeaderField("X-RateLimit-Remaining");
+				return isRateLimited(code, remaining, code == 403 ? errorText(connection) : null) ? RATE_LIMITED
+						: null;
 			}
 			try (InputStream in = connection.getInputStream()) {
 				final StringBuilder text = new StringBuilder();
@@ -327,6 +483,9 @@ public final class UpdateCheck {
 					while ((read = in.read(buffer)) != -1) {
 						if (progress.cancelled()) {
 							return "";
+						}
+						if ((have + read) > release.apkSize) {
+							break;
 						}
 						out.write(buffer, 0, read);
 						have += read;

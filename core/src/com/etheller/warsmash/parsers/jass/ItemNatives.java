@@ -1,6 +1,10 @@
 package com.etheller.warsmash.parsers.jass;
 
+import java.util.List;
+
 import com.badlogic.gdx.math.Rectangle;
+import com.etheller.interpreter.ast.function.ConvertedConstant;
+import com.etheller.interpreter.ast.function.JassNativeManager;
 import com.etheller.interpreter.ast.scope.trigger.TriggerBooleanExpression;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.CodeJassValue;
@@ -8,6 +12,7 @@ import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.JassType;
+import com.etheller.interpreter.ast.value.JassValue;
 import com.etheller.interpreter.ast.value.RealJassValue;
 import com.etheller.interpreter.ast.value.StringJassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
@@ -28,6 +33,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.shop.CAbilitySellItems;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.shop.CAbilitySellUnits;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 
@@ -48,66 +55,147 @@ final class ItemNatives extends CommonNatives {
 		registerInventory();
 		registerEquipment();
 		registerStock();
+		registerItemColor();
 	}
 
 	/**
-	 * The loadout natives of the Reforged 3.0 item model (equipment slots, bags, item tags). The engine has the
-	 * classic six-slot inventory only: no unit has equipment slots, nothing is equipped or bagged, every item has
-	 * the first equipment type and tag, and the random item filters (which only select by those) match every item.
-	 * A map written for the loadout therefore runs without a script error and sees an empty loadout.
+	 * The loadout natives of the Reforged 3.0 item model. An item has an equipment type and a tag from its data; a
+	 * unit with an inventory has nine loadout slots (head, chest, gloves, boots, two rings, primary, offhand,
+	 * trinket) apart from its carried slots, and an item is worn in the first free slot of its type. The "bag" is the
+	 * numbered carried slots.
 	 */
 	private void registerEquipment() {
 		final HandleJassType itemType = type("item");
-		final String[] noItem = { "GetEquippedItem", "BlzGetEquippedItem", "GetUnequippedItem",
-				"BlzGetUnequippedItem", "UnitUnequipItemFromSlot", "BlzUnitUnequipItemFromSlot", "UnitItemInBagSlot",
-				"BlzUnitItemInBagSlot", "UnitItemInEquipmentSlot", "BlzUnitItemInEquipmentSlot" };
-		for (final String name : noItem) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> new HandleJassValue(itemType, null));
-		}
-		final String[] noBoolean = { "IsItemEquipped", "BlzIsItemEquipped", "IsItemInBag", "BlzIsItemInBag",
-				"UnitEquipItem", "BlzUnitEquipItem", "UnitHasItemBagged", "BlzUnitHasItemBagged",
-				"UnitHasItemEquipped", "BlzUnitHasItemEquipped", "UnitHasAnyItemEquiped",
-				"BlzUnitHasAnyItemEquipped", "UnitHasItemEquipmentOfType", "BlzUnitHasItemEquipmentOfType",
-				"UnitCanEquipItemOfEquipmentType", "BlzUnitCanEquipItemOfEquipmentType" };
-		for (final String name : noBoolean) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
-		}
-		for (final String name : new String[] { "UnitHasLoadoutSlotEmpty", "BlzUnitHasLoadoutSlotEmpty" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> BooleanJassValue.TRUE);
-		}
-		for (final String name : new String[] { "UnitExtendedInventorySize", "BlzUnitExtendedInventorySize" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> IntegerJassValue.of(0));
-		}
-		for (final String name : new String[] { "UnitUnequipItem", "BlzUnitUnequipItem" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name, (arguments, globalScope, triggerScope) -> null);
-		}
-		for (final String name : new String[] { "GetItemEquipmentType", "BlzGetItemEquipmentType" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> jassProgramVisitor.getJassNativeManager()
-							.convertedConstant(globalScope.getHandleType(declaredName(globalScope, "equipmenttype",
-									"equipmentType")), 0));
-		}
-		for (final String name : new String[] { "GetItemTag", "BlzGetItemTag" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> jassProgramVisitor.getJassNativeManager()
-							.convertedConstant(globalScope.getHandleType(declaredName(globalScope, "itemtag",
-									"itemTag")), 0));
+		final JassNativeManager nm = jassProgramVisitor.getJassNativeManager();
+		for (final String prefix : new String[] { "", "Blz" }) {
+			nm.createNative(prefix + "GetEquippedItem", (arguments, globalScope, triggerScope) -> {
+				return new HandleJassValue(itemType, ((CommonTriggerExecutionScope) triggerScope).getManipulatedItem());
+			});
+			nm.createNative(prefix + "GetUnequippedItem", (arguments, globalScope, triggerScope) -> {
+				return new HandleJassValue(itemType, ((CommonTriggerExecutionScope) triggerScope).getManipulatedItem());
+			});
+			nm.createNative(prefix + "IsItemEquipped", (arguments, globalScope, triggerScope) -> {
+				final CItem item = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				final CAbilityInventory inventory = (item == null) ? null : item.getContainedInventory();
+				return BooleanJassValue.of((inventory != null) && (inventory.getLoadoutSlot(item) >= 0));
+			});
+			nm.createNative(prefix + "IsItemInBag", (arguments, globalScope, triggerScope) -> {
+				final CItem item = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				final CAbilityInventory inventory = (item == null) ? null : item.getContainedInventory();
+				return BooleanJassValue.of((inventory != null) && (inventory.getSlot(item) >= 0));
+			});
+			nm.createNative(prefix + "GetItemEquipmentType", (arguments, globalScope, triggerScope) -> {
+				final CItem item = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				return nm.convertedConstant(
+						globalScope.getHandleType(declaredName(globalScope, "equipmenttype", "equipmentType")),
+						(item == null) ? 0 : item.getEquipmentType().ordinal());
+			});
+			nm.createNative(prefix + "GetItemTag", (arguments, globalScope, triggerScope) -> {
+				final CItem item = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				return nm.convertedConstant(
+						globalScope.getHandleType(declaredName(globalScope, "itemtag", "itemTag")),
+						(item == null) ? 0 : item.getItemTag().ordinal());
+			});
+			nm.createNative(prefix + "UnitEquipItem", (arguments, globalScope, triggerScope) -> {
+				final CUnit unit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				final CItem item = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+				final CAbilityInventory inventory = usableInventory(unit);
+				return BooleanJassValue.of((inventory != null) && inventory.equipItem(this.simulation, unit, item));
+			});
+			nm.createNative(prefix + "UnitUnequipItem", (arguments, globalScope, triggerScope) -> {
+				final CUnit unit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				final CItem item = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+				final CAbilityInventory inventory = usableInventory(unit);
+				if (inventory != null) {
+					final int slot = inventory.getLoadoutSlot(item);
+					if (slot >= 0) {
+						inventory.unequipSlot(this.simulation, unit, slot);
+					}
+				}
+				return null;
+			});
+			nm.createNative(prefix + "UnitUnequipItemFromSlot", (arguments, globalScope, triggerScope) -> {
+				final CUnit unit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+				final CAbilityInventory inventory = usableInventory(unit);
+				return new HandleJassValue(itemType, (inventory == null) ? null
+						: inventory.unequipSlot(this.simulation, unit, constantValue(arguments, 1)));
+			});
+			nm.createNative(prefix + "UnitHasItemBagged", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				final CItem item = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+				return BooleanJassValue.of((inventory != null) && (item != null) && (inventory.getSlot(item) >= 0));
+			});
+			nm.createNative(prefix + "UnitHasItemEquipped", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				final CItem item = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+				return BooleanJassValue.of((inventory != null) && (inventory.getLoadoutSlot(item) >= 0));
+			});
+			nm.createNative(prefix + (prefix.isEmpty() ? "UnitHasAnyItemEquiped" : "UnitHasAnyItemEquipped"), (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				return BooleanJassValue.of((inventory != null) && inventory.hasEquipment());
+			});
+			nm.createNative(prefix + "UnitHasItemEquipmentOfType", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				return BooleanJassValue.of((inventory != null)
+						&& inventory.hasEquipmentOfType(CEquipmentType.fromId(constantValue(arguments, 1))));
+			});
+			nm.createNative(prefix + "UnitCanEquipItemOfEquipmentType", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				final CEquipmentType type = CEquipmentType.fromId(constantValue(arguments, 1));
+				return BooleanJassValue.of((inventory != null) && inventory.isCanGetItems()
+						&& (type.isWearable() || (type == CEquipmentType.ANY)));
+			});
+			nm.createNative(prefix + "UnitHasLoadoutSlotEmpty", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				final int slot = constantValue(arguments, 1);
+				return BooleanJassValue.of((slot >= 0) && (slot < CEquipmentType.LOADOUT_SLOTS)
+						&& ((inventory == null) || (inventory.getItemInLoadoutSlot(slot) == null)));
+			});
+			nm.createNative(prefix + "UnitItemInEquipmentSlot", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				return new HandleJassValue(itemType,
+						(inventory == null) ? null : inventory.getItemInLoadoutSlot(constantValue(arguments, 1)));
+			});
+			nm.createNative(prefix + "UnitItemInBagSlot", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				return new HandleJassValue(itemType,
+						(inventory == null) ? null : inventory.getItemInSlot(intArg(arguments, 1)));
+			});
+			nm.createNative(prefix + "UnitExtendedInventorySize", (arguments, globalScope, triggerScope) -> {
+				final CAbilityInventory inventory = usableInventory(nullable(arguments, 0,
+						ObjectJassValueVisitor.<CUnit>getInstance()));
+				return IntegerJassValue.of((inventory == null) ? 0 : inventory.getItemCapacity());
+			});
 		}
 		for (final String name : new String[] { "ChooseRandomItemExWithFilter",
 				"ChooseRandomItemExWithFilterAndIncludes" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> {
-						final CItemTypeJass whichType = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
-						final int level = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
-						final War3ID randomItemId = this.simulation.getItemData().chooseRandomItem(whichType, level,
-								this.simulation.getSeededRandom());
-						return IntegerJassValue.of(randomItemId == null ? 0 : randomItemId.getValue());
-					});
+			final boolean includes = name.endsWith("AndIncludes");
+			jassProgramVisitor.getJassNativeManager().createNative(name, (arguments, globalScope, triggerScope) -> {
+				final CItemTypeJass whichType = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
+				final int level = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+				final War3ID randomItemId = this.simulation.getItemData().chooseRandomItem(whichType, level,
+						CEquipmentType.fromId(constantValue(arguments, 2)), CItemTag.fromId(constantValue(arguments, 3)),
+						!includes || arguments.get(4).visit(BooleanJassValueVisitor.getInstance()),
+						includes && arguments.get(5).visit(BooleanJassValueVisitor.getInstance()),
+						this.simulation.getSeededRandom());
+				return IntegerJassValue.of(randomItemId == null ? 0 : randomItemId.getValue());
+			});
 		}
+	}
+
+	/** The number a converted constant argument (an equipment type or a loadout slot) stands for. */
+	private static int constantValue(final List<JassValue> arguments, final int index) {
+		final Object value = arguments.get(index) == null ? null
+				: arguments.get(index).visit(ObjectJassValueVisitor.getInstance());
+		return (value instanceof ConvertedConstant) ? ((ConvertedConstant) value).getValue() : -1;
 	}
 
 	/** Which spelling of a type name common.j declared: the name is lower case in some versions of the file. */
@@ -193,7 +281,7 @@ final class ItemNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CItem whichItem = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 					if (whichItem == null) {
-						return IntegerJassValue.of(0);
+						return new HandleJassValue(playerType, null);
 					}
 					final CUnit containedUnit = whichItem.getContainedUnit();
 					if (containedUnit != null) {
@@ -622,7 +710,7 @@ final class ItemNatives extends CommonNatives {
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("UnitItemInSlot",
 				(arguments, globalScope, triggerScope) -> {
-					final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
+					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					final int whichSlot = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 					if (whichUnit == null) {
 						return new HandleJassValue(itemType, null);
@@ -638,8 +726,8 @@ final class ItemNatives extends CommonNatives {
 					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 					final CItem whichItem = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
 					final CAbilityInventory inventoryData = usableInventory(whichUnit);
-					return BooleanJassValue
-							.of((inventoryData != null) && (whichItem != null) && (inventoryData.getSlot(whichItem) != -1));
+					return BooleanJassValue.of((inventoryData != null) && (whichItem != null)
+							&& ((inventoryData.getSlot(whichItem) != -1) || (inventoryData.getLoadoutSlot(whichItem) != -1)));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("UnitInventoryCount",
 				(arguments, globalScope, triggerScope) -> {
@@ -655,28 +743,24 @@ final class ItemNatives extends CommonNatives {
 					}
 					return IntegerJassValue.of(count);
 				});
-		// 3.0 equipment and bag slots do not exist in this ruleset, so items are never equipped or bagged.
-		for (final String name : new String[] { "BlzIsItemEquipped", "BlzIsItemInBag", "BlzUnitEquipItem",
-				"BlzUnitHasItemBagged", "BlzUnitHasItemEquipped", "BlzUnitHasAnyItemEquipped",
-				"BlzUnitHasItemEquipmentOfType", "BlzUnitCanEquipItemOfEquipmentType" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
-		}
-		jassProgramVisitor.getJassNativeManager().createNative("BlzUnitHasLoadoutSlotEmpty",
-				(arguments, globalScope, triggerScope) -> BooleanJassValue.TRUE);
-		for (final String name : new String[] { "BlzUnitItemInBagSlot", "BlzUnitItemInEquipmentSlot",
-				"BlzUnitUnequipItemFromSlot" }) {
-			jassProgramVisitor.getJassNativeManager().createNative(name,
-					(arguments, globalScope, triggerScope) -> new HandleJassValue(itemType, null));
-		}
-		jassProgramVisitor.getJassNativeManager().createNative("BlzUnitExtendedInventorySize",
-				(arguments, globalScope, triggerScope) -> IntegerJassValue.of(0));
-		for (final String name : new String[] { "BlzUnitUnequipItem", "BlzSetItemColor", "BlzResetUnitTalents",
+		for (final String name : new String[] { "BlzResetUnitTalents",
 				"BlzSetHUDScale", "BlzLockHUDScale", "BlzUnlockHUDScale",
 				"BlzSetThematicMusicAbsoluteVolume" }) {
 			jassProgramVisitor.getJassNativeManager().createNative(name,
 					(arguments, globalScope, triggerScope) -> null);
 		}
+	}
+
+	private void registerItemColor() {
+		jassProgramVisitor.getJassNativeManager().createNative("BlzSetItemColor",
+				(arguments, globalScope, triggerScope) -> {
+					final CItem item = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+					final Object color = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+					if (item != null) {
+						item.setScriptColor(color instanceof ConvertedConstant ? ((ConvertedConstant) color).getValue() : 0);
+					}
+					return null;
+				});
 	}
 
 	private void registerStock() {

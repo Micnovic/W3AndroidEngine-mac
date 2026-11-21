@@ -25,12 +25,9 @@ import com.etheller.warsmash.lan.LanPlay;
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedGame;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CSaveStorage;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CMapControl;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.JassGameEventsWar3;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CPlayerSlotState;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.FocusableFrame;
 
 /**
@@ -85,7 +82,7 @@ final class MeleeUIMenus {
 		this.menuButton = (SimpleButtonFrame) this.ui.rootFrame.getFrameByName("UpperButtonBarMenuButton", 0);
 		this.alliesButton = (SimpleButtonFrame) this.ui.rootFrame.getFrameByName("UpperButtonBarAlliesButton", 0);
 		this.ui.allianceDialog = new MeleeAllianceDialog(this.ui.rootFrame, this.ui.uiViewport,
-				this.ui.war3MapViewer.simulation, this.ui.localPlayer, this.ui.war3MapViewer.getMapFileName(),
+				this.ui.war3MapViewer.simulation, this.ui.localPlayer, this.ui.war3MapViewer.isCampaignGame(),
 				this.ui.unitOrderListener);
 		this.ui.scoreScreen = new MeleeScoreScreen(this.ui.rootFrame, this.ui.uiViewport,
 				this.ui.war3MapViewer.simulation, this.ui.war3MapViewer.getAllObjectData(),
@@ -134,6 +131,11 @@ final class MeleeUIMenus {
 					@Override
 					public void sendCheat(final String cheat) {
 						MeleeUIMenus.this.ui.unitOrderListener.cheat(cheat);
+					}
+
+					@Override
+					public void playCheatMusic(final String musicName) {
+						MeleeUIMenus.this.ui.musicPlayer.playMusicOnce(musicName);
 					}
 
 					@Override

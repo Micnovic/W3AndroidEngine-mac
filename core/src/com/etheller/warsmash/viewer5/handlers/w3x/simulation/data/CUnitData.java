@@ -17,6 +17,7 @@ import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.units.ObjectData;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.util.Log;
+import com.etheller.warsmash.util.SafeParse;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.SecondaryTag;
@@ -860,31 +861,11 @@ public class CUnitData {
 			if (!item.isEmpty() && (item.length() == 4)) {
 				int level;
 				if (i < requirementsLevelsString.size()) {
-					if (requirementsLevelsString.get(i).isEmpty()) {
-						level = 1;
-					}
-					else {
-						try {
-							level = Integer.parseInt(requirementsLevelsString.get(i));
-						}
-						catch (final NumberFormatException exc) {
-							level = 1;
-						}
-					}
+					level = SafeParse.parseInt(requirementsLevelsString.get(i), 1);
 				}
 				else if (requirementsLevelsString.size() > 0) {
 					final String requirementLevel = requirementsLevelsString.get(requirementsLevelsString.size() - 1);
-					if (requirementLevel.isEmpty()) {
-						level = 1;
-					}
-					else {
-						try {
-							level = Integer.parseInt(requirementLevel);
-						}
-						catch (final NumberFormatException exc) {
-							level = 1;
-						}
-					}
+					level = SafeParse.parseInt(requirementLevel, 1);
 				}
 				else {
 					level = 1;

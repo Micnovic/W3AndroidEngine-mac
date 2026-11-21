@@ -208,6 +208,71 @@ public final class CampaignChoice {
 		}
 	}
 
+	/** The recordings are 1920 x 810 pixels with a 3:4 pixel shape, so they play at 16:9 (like their posters). */
+	public static final float RECORDING_ASPECT = 16f / 9f;
+
+	/**
+	 * Where the head of each classic scene's model stands in the recording, as parts of its width and height
+	 * (measured from the frames, so that the pages with a free middle can place it exactly).
+	 */
+	public static float[] bandModel(final String scene) {
+		switch (scene) {
+		case "roc_prologue":
+			return new float[] { 0.31f, 0.21f };
+		case "roc_human":
+			return new float[] { 0.33f, 0.53f };
+		case "roc_undead":
+			return new float[] { 0.33f, 0.30f };
+		case "roc_orc":
+			return new float[] { 0.32f, 0.23f };
+		case "roc_nightelf":
+			return new float[] { 0.31f, 0.12f };
+		case "tft_nightelf":
+			return new float[] { 0.35f, 0.20f };
+		case "tft_human":
+			return new float[] { 0.255f, 0.34f };
+		case "tft_undead":
+			return new float[] { 0.24f, 0.32f };
+		case "tft_orc":
+			return new float[] { 0.15f, 0.35f };
+		default:
+			return new float[] { 0.5f, 0.35f };
+		}
+	}
+
+	/**
+	 * How a recorded scene is framed behind a page whose middle is free (between a rail and a list): {focus, zoom,
+	 * pivotY}. The scene is enlarged by the zoom (at most 1.5) about the left edge at pivotY (a part of the height)
+	 * until the model's head stands at wantedY from the top, or as near as a modest zoom brings it (a picture not enlarged has pivotY 0), and cropped so that it stands at bandMid (a part of the
+	 * screen width); a model near the left edge of the recording is brought right by the zoom as far as it needs.
+	 * The enlarged picture always covers the frame.
+	 */
+	public static float[] bandFrame(final String scene, final float frameAspect, final float sceneAspect,
+			final float bandMid, final float wantedY) {
+		final float[] model = bandModel(scene);
+		final float visible = Math.min(1, frameAspect / sceneAspect);
+		float zoom = 1;
+		if (visible < 1) {
+			zoom = Math.max(zoom, visible * bandMid / model[0]);
+		}
+		// A model high in its recording is lowered only a little: a large zoom would crop the picture too much.
+		zoom = Math.max(zoom, model[1] > wantedY ? (1 - wantedY) / (1 - model[1]) : Math.min(wantedY / model[1], 1.2f));
+		zoom = Math.min(zoom, 1.5f);
+		final float pivotY = zoom > 1.001f ? Math.max(0, Math.min(1, (wantedY - (model[1] * zoom)) / (1 - zoom))) : 0;
+		return new float[] { bandFocus(scene, frameAspect, sceneAspect, bandMid, zoom), zoom, pivotY };
+	}
+
+	/** The crop of a picture of the given aspect that puts the scene's model at bandMid once enlarged by the zoom. */
+	public static float bandFocus(final String scene, final float frameAspect, final float pictureAspect,
+			final float bandMid, final float zoom) {
+		final float visible = Math.min(1, frameAspect / pictureAspect);
+		if (visible >= 1) {
+			return 0.5f;
+		}
+		final float focus = (bandModel(scene)[0] - (visible * bandMid / zoom)) / (1 - visible);
+		return Math.max(0, Math.min(1, focus));
+	}
+
 	/**
 	 * Where to crop a recorded scene so that its model stands in the middle of a narrower frame: the model's x (as a
 	 * part of the recording's width) moved as far as the recording allows.

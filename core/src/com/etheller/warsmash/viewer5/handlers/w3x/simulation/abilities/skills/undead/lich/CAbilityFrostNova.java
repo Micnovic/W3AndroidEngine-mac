@@ -55,7 +55,7 @@ public class CAbilityFrostNova extends CAbilityTargetSpellBase {
 			return false;
 		}
 		final CGameplayConstants constants = simulation.getGameplayConstants();
-		simulation.createTemporarySpellEffectOnUnit(targetUnit, getAlias(), CEffectType.TARGET);
+		simulation.createTemporarySpellEffectOnUnit(targetUnit, getAlias(), CEffectType.EFFECT);
 		targetUnit.damage(simulation, caster, DAMAGE_FLAGS, CAttackType.SPELLS, CDamageType.UNIVERSAL,
 				CWeaponSoundTypeJass.WHOKNOWS.name(), this.targetDamage);
 		final CPlayer casterPlayer = simulation.getPlayer(caster.getPlayerIndex());
@@ -77,7 +77,6 @@ public class CAbilityFrostNova extends CAbilityTargetSpellBase {
 					}
 					return false;
 				});
-		simulation.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.CASTER);
 		return false;
 	}
 }

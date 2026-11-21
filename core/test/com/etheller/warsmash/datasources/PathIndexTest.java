@@ -60,6 +60,26 @@ class PathIndexTest {
 	}
 
 	@Test
+	void aPathAsAskedIsFoundAsItsNormalizedForm() {
+		final PathIndex index = new PathIndex(LISTED);
+		final List<String> asked = new ArrayList<>();
+		for (final String path : LISTED) {
+			asked.add(path.replace('\\', '/'));
+			asked.add(path.replace('\\', ':'));
+			asked.add(path.replace('\\', '/').toUpperCase(Locale.ROOT) + "/");
+			asked.add(path.replace('\\', '/') + "x/");
+		}
+		asked.add("/");
+		asked.add("units/human/footman/footman.mdx");
+		for (final String path : asked) {
+			assertEquals(index.indexOf(CascDataSource.normalizePath(path)), index.indexOf(path), path);
+			assertEquals(index.indexOf("war3.w3mod", CascDataSource.normalizePath(path)),
+					index.indexOf("war3.w3mod", path), path);
+		}
+		assertEquals(0, index.indexOf("war3.w3mod/units/human/FOOTMAN/footman.mdx"));
+	}
+
+	@Test
 	void aPrefixAndAPathAreAskedAsOneJoinedPath() {
 		final PathIndex index = new PathIndex(LISTED);
 		final String[][] pairs = { { "war3.w3mod", "units\\human\\footman\\footman.mdx" },

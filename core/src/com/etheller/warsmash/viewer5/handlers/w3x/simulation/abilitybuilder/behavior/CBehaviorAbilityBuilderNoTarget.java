@@ -19,6 +19,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CExactExpiry;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.JassGameEventsWar3;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.BooleanAbilityActivationReceiver;
 
@@ -292,6 +293,8 @@ public class CBehaviorAbilityBuilderNoTarget implements ABBehavior {
 
 			this.ability.runEndCastingActions(game, unit, orderId);
 			this.channeling = (boolean) localStore.get(ABLocalStoreKeys.CHANNELING);
+			// 1.29: a spell without a target takes its Effectart on the caster, the caster being its target.
+			game.createTemporarySpellEffectOnUnit(this.unit, this.ability.getAlias(), CEffectType.EFFECT);
 			this.unit.fireSpellEvents(game, JassGameEventsWar3.EVENT_UNIT_SPELL_EFFECT, this.ability, null);
 		}
 		this.channeling = this.channeling && this.doChannelTick(game, this.unit);

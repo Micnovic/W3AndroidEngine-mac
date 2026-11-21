@@ -1,6 +1,7 @@
 package com.etheller.warsmash.android;
 
 import java.io.File;
+import java.nio.Buffer;
 import java.nio.IntBuffer;
 
 import android.content.Context;
@@ -20,6 +21,7 @@ import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.IntSet;
+import com.etheller.warsmash.util.GlMemory;
 
 /**
  * libGDX asks Android to keep the GL context while the app is in the background, but Android may still drop it. The
@@ -59,6 +61,7 @@ final class GlContextWatch implements ApplicationListener {
 	@Override
 	public void create() {
 		final Graphics graphics = Gdx.graphics;
+		GlMemory.configure();
 		if (graphics.getGL30() != null) {
 			this.gl = new ContextGL30();
 			graphics.setGL30(this.gl);
@@ -69,6 +72,7 @@ final class GlContextWatch implements ApplicationListener {
 
 	/** On the rendering thread, while libGDX reloads its managed textures into a new context, the marker first. */
 	private void reloading() {
+		GlMemory.reset();
 		if (this.gl != null) {
 			this.gl.reloaded = new IntSet();
 			this.gl.reloaded.add(this.markerTexture.getTextureObjectHandle());
@@ -211,6 +215,144 @@ final class GlContextWatch implements ApplicationListener {
 		/** The texture names libGDX reloaded into a new context through this GL, from the loss on. */
 		private IntSet reloaded;
 
+		@Override
+		public void glActiveTexture(final int texture) {
+			if (GlMemory.ON) {
+				GlMemory.activeTexture(texture);
+			}
+			super.glActiveTexture(texture);
+		}
+
+		@Override
+		public void glBindTexture(final int target, final int texture) {
+			if (GlMemory.ON) {
+				GlMemory.bindTexture(target, texture);
+			}
+			super.glBindTexture(target, texture);
+		}
+
+		@Override
+		public void glTexImage2D(final int target, final int level, final int internalformat, final int width,
+				final int height, final int border, final int format, final int type, final Buffer pixels) {
+			if (GlMemory.ON) {
+				GlMemory.texImage(target, level, internalformat, width, height, 1, format, type);
+			}
+			super.glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+		}
+
+		@Override
+		public void glTexImage2D(final int target, final int level, final int internalformat, final int width,
+				final int height, final int border, final int format, final int type, final int offset) {
+			if (GlMemory.ON) {
+				GlMemory.texImage(target, level, internalformat, width, height, 1, format, type);
+			}
+			super.glTexImage2D(target, level, internalformat, width, height, border, format, type, offset);
+		}
+
+		@Override
+		public void glTexImage3D(final int target, final int level, final int internalformat, final int width,
+				final int height, final int depth, final int border, final int format, final int type,
+				final Buffer pixels) {
+			if (GlMemory.ON) {
+				GlMemory.texImage(target, level, internalformat, width, height, depth, format, type);
+			}
+			super.glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, pixels);
+		}
+
+		@Override
+		public void glTexImage3D(final int target, final int level, final int internalformat, final int width,
+				final int height, final int depth, final int border, final int format, final int type,
+				final int offset) {
+			if (GlMemory.ON) {
+				GlMemory.texImage(target, level, internalformat, width, height, depth, format, type);
+			}
+			super.glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, offset);
+		}
+
+		@Override
+		public void glCompressedTexImage2D(final int target, final int level, final int internalformat,
+				final int width, final int height, final int border, final int imageSize, final Buffer data) {
+			if (GlMemory.ON) {
+				GlMemory.compressedTexImage(target, level, internalformat, width, height, imageSize);
+			}
+			super.glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
+		}
+
+		@Override
+		public void glGenerateMipmap(final int target) {
+			if (GlMemory.ON) {
+				GlMemory.generateMipmap(target);
+			}
+			super.glGenerateMipmap(target);
+		}
+
+		@Override
+		public void glBindBuffer(final int target, final int buffer) {
+			if (GlMemory.ON) {
+				GlMemory.bindBuffer(target, buffer);
+			}
+			super.glBindBuffer(target, buffer);
+		}
+
+		@Override
+		public void glBindBufferBase(final int target, final int index, final int buffer) {
+			if (GlMemory.ON) {
+				GlMemory.bindBuffer(target, buffer);
+			}
+			super.glBindBufferBase(target, index, buffer);
+		}
+
+		@Override
+		public void glBindBufferRange(final int target, final int index, final int buffer, final int offset,
+				final int size) {
+			if (GlMemory.ON) {
+				GlMemory.bindBuffer(target, buffer);
+			}
+			super.glBindBufferRange(target, index, buffer, offset, size);
+		}
+
+		@Override
+		public void glBindVertexArray(final int array) {
+			if (GlMemory.ON) {
+				GlMemory.bindVertexArray(array);
+			}
+			super.glBindVertexArray(array);
+		}
+
+		@Override
+		public void glBufferData(final int target, final int size, final Buffer data, final int usage) {
+			if (GlMemory.ON) {
+				GlMemory.bufferData(target, size);
+			}
+			super.glBufferData(target, size, data, usage);
+		}
+
+		@Override
+		public void glBindRenderbuffer(final int target, final int renderbuffer) {
+			if (GlMemory.ON) {
+				GlMemory.bindRenderbuffer(renderbuffer);
+			}
+			super.glBindRenderbuffer(target, renderbuffer);
+		}
+
+		@Override
+		public void glRenderbufferStorage(final int target, final int internalformat, final int width,
+				final int height) {
+			if (GlMemory.ON) {
+				GlMemory.renderbufferStorage(internalformat, width, height, 1);
+			}
+			super.glRenderbufferStorage(target, internalformat, width, height);
+		}
+
+		@Override
+		public void glRenderbufferStorageMultisample(final int target, final int samples, final int internalformat,
+				final int width, final int height) {
+			if (GlMemory.ON) {
+				GlMemory.renderbufferStorage(internalformat, width, height, samples);
+			}
+			super.glRenderbufferStorageMultisample(target, samples, internalformat, width, height);
+		}
+
 		private boolean quiet() {
 			return this.lost;
 		}
@@ -236,6 +378,11 @@ final class GlContextWatch implements ApplicationListener {
 
 		@Override
 		public void glDeleteBuffers(final int n, final IntBuffer buffers) {
+			if (GlMemory.ON) {
+				for (int i = 0; i < n; i++) {
+					GlMemory.deleteBuffer(buffers.get(buffers.position() + i));
+				}
+			}
 			if (!quiet()) {
 				super.glDeleteBuffers(n, buffers);
 			}
@@ -243,6 +390,9 @@ final class GlContextWatch implements ApplicationListener {
 
 		@Override
 		public void glDeleteBuffer(final int buffer) {
+			if (GlMemory.ON) {
+				GlMemory.deleteBuffer(buffer);
+			}
 			if (!quiet()) {
 				super.glDeleteBuffer(buffer);
 			}
@@ -271,6 +421,11 @@ final class GlContextWatch implements ApplicationListener {
 
 		@Override
 		public void glDeleteRenderbuffers(final int n, final IntBuffer renderbuffers) {
+			if (GlMemory.ON) {
+				for (int i = 0; i < n; i++) {
+					GlMemory.deleteRenderbuffer(renderbuffers.get(renderbuffers.position() + i));
+				}
+			}
 			if (!quiet()) {
 				super.glDeleteRenderbuffers(n, renderbuffers);
 			}
@@ -278,6 +433,9 @@ final class GlContextWatch implements ApplicationListener {
 
 		@Override
 		public void glDeleteRenderbuffer(final int renderbuffer) {
+			if (GlMemory.ON) {
+				GlMemory.deleteRenderbuffer(renderbuffer);
+			}
 			if (!quiet()) {
 				super.glDeleteRenderbuffer(renderbuffer);
 			}
@@ -299,6 +457,9 @@ final class GlContextWatch implements ApplicationListener {
 
 		@Override
 		public void glDeleteTexture(final int texture) {
+			if (GlMemory.ON) {
+				GlMemory.deleteTexture(texture);
+			}
 			if (!quiet() && this.textures.remove(texture)) {
 				super.glDeleteTexture(texture);
 			}

@@ -16,7 +16,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CDamageType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringErrorKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponent;

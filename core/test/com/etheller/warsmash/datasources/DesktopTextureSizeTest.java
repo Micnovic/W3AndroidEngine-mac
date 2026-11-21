@@ -45,6 +45,19 @@ class DesktopTextureSizeTest {
 	}
 
 	@Test
+	void aDeviceDefaultLimitsHdAndDeButNotClassic() {
+		final DataTable ini = new DataTable(StringBundle.EMPTY);
+		GraphicsSettings.applyDefaultTextureSize(ini, 512);
+		GraphicsSettings.applyDefaultTextureSize(ini, 1024);
+		assertEquals(-1, GraphicsSettings.configuredTextureSize(ini));
+		assertEquals(0, GraphicsSettings.textureSize(ini, GraphicsSet.CLASSIC, () -> 2048));
+		assertEquals(512, GraphicsSettings.textureSize(ini, GraphicsSet.DE, () -> 2048));
+		GraphicsSettings.apply(ini, GraphicsSet.CLASSIC, 1024);
+		assertEquals(1024, GraphicsSettings.textureSize(ini, GraphicsSet.CLASSIC, () -> 2048));
+		assertEquals(1024, GraphicsSettings.textureSize(ini, GraphicsSet.DE, () -> 2048));
+	}
+
+	@Test
 	void aChoiceAlwaysWins() {
 		final DataTable ini = new DataTable(StringBundle.EMPTY);
 		GraphicsSettings.apply(ini, GraphicsSet.DE, 0);

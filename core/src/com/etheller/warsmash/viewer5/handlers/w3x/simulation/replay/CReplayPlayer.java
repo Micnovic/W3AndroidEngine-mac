@@ -5,6 +5,7 @@ import java.util.function.ToIntFunction;
 
 import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ChecksumSteps;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerCommandCodec;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderExecutor;
@@ -18,7 +19,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnit
 public final class CReplayPlayer {
 	private final CReplay replay;
 	private final CSimulation game;
-	private final ToIntFunction<CSimulation> checksum;
+	private final ChecksumSteps checksum;
 	private final CPlayerUnitOrderListener[] executors;
 	private int nextCommand;
 	private int nextChecksum;
@@ -30,7 +31,12 @@ public final class CReplayPlayer {
 	private int desyncTick = -1;
 	private int desyncs;
 
+	/** A player that makes the game's checksum all at once, as the replays of format 7 and before have it. */
 	public CReplayPlayer(final CReplay replay, final CSimulation game, final ToIntFunction<CSimulation> checksum) {
+		this(replay, game, ChecksumSteps.whole(replay.getHeader().getChecksumInterval(), checksum));
+	}
+
+	public CReplayPlayer(final CReplay replay, final CSimulation game, final ChecksumSteps checksum) {
 		this.replay = replay;
 		this.game = game;
 		this.executors = new CPlayerUnitOrderListener[game.getGameData().getMaxPlayers()];
@@ -76,14 +82,15 @@ public final class CReplayPlayer {
 
 	/** Compares the game with the replay after a step. */
 	public void afterStep() {
+		final boolean finished = this.checksum.afterStep(this.game);
 		final int tick = this.game.getGameTurnTick();
 		final List<CReplay.Checksum> checksums = this.replay.getChecksums();
 		while ((this.nextChecksum < checksums.size()) && (checksums.get(this.nextChecksum).getTick() < tick)) {
 			this.nextChecksum++;
 		}
-		if ((this.nextChecksum < checksums.size()) && (checksums.get(this.nextChecksum).getTick() == tick)) {
+		if (finished && (this.nextChecksum < checksums.size()) && (checksums.get(this.nextChecksum).getTick() == tick)) {
 			final int recorded = checksums.get(this.nextChecksum++).getValue();
-			final int now = this.checksum.applyAsInt(this.game);
+			final int now = this.checksum.value();
 			this.checksumsCompared++;
 			if (now != recorded) {
 				this.desyncs++;

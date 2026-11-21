@@ -78,7 +78,6 @@ public class FadingSpriteBatch extends SpriteBatch {
 
 	private Color unscaledColor;
 	private float alphaScale = 1f;
-	private float[] scaledVertices = new float[0];
 
 	private final ShaderProgram multiShader;
 	private final Mesh mesh;

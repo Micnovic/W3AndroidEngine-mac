@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import com.etheller.interpreter.ast.util.CExtensibleHandleAbstract;
@@ -50,6 +51,10 @@ public abstract class AbstractCAbility extends CExtensibleHandleAbstract impleme
 
 	public String getScriptField(final String key) {
 		return this.scriptFields == null ? null : this.scriptFields.get(key);
+	}
+
+	public Map<String, String> getScriptFields() {
+		return this.scriptFields == null ? Collections.<String, String>emptyMap() : this.scriptFields;
 	}
 
 	public void setScriptField(final String key, final String value) {

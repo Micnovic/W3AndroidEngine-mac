@@ -1,6 +1,7 @@
 package com.etheller.interpreter.ast.execution.instruction;
 
 import com.etheller.interpreter.ast.execution.JassThread;
+import com.etheller.interpreter.ast.util.JassProfiler;
 
 public class BeginFunctionInstruction implements JassInstruction {
 	private final int lineNo;
@@ -21,6 +22,9 @@ public class BeginFunctionInstruction implements JassInstruction {
 			throw new IllegalStateException();
 		}
 		thread.stackFrame.functionNameMetaData = this;
+		if (JassProfiler.ENABLED) {
+			JassProfiler.enterFunction(thread, this);
+		}
 
 //		final JassStackFrame jassStackFrame = new JassStackFrame();
 //		jassStackFrame.functionNameMetaData = this.functionNameMetaData;

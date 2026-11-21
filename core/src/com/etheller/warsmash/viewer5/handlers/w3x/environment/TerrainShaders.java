@@ -32,6 +32,7 @@ public class TerrainShaders {
 					"out vec3 Normal;\r\n" + //
 					"out vec2 pathing_map_uv;\r\n" + //
 					"out vec3 position;\r\n" + //
+					"out float v_fogZ;\r\n" + //
 					"out vec2 v_suv;\r\n" + //
 					"out vec3 shadeColor;\r\n" + //
 					"\r\n" + //
@@ -47,6 +48,7 @@ public class TerrainShaders {
 					"   position = (vec3(vPosition.y, -vPosition.x, vPosition.z) + vec3(vOffset.xy, vOffset.z + value) * 128.0 );\r\n"
 					+ //
 					"   vec4 myposition = vec4(position, 1);\r\n" + //
+					"   v_fogZ = myposition.z;\r\n" + //
 					"   myposition.x += centerOffsetX;\r\n" + //
 					"   myposition.y += centerOffsetY;\r\n" + //
 					"   position.x /= (float(size.x) * 128.0);\r\n" + //
@@ -97,7 +99,7 @@ public class TerrainShaders {
 				"\r\n" + //
 				"uniform bool show_lighting;\r\n" + //
 				"    uniform vec4 u_fogColor;\r\n" + //
-				"    uniform vec4 u_fogParams;\r\n" + //
+				"    uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    in float v_fogZ;\r\n" + //
 				"\r\n" + //
 				"in vec3 UV;\r\n" + //
 				"in vec3 Normal;\r\n" + //
@@ -148,6 +150,7 @@ public class TerrainShaders {
 					"out vec2 pathing_map_uv;\r\n" + //
 					"out vec3 position;\r\n" + //
 					"out vec3 ShadowCoord;\r\n" + //
+					"out float v_fogZ;\r\n" + //
 					"out vec2 v_suv;\r\n" + //
 					"out vec3 shadeColor;\r\n" + //
 					"\r\n" + //
@@ -174,6 +177,7 @@ public class TerrainShaders {
 					"	vec3 positionWorld = vec3((vPosition.x + float(pos.x))*128.0 + centerOffsetX, (vPosition.y + float(pos.y))*128.0 + centerOffsetY, height.r*128.0);\r\n"
 					+ //
 					"	position = positionWorld;\r\n" + //
+					"	v_fogZ = positionWorld.z;\r\n" + //
 					"	gl_Position = ((texture_indices.a & 32768u) == 0u) ? MVP * vec4(position.xyz, 1) : vec4(2.0, 0.0, 0.0, 1.0);\r\n"
 					+ //
 					"	ShadowCoord = (((texture_indices.a & 32768u) == 0u) ? DepthBiasMVP * vec4(position.xyz, 1) : vec4(2.0, 0.0, 0.0, 1.0)).xyz;\r\n"
@@ -216,7 +220,7 @@ public class TerrainShaders {
 				"uniform sampler2D shadowMap;\r\n" + //
 				"uniform sampler2D fogOfWarMap;\r\n" + //
 				"    uniform vec4 u_fogColor;\r\n" + //
-				"    uniform vec4 u_fogParams;\r\n" + //
+				"    uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    in float v_fogZ;\r\n" + //
 				"\r\n" + //
 				"in vec2 UV;\r\n" + //
 				"flat in uvec4 texture_indices;\r\n" + //
@@ -339,6 +343,7 @@ public class TerrainShaders {
 					"out vec2 UV;\r\n" + //
 					"out vec4 vertexColor;\r\n" + //
 					"out vec2 position;\r\n" + //
+					"out float v_fogZ;\r\n" + //
 					"out vec3 shadeColor;\r\n" + //
 					"out vec2 v_suv;\r\n" + //
 					"\r\n" + //
@@ -360,6 +365,7 @@ public class TerrainShaders {
 					"   position = vec2((vPosition.x + float(pos.x))*128.0 + centerOffsetX, (vPosition.y + float(pos.y))*128.0 + centerOffsetY);\r\n"
 					+ //
 					"   vec4 myposition = vec4(position.xy, water_height*128.0, 1);\r\n" + //
+					"   v_fogZ = myposition.z;\r\n" + //
 					"   vec3 Normal = vec3(0,0,1);\r\n" + //
 					"	gl_Position = is_water ? MVP * myposition : vec4(2.0, 0.0, 0.0, 1.0);\r\n" + //
 					"\r\n" + //
@@ -392,7 +398,7 @@ public class TerrainShaders {
 				"uniform int current_texture;\r\n" + //
 				"uniform vec4 mapBounds;\r\n" + //
 				"    uniform vec4 u_fogColor;\r\n" + //
-				"    uniform vec4 u_fogParams;\r\n" + //
+				"    uniform vec4 u_fogParams;\r\n    uniform vec4 u_fogHeight;\r\n    in float v_fogZ;\r\n" + //
 				"\r\n" + //
 				"in vec2 UV;\r\n" + //
 				"in vec4 vertexColor;\r\n" + //

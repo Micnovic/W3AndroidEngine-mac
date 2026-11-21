@@ -130,6 +130,19 @@ public class CAbilityAbilityBuilderPassive extends AbilityGenericSingleIconPassi
 	}
 
 	@Override
+	public void setLevelData(List<CAbilityTypeAbilityBuilderLevelData> levelData) {
+		this.levelData = levelData;
+		this.localStore.put(ABLocalStoreKeys.LEVELDATA, levelData);
+	}
+
+	@Override
+	public void refreshSpellFields(CSimulation game, CUnit unit) {
+		if (getLevel() >= 1) {
+			setSpellFields(game, unit);
+		}
+	}
+
+	@Override
 	public List<CAbilityTypeAbilityBuilderLevelData> getLevelData() {
 		return this.levelData;
 	}

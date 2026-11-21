@@ -7,6 +7,7 @@ import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitEnumFunction;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
@@ -41,6 +42,20 @@ public class CAbilityPhoenixFire extends AbstractGenericNoIconAbility {
 	private int nextFireTick;
 	private CUnitAttack plainSource;
 	private CUnitAttackMissile plainMissile;
+	private final Rectangle searchRect = new Rectangle();
+	// Reused every tick; the search state lives only for the duration of one enumeration.
+	private CUnit searchUnit;
+	private CSimulation searchGame;
+	private CUnit searchChosen;
+	private final CUnitEnumFunction searchCallback = enumUnit -> {
+		if (this.searchUnit.canReach(enumUnit, this.areaOfEffect)
+				&& enumUnit.canBeTargetedBy(this.searchGame, this.searchUnit, this.targetsAllowed)
+				&& !isBurning(enumUnit)) {
+			this.searchChosen = enumUnit;
+			return true;
+		}
+		return false;
+	};
 
 	public CAbilityPhoenixFire(final int handleId, final War3ID code, final War3ID alias, final float initialDamage,
 			final float damagePerSecond, final float areaOfEffect, final float cooldown, final float duration,
@@ -76,17 +91,15 @@ public class CAbilityPhoenixFire extends AbstractGenericNoIconAbility {
 		}
 		// One missile per interval, at the first unit in range that is not already burning; the interval does not
 		// follow the per-unit cooldown override.
-		final CUnit[] chosen = new CUnit[1];
-		game.getWorldCollision().enumUnitsInRect(new Rectangle(unit.getX() - this.areaOfEffect,
-				unit.getY() - this.areaOfEffect, this.areaOfEffect * 2, this.areaOfEffect * 2), enumUnit -> {
-					if (unit.canReach(enumUnit, this.areaOfEffect)
-							&& enumUnit.canBeTargetedBy(game, unit, this.targetsAllowed) && !isBurning(enumUnit)) {
-						chosen[0] = enumUnit;
-						return true;
-					}
-					return false;
-				});
-		final CUnit target = chosen[0];
+		this.searchRect.set(unit.getX() - this.areaOfEffect, unit.getY() - this.areaOfEffect, this.areaOfEffect * 2,
+				this.areaOfEffect * 2);
+		this.searchUnit = unit;
+		this.searchGame = game;
+		game.getWorldCollision().enumUnitsInRect(this.searchRect, this.searchCallback);
+		final CUnit target = this.searchChosen;
+		this.searchChosen = null;
+		this.searchUnit = null;
+		this.searchGame = null;
 		if (target == null) {
 			return;
 		}

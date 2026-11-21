@@ -52,8 +52,8 @@ public class MdxSimpleInstance extends BatchedInstance {
 
 	@Override
 	public void setReplaceableTexture(final int replaceableTextureId, final String replaceableTextureFile) {
-		this.replaceableTextures[replaceableTextureId] = (Texture) this.model.viewer.load(replaceableTextureFile,
-				PathSolver.DEFAULT, null);
+		this.replaceableTextures[replaceableTextureId] = (Texture) this.model.viewer
+				.loadInstanceTexture(replaceableTextureFile, PathSolver.DEFAULT, null);
 	}
 
 	@Override

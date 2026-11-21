@@ -26,8 +26,22 @@ public class RenderItemTypeData extends RenderWidgetTypeData<RenderItemType> {
 		this.miscData = miscData;
 	}
 
+	/**
+	 * While the game goes on, the model of a type first needed is read in the background and its items wait for it
+	 * (see {@link com.etheller.warsmash.viewer5.ModelViewer#setDeferModelLoads}).
+	 */
 	@Override
 	protected RenderItemType createTypeData(War3ID key, GameObject row) {
+		final boolean deferBefore = this.mapViewer.setDeferModelLoadsInGame(true);
+		try {
+			return createTypeDataNow(row);
+		}
+		finally {
+			this.mapViewer.setDeferModelLoadsInGame(deferBefore);
+		}
+	}
+
+	private RenderItemType createTypeDataNow(final GameObject row) {
 		String path = row.getFieldAsString(ITEM_FILE, 0);
 
 		if (path.toLowerCase(Locale.ROOT).endsWith(".mdl") || path.toLowerCase(Locale.ROOT).endsWith(".mdx")) {

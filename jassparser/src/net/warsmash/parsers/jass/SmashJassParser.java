@@ -38,7 +38,6 @@ package net.warsmash.parsers.jass;
 
 
 
-import java.text.MessageFormat;
 /* "%code imports" blocks.  */
 /* "SmashJassParser.y":58  */
 
@@ -58,9 +57,7 @@ import com.etheller.interpreter.ast.type.*;
 import com.etheller.interpreter.ast.util.JassProgram;
 import java.io.IOException;
 import java.io.Reader;
-import java.util.List;
 import java.util.LinkedList;
-import java.util.ArrayList;
 import java.util.EnumSet;
 import com.etheller.interpreter.ast.util.JassSettings;
 

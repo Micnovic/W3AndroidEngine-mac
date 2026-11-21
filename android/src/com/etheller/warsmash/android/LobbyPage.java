@@ -165,7 +165,7 @@ final class LobbyPage extends LauncherViews {
 		}
 		final String failed = model.takeMapFailure();
 		if (failed != null) {
-			this.activity.dialogs.showMessage(LanText.mapFailedTitle(), failed);
+			this.activity.dialogs.showMessage(model.mapFailureTitle(), failed);
 		}
 		final String error = model.takeError();
 		if (error != null) {

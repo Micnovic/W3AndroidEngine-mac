@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.StreamBytes;
 
 import com.badlogic.gdx.Gdx;
@@ -31,7 +32,6 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
-import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.parsers.w3x.w3e.Corner;
 import com.etheller.warsmash.parsers.w3x.w3e.War3MapW3e;
@@ -53,6 +53,7 @@ import com.etheller.warsmash.viewer5.Texture;
 import com.etheller.warsmash.viewer5.gl.DataTexture;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.gl.WebGL;
+import com.etheller.warsmash.viewer5.handlers.mdx.MdxShadowCaster;
 import com.etheller.warsmash.viewer5.handlers.w3x.DynamicShadowManager;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.GameOptions;
 import com.etheller.warsmash.viewer5.handlers.w3x.SplatModel;
@@ -167,6 +168,8 @@ public class Terrain {
 	// when a whole base goes out of sight.
 	private boolean shadowsChanged;
 	private byte[] staticShadowData;
+	private byte[] mapShadowData;
+	private boolean worldFogBoundary = true;
 	private byte[] shadowData;
 	private ByteBuffer shadowDataBuffer;
 	private final Map<RawOpenGLTextureResource, boolean[]> shadowMasks = new IdentityHashMap<>();
@@ -175,6 +178,9 @@ public class Terrain {
 	private byte[] visualFogArray;
 	private byte[] fogStateArray;
 	private final byte[] fogStateMapping = new byte[256];
+	private byte[] settledFogStates;
+	private final byte[] settledFogMapping = new byte[256];
+	private boolean fogSettled;
 
 	public Terrain(final War3MapW3e w3eFile, final War3MapWpm terrainPathing, final War3MapW3i w3iFile,
 			final WebGL webGL, final DataSource dataSource, final WorldEditStrings worldEditStrings,
@@ -1008,59 +1014,57 @@ public class Terrain {
 		gl.glEnable(GL20.GL_DEPTH_TEST);
 		gl.glDepthMask(true);
 
-		gl.glUniformMatrix4fv(this.groundShader.getUniformLocation("MVP"), 1, false,
-				this.camera.viewProjectionMatrix.val, 0);
-		gl.glUniform1i(this.groundShader.getUniformLocation("show_pathing_map"), this.viewer.renderPathing);
-		gl.glUniform1i(this.groundShader.getUniformLocation("show_lighting"), this.viewer.renderLighting);
-		gl.glUniform1i(this.groundShader.getUniformLocation("height_texture"), 0);
-		gl.glUniform1i(this.groundShader.getUniformLocation("height_cliff_texture"), 1);
-		gl.glUniform1i(this.groundShader.getUniformLocation("terrain_texture_list"), 2);
-		gl.glUniform1i(this.groundShader.getUniformLocation("shadowMap"), 20);
-		gl.glUniform1f(this.groundShader.getUniformLocation("centerOffsetX"), this.centerOffset[0]);
-		gl.glUniform1f(this.groundShader.getUniformLocation("centerOffsetY"), this.centerOffset[1]);
+		this.groundShader.setUniformMatrix4fv("MVP", this.camera.viewProjectionMatrix.val, 0, 16);
+		this.groundShader.setUniformi("show_pathing_map", this.viewer.renderPathing);
+		this.groundShader.setUniformi("show_lighting", this.viewer.renderLighting);
+		this.groundShader.setUniformi("height_texture", 0);
+		this.groundShader.setUniformi("height_cliff_texture", 1);
+		this.groundShader.setUniformi("terrain_texture_list", 2);
+		this.groundShader.setUniformi("shadowMap", 20);
+		this.groundShader.setUniformf("centerOffsetX", this.centerOffset[0]);
+		this.groundShader.setUniformf("centerOffsetY", this.centerOffset[1]);
 
 		final W3xSceneLightManager lightManager = (W3xSceneLightManager) this.viewer.worldScene.getLightManager();
 		final DataTexture unitLightsTexture = lightManager.getTerrainLightsTexture();
 
 		unitLightsTexture.bind(21);
-		gl.glUniform1i(this.groundShader.getUniformLocation("lightTexture"), 21);
-		gl.glUniform1f(this.groundShader.getUniformLocation("lightCount"), lightManager.getTerrainLightCount());
-		gl.glUniform1f(this.groundShader.getUniformLocation("lightTextureHeight"), unitLightsTexture.getHeight());
+		this.groundShader.setUniformi("lightTexture", 21);
+		this.groundShader.setUniformf("lightCount", lightManager.getTerrainLightCount());
+		this.groundShader.setUniformf("lightTextureHeight", unitLightsTexture.getHeight());
 		this.viewer.worldScene.fogSettings.uploadUniforms(this.groundShader);
 
-		gl.glUniformMatrix4fv(this.groundShader.getUniformLocation("DepthBiasMVP"), 1, false,
-				dynamicShadowManager.getDepthBiasMVP().val, 0);
+		this.groundShader.setUniformMatrix4fv("DepthBiasMVP", dynamicShadowManager.getDepthBiasMVP().val, 0, 16);
 
-		gl.glUniform1i(this.groundShader.getUniformLocation("cliff_textures"), 0);
+		this.groundShader.setUniformi("cliff_textures", 0);
 		gl.glActiveTexture(GL30.GL_TEXTURE0);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.groundHeight);
 
 		gl.glActiveTexture(GL30.GL_TEXTURE1);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.groundCornerHeight);
 
-		gl.glUniform1i(this.groundShader.getUniformLocation("pathing_map_static"), 2);
+		this.groundShader.setUniformi("pathing_map_static", 2);
 		gl.glActiveTexture(GL30.GL_TEXTURE2);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.groundTextureData);
 
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample0"), 3);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample1"), 4);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample2"), 5);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample3"), 6);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample4"), 7);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample5"), 8);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample6"), 9);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample7"), 10);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample8"), 11);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample9"), 12);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample10"), 13);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample11"), 14);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample12"), 15);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample13"), 16);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample14"), 17);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample15"), 18);
-		gl.glUniform1i(this.groundShader.getUniformLocation("sample16"), 19);
-		gl.glUniform1i(this.groundShader.getUniformLocation("shadowMap"), 20);
-		gl.glUniform1i(this.groundShader.getUniformLocation("fogOfWarMap"), 22);
+		this.groundShader.setUniformi("sample0", 3);
+		this.groundShader.setUniformi("sample1", 4);
+		this.groundShader.setUniformi("sample2", 5);
+		this.groundShader.setUniformi("sample3", 6);
+		this.groundShader.setUniformi("sample4", 7);
+		this.groundShader.setUniformi("sample5", 8);
+		this.groundShader.setUniformi("sample6", 9);
+		this.groundShader.setUniformi("sample7", 10);
+		this.groundShader.setUniformi("sample8", 11);
+		this.groundShader.setUniformi("sample9", 12);
+		this.groundShader.setUniformi("sample10", 13);
+		this.groundShader.setUniformi("sample11", 14);
+		this.groundShader.setUniformi("sample12", 15);
+		this.groundShader.setUniformi("sample13", 16);
+		this.groundShader.setUniformi("sample14", 17);
+		this.groundShader.setUniformi("sample15", 18);
+		this.groundShader.setUniformi("sample16", 19);
+		this.groundShader.setUniformi("shadowMap", 20);
+		this.groundShader.setUniformi("fogOfWarMap", 22);
 		for (int i = 0; i < this.groundTextures.size(); i++) {
 			gl.glActiveTexture(GL30.GL_TEXTURE3 + i);
 			gl.glBindTexture(GL30.GL_TEXTURE_2D_ARRAY, this.groundTextures.get(i).id);
@@ -1083,6 +1087,7 @@ public class Terrain {
 		if (WIREFRAME_TERRAIN) {
 			Extensions.wireframeExtension.glPolygonMode(GL20.GL_FRONT_AND_BACK, Extensions.GL_LINE);
 		}
+		PerfStats.draw();
 		gl.glDrawElementsInstanced(GL30.GL_TRIANGLES, Shapes.INSTANCE.quadIndices.length * 3, GL30.GL_UNSIGNED_INT, 0,
 				(this.columns - 1) * (this.rows - 1));
 		if (WIREFRAME_TERRAIN) {
@@ -1138,9 +1143,9 @@ public class Terrain {
 		final DataTexture terrainLightsTexture = lightManager.getTerrainLightsTexture();
 
 		terrainLightsTexture.bind(21);
-		gl.glUniform1i(shader.getUniformLocation("u_lightTexture"), 21);
-		gl.glUniform1f(shader.getUniformLocation("u_lightCount"), lightManager.getTerrainLightCount());
-		gl.glUniform1f(shader.getUniformLocation("u_lightTextureHeight"), terrainLightsTexture.getHeight());
+		shader.setUniformi("u_lightTexture", 21);
+		shader.setUniformf("u_lightCount", lightManager.getTerrainLightCount());
+		shader.setUniformf("u_lightTextureHeight", terrainLightsTexture.getHeight());
 		this.viewer.worldScene.fogSettings.uploadUniforms(shader);
 
 		// Render the cliffs
@@ -1202,6 +1207,7 @@ public class Terrain {
 		gl.glVertexAttribPointer(this.waterShader.getAttributeLocation("vPosition"), 2, GL30.GL_FLOAT, false, 0, 0);
 
 		gl.glBindBuffer(GL30.GL_ELEMENT_ARRAY_BUFFER, this.quadIndexBuffer);
+		PerfStats.draw();
 		gl.glDrawElementsInstanced(GL30.GL_TRIANGLES, Shapes.INSTANCE.quadIndices.length * 3, GL30.GL_UNSIGNED_INT, 0,
 				(this.columns - 1) * (this.rows - 1));
 
@@ -1234,16 +1240,16 @@ public class Terrain {
 
 		// WC3 models are 128x too large
 		tempMatrix.set(this.camera.viewProjectionMatrix);
-		gl.glUniformMatrix4fv(this.cliffShader.getUniformLocation("MVP"), 1, false, tempMatrix.val, 0);
-		gl.glUniform1i(this.cliffShader.getUniformLocation("show_lighting"), this.viewer.renderLighting);
+		this.cliffShader.setUniformMatrix4fv("MVP", tempMatrix.val, 0, 16);
+		this.cliffShader.setUniformi("show_lighting", this.viewer.renderLighting);
 
 		final W3xSceneLightManager lightManager = (W3xSceneLightManager) this.viewer.worldScene.getLightManager();
 		final DataTexture unitLightsTexture = lightManager.getTerrainLightsTexture();
 
 		unitLightsTexture.bind(21);
-		gl.glUniform1i(this.cliffShader.getUniformLocation("lightTexture"), 21);
-		gl.glUniform1f(this.cliffShader.getUniformLocation("lightCount"), lightManager.getTerrainLightCount());
-		gl.glUniform1f(this.cliffShader.getUniformLocation("lightTextureHeight"), unitLightsTexture.getHeight());
+		this.cliffShader.setUniformi("lightTexture", 21);
+		this.cliffShader.setUniformf("lightCount", lightManager.getTerrainLightCount());
+		this.cliffShader.setUniformf("lightTextureHeight", unitLightsTexture.getHeight());
 		this.viewer.worldScene.fogSettings.uploadUniforms(this.cliffShader);
 
 		this.cliffShader.setUniformi("shadowMap", 2);
@@ -1261,14 +1267,44 @@ public class Terrain {
 		gl.glActiveTexture(GL30.GL_TEXTURE1);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.groundHeight);
 //		gl.glActiveTexture(GL30.GL_TEXTURE2);
-		gl.glUniform1f(this.cliffShader.getUniformLocation("centerOffsetX"), this.centerOffset[0]);
-		gl.glUniform1f(this.cliffShader.getUniformLocation("centerOffsetY"), this.centerOffset[1]);
+		this.cliffShader.setUniformf("centerOffsetX", this.centerOffset[0]);
+		this.cliffShader.setUniformf("centerOffsetY", this.centerOffset[1]);
 		for (final CliffMesh i : this.cliffMeshes) {
 			i.render(this.cliffShader);
 		}
 	}
 
+	private static final BuildingShadow NO_SHADOW = new BuildingShadow() {
+		@Override
+		public void remove() {
+		}
+
+		@Override
+		public void move(final float x, final float y) {
+		}
+	};
+
+	/** Binds the corner heights, filtered, to a texture unit for the model shadows to land on. */
+	public void bindShadowHeights(final MdxShadowCaster caster, final int unit) {
+		final GL30 gl = Gdx.gl30;
+		gl.glActiveTexture(GL30.GL_TEXTURE0 + unit);
+		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.groundCornerHeightLinear);
+		caster.setTerrain(this.columns, this.rows, this.centerOffset[0], this.centerOffset[1]);
+	}
+
 	public BuildingShadow addShadow(final String file, final float shadowX, final float shadowY) {
+		return addShadow(file, shadowX, shadowY, false);
+	}
+
+	/**
+	 * @param always whether the shadow image is laid even where the buildings and scenery cast shadows in the shape
+	 *               of their models, for what does not
+	 */
+	public BuildingShadow addShadow(final String file, final float shadowX, final float shadowY,
+			final boolean always) {
+		if (!always && this.viewer.getDynamicShadowManager().isSceneShadows()) {
+			return NO_SHADOW;
+		}
 		if (!this.shadows.containsKey(file)) {
 			// Some 2.0 and later tables give the shadow with its extension (ShadowCrates.blp).
 			final String lowerFile = file.toLowerCase(Locale.US);
@@ -1324,7 +1360,9 @@ public class Terrain {
 		final int shadowSize = columns * rows;
 		this.staticShadowData = new byte[columns * rows];
 		this.shadowData = new byte[columns * rows];
-		if (this.viewer.mapMpq.has("war3map.shd")) {
+		// The map's baked shadows are those of its doodads, which cast shadows of their own shape when scene shadows
+		// are on: both together drew every shadow twice, the baked one in coarse blocks.
+		if (this.viewer.mapMpq.has("war3map.shd") && !this.viewer.getDynamicShadowManager().isSceneShadows()) {
 			final byte[] buffer;
 
 			try (final InputStream shadowSource = this.viewer.mapMpq.getResourceAsStream("war3map.shd")) {
@@ -1336,6 +1374,35 @@ public class Terrain {
 			}
 		}
 
+		this.mapShadowData = this.staticShadowData.clone();
+		paintBoundaryShade();
+		reloadShadowData(centerOffset, columns, rows);
+
+		this.shadowMap = gl.glGenTexture();
+		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.shadowMap);
+		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAG_FILTER, GL30.GL_LINEAR);
+		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MIN_FILTER, GL30.GL_LINEAR);
+		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_S, GL30.GL_CLAMP_TO_EDGE);
+		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_T, GL30.GL_CLAMP_TO_EDGE);
+		this.shadowDataBuffer = ByteBuffer.allocateDirect(this.shadowData.length).order(ByteOrder.nativeOrder());
+		this.shadowDataBuffer.put(this.shadowData);
+		this.shadowDataBuffer.clear();
+		gl.glTexImage2D(GL30.GL_TEXTURE_2D, 0, GL30.GL_R8, columns, rows, 0, GL30.GL_RED, GL30.GL_UNSIGNED_BYTE,
+				this.shadowDataBuffer);
+		this.initShadowsFinished = true;
+
+		this.fogOfWarMap = gl.glGenTexture();
+		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.fogOfWarMap);
+	}
+
+	/** The dark band past the playable area; EnableWorldFogBoundary(false) leaves it out. */
+	private void paintBoundaryShade() {
+		final int columns = (this.columns - 1) * 4;
+		final int rows = (this.rows - 1) * 4;
+		System.arraycopy(this.mapShadowData, 0, this.staticShadowData, 0, this.mapShadowData.length);
+		if (!this.worldFogBoundary) {
+			return;
+		}
 		final byte outsideArea = (byte) 204;
 		final int x0 = this.mapBounds[0] * 4, x1 = (this.mapSize[0] - this.mapBounds[1] - 1) * 4,
 				y0 = this.mapBounds[2] * 4, y1 = (this.mapSize[1] - this.mapBounds[3] - 1) * 4;
@@ -1363,23 +1430,16 @@ public class Terrain {
 				this.staticShadowData[(y * columns) + x] = outsideArea;
 			}
 		}
-		reloadShadowData(centerOffset, columns, rows);
+	}
 
-		this.shadowMap = gl.glGenTexture();
-		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.shadowMap);
-		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAG_FILTER, GL30.GL_LINEAR);
-		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MIN_FILTER, GL30.GL_LINEAR);
-		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_S, GL30.GL_CLAMP_TO_EDGE);
-		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_T, GL30.GL_CLAMP_TO_EDGE);
-		this.shadowDataBuffer = ByteBuffer.allocateDirect(this.shadowData.length).order(ByteOrder.nativeOrder());
-		this.shadowDataBuffer.put(this.shadowData);
-		this.shadowDataBuffer.clear();
-		gl.glTexImage2D(GL30.GL_TEXTURE_2D, 0, GL30.GL_R8, columns, rows, 0, GL30.GL_RED, GL30.GL_UNSIGNED_BYTE,
-				this.shadowDataBuffer);
-		this.initShadowsFinished = true;
-
-		this.fogOfWarMap = gl.glGenTexture();
-		gl.glBindTexture(GL30.GL_TEXTURE_2D, this.fogOfWarMap);
+	public void setWorldFogBoundary(final boolean enabled) {
+		if (this.worldFogBoundary != enabled) {
+			this.worldFogBoundary = enabled;
+			if (this.initShadowsFinished) {
+				paintBoundaryShade();
+				this.shadowsChanged = true;
+			}
+		}
 	}
 
 	private void reloadShadowData(final float[] centerOffset, final int columns, final int rows) {
@@ -1613,6 +1673,15 @@ public class Terrain {
 		this.uberSplatModelsList.remove(this.uberSplatModels.remove(path));
 	}
 
+	/** Takes a batch off the ground for good and frees its buffers. */
+	public void releaseSplatBatchModel(final String path) {
+		final SplatModel model = this.uberSplatModels.remove(path);
+		if (model != null) {
+			this.uberSplatModelsList.remove(model);
+			model.release(this.gl);
+		}
+	}
+
 	public void addSplatBatchModel(final String path, final SplatModel model) {
 		this.uberSplatModels.put(path, model);
 		this.uberSplatModelsList.add(model);
@@ -1816,6 +1885,7 @@ public class Terrain {
 		this.visualFogArray = new byte[this.visualFogData.capacity()];
 		this.fogStateArray = new byte[this.visualFogData.capacity()];
 		this.fogOfWarMapAllocated = false;
+		this.fogSettled = false;
 		reloadFogOfWarDataToGPU(fogMaskSettings);
 	}
 
@@ -1837,13 +1907,29 @@ public class Terrain {
 		final ByteBuffer source = fogOfWarBuffer.duplicate();
 		source.clear();
 		source.get(states, 0, Math.min(states.length, source.remaining()));
+		// The fade only depends on the drawn fog, the fog states and their shades: when a pass found nothing to fade
+		// and neither input has moved since, the next one cannot either.
+		if (this.fogSettled && !changed && Arrays.equals(states, this.settledFogStates)
+				&& Arrays.equals(mapping, this.settledFogMapping)) {
+			return false;
+		}
+		boolean faded = false;
 		for (int i = 0; i < visual.length; i++) {
 			final byte previous = visual[i];
-			final byte faded = War3MapViewer.fadeLineOfSightColor(previous, mapping[states[i] & 0xFF]);
-			if (faded != previous) {
-				visual[i] = faded;
-				changed = true;
+			final byte next = War3MapViewer.fadeLineOfSightColor(previous, mapping[states[i] & 0xFF]);
+			if (next != previous) {
+				visual[i] = next;
+				faded = true;
 			}
+		}
+		changed |= faded;
+		this.fogSettled = !faded;
+		if (!faded) {
+			if ((this.settledFogStates == null) || (this.settledFogStates.length != states.length)) {
+				this.settledFogStates = new byte[states.length];
+			}
+			System.arraycopy(states, 0, this.settledFogStates, 0, states.length);
+			System.arraycopy(mapping, 0, this.settledFogMapping, 0, mapping.length);
 		}
 		// The fog fades for a moment after each fog of war update and then stays; sending the whole texture every
 		// tick anyway cost phones several milliseconds a frame.

@@ -4,10 +4,7 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitStateListener;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractCAbilityPassiveNoOrders;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CAttackType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CDamageFlags;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CSpellDamageFlags;
@@ -19,8 +16,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitAppliedUp
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.upgrade.CUpgradeEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.upgrade.CUpgradeEffectSpikedBarricades;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityActivationReceiver;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentModel;
 
 /**

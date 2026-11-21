@@ -121,7 +121,7 @@ public class RenderUnit implements RenderWidget {
 		if (this.instance != null) {
 			this.instance.detach();
 		}
-		final MdxComplexInstance instance = (MdxComplexInstance) typeData.getModel().addInstance();
+		final MdxComplexInstance instance = (MdxComplexInstance) typeData.getModel().addWaitingInstance();
 
 		this.location[0] = x;
 		this.location[1] = y;
@@ -209,6 +209,7 @@ public class RenderUnit implements RenderWidget {
 			this.shownTeamColor = teamColor;
 			this.instance.setTeamColor(teamColor);
 		}
+		this.instance.teamGlowHidden = !this.simulationUnit.isTeamGlowShown();
 		final boolean wasHidden = this.instance.hidden();
 		final boolean removed = this.simulationUnit.isHidden();
 		if (removed != this.decalsRemovedWhileHidden) {
@@ -369,7 +370,8 @@ public class RenderUnit implements RenderWidget {
 		final boolean corpse = this.simulationUnit.isCorpse();
 		final boolean boneCorpse = this.simulationUnit.isBoneCorpse();
 		final boolean building = this.simulationUnit.isBuilding();
-		this.instance.groundShadow = !dead && !building && (this.typeData.getRenderShadowType() != null);
+		this.instance.groundShadow = !dead && (building ? map.getDynamicShadowManager().isSceneShadows()
+				: this.typeData.getRenderShadowType() != null);
 		if (dead) {
 			if (!this.dead) {
 				this.unitAnimationListenerImpl.playAnimation(true, PrimaryTag.DEATH, SequenceUtils.EMPTY, 1.0f, true);

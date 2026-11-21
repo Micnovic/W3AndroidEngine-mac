@@ -24,7 +24,7 @@ public class CAbilityTypeColdArrows extends CAbilityType<CAbilityTypeColdArrowsL
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeColdArrowsLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeColdArrowsLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityColdArrows heroAbility = ((CAbilityColdArrows) existingAbility);
 		heroAbility.setLevel(game, unit, level);
 	}

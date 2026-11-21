@@ -26,6 +26,11 @@ public final class SavedInterfaceState {
 	public float fogDensity;
 	public float fogStart;
 	public float fogEnd;
+	/** 0 in saves from before the rest of the fog was kept; the fog then keeps what the map set. */
+	public float fogMaxOpacity;
+	public float fogHeightMin;
+	public float fogHeightMax;
+	public boolean fogDrawOverSky;
 	public float[] waterColor;
 	public float[] cameraBounds;
 	public String mapMusic;

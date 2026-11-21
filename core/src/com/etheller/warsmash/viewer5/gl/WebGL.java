@@ -28,6 +28,8 @@ public class WebGL {
 	public ShaderProgram currentShaderProgram;
 	public String floatPrecision;
 	public final com.badlogic.gdx.graphics.Texture emptyTexture;
+	/** Stands for a texture that is not uploaded yet, so what uses it draws nothing. */
+	private final com.badlogic.gdx.graphics.Texture transparentTexture;
 	public ANGLEInstancedArrays instancedArrays;
 
 	public WebGL(final GL20 gl) {
@@ -50,6 +52,11 @@ public class WebGL {
 			}
 		}
 		this.emptyTexture = new com.badlogic.gdx.graphics.Texture(imageData);
+		final Pixmap transparentData = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+		transparentData.setColor(0);
+		transparentData.fill();
+		this.transparentTexture = new com.badlogic.gdx.graphics.Texture(transparentData);
+		transparentData.dispose();
 		this.instancedArrays = Extensions.angleInstancedArrays;
 	}
 
@@ -60,6 +67,7 @@ public class WebGL {
 		this.shaderPrograms.clear();
 		this.currentShaderProgram = null;
 		this.emptyTexture.dispose();
+		this.transparentTexture.dispose();
 	}
 
 	public ShaderProgram createShaderProgram(String vertexSrc, String fragmentSrc) {
@@ -175,7 +183,13 @@ public class WebGL {
 
 		gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
 
-		if (texture != null /* && texture.ok */) {
+		if (texture != null) {
+			texture.markDrawn();
+		}
+		if ((texture != null) && texture.isPending()) {
+			this.transparentTexture.bind();
+		}
+		else if (texture != null /* && texture.ok */) {
 			texture.internalBind();
 		}
 		else {

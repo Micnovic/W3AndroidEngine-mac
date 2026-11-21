@@ -14,7 +14,8 @@ public class BoolExprNot extends AllocatedHandle implements TriggerBooleanExpres
 
 	@Override
 	public boolean evaluate(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		return this.operand.evaluate(globalScope, triggerScope);
+		// Not of a null boolexpr is false too, not true.
+		return (this.operand != null) && !this.operand.evaluate(globalScope, triggerScope);
 	}
 
 }

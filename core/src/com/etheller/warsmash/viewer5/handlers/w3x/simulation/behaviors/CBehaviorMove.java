@@ -25,11 +25,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.COrder;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.COrderTargetWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing.CPathPoint;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing.CPathfindingProcessor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 
 public class CBehaviorMove implements CBehavior {
-	private static final boolean ALWAYS_INTERRUPT_MOVE = false;
 	/**
 	 * Measured on 1.29: a unit turns its heading by turnRate radians every 0.029 s and walks once the
 	 * heading is inside the propulsion window, straight toward its next point; the drawn facing turns slower and on its
@@ -44,6 +42,7 @@ public class CBehaviorMove implements CBehavior {
 	}
 	/** Ticks a unit waits behind walking units before it searches a way around them. */
 	private static final int WAIT_FOR_WALKERS_TICKS = 10;
+	private static final int WALK_KEEP_WAIT_TICKS = 2;
 	private static final float MAX_DETOUR_AROUND_UNITS = 320f;
 	private static final float GIVE_UP_NEAR_TARGET = 384f;
 	private static final int START_TICKS = 4;
@@ -63,6 +62,7 @@ public class CBehaviorMove implements CBehavior {
 	 * path side by side, instead of every unit finding its own way to its own far slot.
 	 */
 	static final float SHARED_ROUTE_MIN_DISTANCE = 1350f;
+	private static final float CARRY_WAY_MAX_SHIFT = 1024f;
 	/** The walk to a standing attack target is only a grid row from this distance on. */
 	private static final float ROW_PATH_MIN_DISTANCE = 256f;
 	private static final float LANE_FORM_DISTANCE = 1000f;
@@ -80,7 +80,6 @@ public class CBehaviorMove implements CBehavior {
 
 	private boolean wasWithinPropWindow = false;
 	private List<CPathPoint> path = null;
-	private CPathfindingProcessor.GridMapping gridMapping;
 	private CPathPoint target;
 	private CPathPoint approachCell;
 	private int searchCycles = 0;
@@ -90,6 +89,11 @@ public class CBehaviorMove implements CBehavior {
 	private double movedDistance;
 	private boolean disableCollision = false;
 	private boolean pathfindingActive = false;
+	/**
+	 * The search still queued was asked for the order this one replaced. Left in the queue it would run to its end
+	 * before the new order's search could even start, the unit standing the while.
+	 */
+	private boolean staleSearch;
 	private boolean firstPathfindJob = false;
 	private boolean pathfindingFailedGiveUp;
 	private int giveUpUntilTurnTick;
@@ -110,10 +114,18 @@ public class CBehaviorMove implements CBehavior {
 	private float laneY;
 	private CPathPoint sharedGoal;
 	private boolean sharedRouteOff;
+	/**
+	 * The walk goes on along the way found for the point this order replaced until the search for the new point
+	 * brings its own.
+	 */
+	private boolean replacingPath;
+	private boolean carryPath;
 
 	public CBehaviorMove reset(final int highlightOrderId, final AbilityTarget target) {
 		if (!continuesSameMove(highlightOrderId, target)) {
+			this.carryPath = continuesWayToNearbyPoint(highlightOrderId, target);
 			target.visit(this.targetVisitingResetter.reset(highlightOrderId));
+			this.carryPath = false;
 		}
 		this.rangedBehavior = null;
 		this.group = null;
@@ -136,6 +148,23 @@ public class CBehaviorMove implements CBehavior {
 			return false;
 		}
 		return isUnderwayTo((AbilityPointTarget) target);
+	}
+
+	/**
+	 * Measured on 1.29: a crowd re-ordered to points a little apart (a player clicking on) keeps walking along its
+	 * way, where here the search for each new point takes its turn in the queue and a unit with no way walks straight
+	 * at the point, into the trees on its side. The way found for the earlier point still leads the right way, so the
+	 * unit walks it until the new one is found.
+	 */
+	private boolean continuesWayToNearbyPoint(final int highlightOrderId, final AbilityTarget target) {
+		if (!(target instanceof AbilityPointTarget) || (this.unit.getCurrentBehavior() != this)
+				|| (this.rangedBehavior != null) || (this.followUnit != null) || (this.target == null)
+				|| (highlightOrderId != this.highlightOrderId) || this.pathfindingFailedGiveUp || (this.path == null)
+				|| (this.path.size() < 2) || !this.pathReachesGoal || this.unit.isPathingDisabled()) {
+			return false;
+		}
+		final AbilityPointTarget point = (AbilityPointTarget) target;
+		return StrictMath.hypot(point.x - this.target.x, point.y - this.target.y) <= CARRY_WAY_MAX_SHIFT;
 	}
 
 	/**
@@ -303,13 +332,14 @@ public class CBehaviorMove implements CBehavior {
 	private void internalResetMove(final int highlightOrderId, final float targetX, final float targetY) {
 		this.highlightOrderId = highlightOrderId;
 		this.wasWithinPropWindow = false;
-		this.gridMapping = CPathfindingProcessor.isCollisionSizeBetterSuitedForCorners(
-				this.unit.getUnitType().getCollisionSize()) ? CPathfindingProcessor.GridMapping.CORNERS
-						: CPathfindingProcessor.GridMapping.CELLS;
+		this.staleSearch = this.pathfindingActive;
 		this.target = new CPathPoint(targetX, targetY);
 		this.sharedGoal = null;
 		this.sharedRouteOff = false;
-		this.path = null;
+		this.replacingPath = this.carryPath && (this.path != null);
+		if (!this.replacingPath) {
+			this.path = null;
+		}
 		this.searchCycles = 0;
 		this.followUnit = null;
 		this.firstUpdate = true;
@@ -326,12 +356,11 @@ public class CBehaviorMove implements CBehavior {
 	private void internalResetMove(final int highlightOrderId, final CUnit followUnit) {
 		this.highlightOrderId = highlightOrderId;
 		this.wasWithinPropWindow = false;
-		this.gridMapping = CPathfindingProcessor.isCollisionSizeBetterSuitedForCorners(
-				this.unit.getUnitType().getCollisionSize()) ? CPathfindingProcessor.GridMapping.CORNERS
-						: CPathfindingProcessor.GridMapping.CELLS;
+		this.staleSearch = this.pathfindingActive;
 		this.target = new CPathPoint(followUnit.getX(), followUnit.getY());
 		this.sharedGoal = null;
 		this.sharedRouteOff = false;
+		this.replacingPath = false;
 		this.path = null;
 		this.searchCycles = 0;
 		this.followUnit = followUnit;
@@ -368,6 +397,14 @@ public class CBehaviorMove implements CBehavior {
 
 	@Override
 	public CBehavior update(final CSimulation simulation) {
+		if (this.staleSearch) {
+			this.staleSearch = false;
+			if (this.pathfindingActive) {
+				// withdrawn, the search asked below takes its place in the queue
+				simulation.removeFromPathfindingQueue(this);
+				this.pathfindingActive = false;
+			}
+		}
 		if ((this.rangedBehavior != null) && (this.rangedBehavior.isWithinRange(simulation)
 				|| isUnorderedChaseOfLostTarget(simulation))) {
 			if (this.pathfindingActive) {
@@ -428,6 +465,12 @@ public class CBehaviorMove implements CBehavior {
 				this.pathfindingActive = true;
 				this.firstPathfindJob = true;
 			}
+		}
+		else if (this.replacingPath && !this.pathfindingActive) {
+			simulation.findNaiveSlowPath(this.unit, null, startFloatingX, startFloatingY, searchGoal(), movementType,
+					collisionSize, smoothsPath(simulation), this);
+			this.pathfindingActive = true;
+			this.followSearch = true;
 		}
 		else if ((this.followUnit != null) && (this.path.size() > 1) && (this.target.distance(this.followUnit.getX(),
 				this.followUnit.getY()) > (0.1 * this.target.distance(this.unit.getX(), this.unit.getY())))) {
@@ -531,7 +574,7 @@ public class CBehaviorMove implements CBehavior {
 				if ((this.path == null ? !walkThrough : ((this.path.size() == 1) && this.pathReachesGoal))
 						&& (this.followUnit == null)
 						&& ((this.rangedBehavior == null) || (this.rangedBehavior instanceof CBehaviorAttackMove))
-						&& (this.group == null) && (travelDistance > 0)
+						&& (this.group == null) && !this.replacingPath && (travelDistance > 0)
 						&& (travelDistance <= (continueDistance + MOVE_END_DISTANCE))) {
 					final double stepDistance = speed * MOVE_END_STEP_TIME;
 					final double wholeWay = this.movedDistance + travelDistance;
@@ -555,10 +598,6 @@ public class CBehaviorMove implements CBehavior {
 					nextX = walkX + (float) ((deltaX / travelDistance) * continueDistance);
 					nextY = walkY + (float) ((deltaY / travelDistance) * continueDistance);
 					continueDistance = 0;
-//					done = (this.gridMapping.getX(pathingGrid, nextX) == this.gridMapping.getX(pathingGrid,
-//							currentTargetX))
-//							&& (this.gridMapping.getY(pathingGrid, nextY) == this.gridMapping.getY(pathingGrid,
-//									currentTargetY));
 					done = false;
 				}
 				if (this.unit.getCollisionRectangle() != null) {
@@ -606,6 +645,11 @@ public class CBehaviorMove implements CBehavior {
 							}
 							onMoveGiveUp(simulation);
 							return this.unit.pollNextOrderBehavior(simulation);
+						}
+						else if (this.replacingPath && (this.path.size() == 1)) {
+							// the way found for the earlier point is walked to its end: the unit waits for the new one
+							standWhileBlocked();
+							break;
 						}
 						else {
 							this.path.remove(0);
@@ -673,6 +717,10 @@ public class CBehaviorMove implements CBehavior {
 							&& !blockedByUnit(worldCollision, pathingGrid, nextX, nextY, movementType, collisionSize,
 									simulation.getGameTurnTick())) {
 						this.waitForWalkersTicks++;
+						// a tick or two of waiting between steps keeps the walk; a longer wait stands
+						if (this.waitForWalkersTicks > WALK_KEEP_WAIT_TICKS) {
+							standWhileBlocked();
+						}
 						break;
 					}
 					this.waitForWalkersTicks = 0;
@@ -695,6 +743,7 @@ public class CBehaviorMove implements CBehavior {
 							&& (this.unit.distance(this.target.x, this.target.y) <= Math.max(128f, collisionSize * 4))) {
 						if ((this.rangedBehavior != null) && (this.blockedNearTargetTicks < BLOCKED_NEAR_TARGET_TICKS)) {
 							this.blockedNearTargetTicks++;
+							standWhileBlocked();
 							break;
 						}
 						onMoveGiveUp(simulation);
@@ -715,6 +764,7 @@ public class CBehaviorMove implements CBehavior {
 						// a detour.
 						this.pathLengthWhenBlocked = (this.path == null) ? 0 : pathLength(this.path);
 						this.searchCycles++;
+						standWhileBlocked();
 						return this;
 					}
 				}
@@ -741,6 +791,14 @@ public class CBehaviorMove implements CBehavior {
 		}
 
 		return this;
+	}
+
+	/** A unit that is held up does not walk on the spot: it stands until it moves again. */
+	private void standWhileBlocked() {
+		if (this.wasWithinPropWindow) {
+			playStandAnimation();
+		}
+		this.wasWithinPropWindow = false;
 	}
 
 	private void playStandAnimation() {
@@ -984,10 +1042,6 @@ public class CBehaviorMove implements CBehavior {
 		if (this.disableCollision) {
 			this.unit.setNoCollisionMovementType(false);
 		}
-		if (ALWAYS_INTERRUPT_MOVE) {
-			game.removeFromPathfindingQueue(this);
-			this.pathfindingActive = false;
-		}
 		if ((this.rangedBehavior != null) && !this.takenOver) {
 			this.rangedBehavior.endMove(game, interrupted);
 		}
@@ -1022,6 +1076,7 @@ public class CBehaviorMove implements CBehavior {
 				this.sharedRouteOff = true;
 				this.pathfindingActive = false;
 				this.followSearch = false;
+				this.replacingPath = false;
 				this.path = null;
 				return;
 			}
@@ -1035,6 +1090,7 @@ public class CBehaviorMove implements CBehavior {
 			final CSimulation simulation) {
 		this.pathfindingActive = false;
 		this.followSearch = false;
+		this.replacingPath = false;
 		this.path = waypoints;
 		this.pathReachesGoal = reachesGoal;
 		final boolean searchedAfterBlock = this.searchAfterBlock;
@@ -1141,6 +1197,21 @@ public class CBehaviorMove implements CBehavior {
 		final COrder order = this.unit.getCurrentOrder();
 		return (this.followUnit == null) && (this.rangedBehavior == null) && (order != null)
 				&& ((order.getOrderId() == OrderIds.move) || (order.getOrderId() == OrderIds.smart));
+	}
+
+	/**
+	 * A move to a point that a player or a script ordered: not a flight from an attacker, an approach for an attack or
+	 * a spell, or a follow.
+	 */
+	public boolean isOrderedPointMove() {
+		return (this.followUnit == null) && (this.rangedBehavior == null)
+				&& ((this.highlightOrderId == OrderIds.move) || (this.highlightOrderId == OrderIds.smart))
+				&& !this.unit.isFleeing();
+	}
+
+	/** Whether the search under way is the first one of this move, not one made on the way. */
+	public boolean isFirstSearch() {
+		return this.firstPathfindJob;
 	}
 
 	private boolean isPlainMove() {

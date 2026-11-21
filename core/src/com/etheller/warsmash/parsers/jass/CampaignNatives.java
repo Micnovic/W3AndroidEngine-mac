@@ -36,6 +36,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.data.CUnitRace;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRace;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRaceManager;
+import com.etheller.warsmash.viewer5.FogSettings;
 import com.etheller.warsmash.viewer5.handlers.w3x.UnitSound;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.camera.GameCameraManager;
@@ -61,6 +62,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CCampaignProgress;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CSaveStorage;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CheckpointSaves;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CLeaderboard;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CStoredUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
@@ -96,6 +98,7 @@ final class CampaignNatives {
 	static void register(final JassProgram program, final War3MapViewer viewer, final WarsmashUI ui) {
 		final CampaignNatives natives = new CampaignNatives(program, viewer, ui);
 		natives.registerGameCache();
+		GameCacheSyncNatives.register(program, viewer, ui);
 		natives.registerCampaign();
 		natives.registerSounds();
 		natives.registerCamera();
@@ -172,7 +175,6 @@ final class CampaignNatives {
 			CGameCache.reloadAllFromDisk();
 			return BooleanJassValue.TRUE;
 		});
-		ignored("SyncStoredInteger", "SyncStoredReal", "SyncStoredBoolean", "SyncStoredUnit", "SyncStoredString");
 		add("FlushGameCache", (arguments, globalScope, triggerScope) -> {
 			final CGameCache cache = object(arguments, 0);
 			if (cache != null) {
@@ -426,7 +428,9 @@ final class CampaignNatives {
 			return null;
 		});
 		add("SaveGameCheckpoint", (arguments, globalScope, triggerScope) -> {
-			this.viewer.requestSaveGame(CSaveStorage.savedGame(noneIfNull(string(arguments, 0))));
+			final FileHandle checkpoint = CSaveStorage.savedGame(noneIfNull(string(arguments, 0)));
+			this.viewer.requestSaveGame(checkpoint);
+			CheckpointSaves.delete(this.viewer.scriptUiState.getCheckpointSaves().record(checkpoint));
 			return null;
 		});
 		add("DisableRestartMission", (arguments, globalScope, triggerScope) -> {
@@ -579,7 +583,10 @@ final class CampaignNatives {
 			this.ui.setMusicVolume(integer(arguments, 0));
 			return null;
 		});
-		add("GetSoundIsLoading", (arguments, globalScope, triggerScope) -> BooleanJassValue.FALSE);
+		add("GetSoundIsLoading", (arguments, globalScope, triggerScope) -> {
+			final CSound sound = object(arguments, 0);
+			return BooleanJassValue.of((sound != null) && sound.isLoading());
+		});
 		add("VolumeGroupSetVolume", (arguments, globalScope, triggerScope) -> {
 			final CSoundVolumeGroup group = object(arguments, 0);
 			if (group != null) {
@@ -605,7 +612,10 @@ final class CampaignNatives {
 				bool(arguments, 1), real(arguments, 2), real(arguments, 3))));
 		add("UnregisterStackedSound", soundSetter((sound, arguments) -> this.viewer.getStackedSounds()
 				.unregister(sound, bool(arguments, 1), real(arguments, 2), real(arguments, 3))));
-		ignored("SetCinematicAudio");
+		add("SetCinematicAudio", (arguments, globalScope, triggerScope) -> {
+			this.viewer.getSoundMixer().setCinematicAudio(bool(arguments, 0));
+			return null;
+		});
 		add("KillSoundWhenDone", soundSetter((sound, arguments) -> sound.killWhenDone()));
 	}
 
@@ -690,9 +700,14 @@ final class CampaignNatives {
 				new AbilityPointTarget(local(camera().getNoisyTargetX()), local(camera().getNoisyTargetY()))));
 		add("GetCameraEyePositionLoc", (arguments, globalScope, triggerScope) -> new HandleJassValue(locationType,
 				new AbilityPointTarget(local(camera().getEyeX()), local(camera().getEyeY()))));
-		// Measured: a smoothing factor does not change a timed pan (linear with it too). The original applies it to
-		// the free camera, which has no such movement here.
-		ignored("CameraSetSmoothingFactor", "CameraSetDepthOfFieldScale", "CameraSetFocalDistance");
+		// Measured: a smoothing factor does not change a timed pan (linear with it too); it eases the movement the
+		// player makes with the keys and the screen edge.
+		add("CameraSetSmoothingFactor", (arguments, globalScope, triggerScope) -> {
+			camera().setSmoothingFactor(real(arguments, 0));
+			return null;
+		});
+		// The picture has no depth of field pass.
+		ignored("CameraSetDepthOfFieldScale", "CameraSetFocalDistance");
 		// Measured: an empty name leaves a running model camera as it is.
 		add("SetCinematicCamera", (arguments, globalScope, triggerScope) -> {
 			final String file = string(arguments, 0);
@@ -709,7 +724,16 @@ final class CampaignNatives {
 		});
 		// Measured: neither changes the camera's rotation or the target the camera natives report, with the unit
 		// turning or moving or the rotation running its time.
-		ignored("SetCameraRotateMode", "SetCameraOrientController");
+		add("SetCameraRotateMode", (arguments, globalScope, triggerScope) -> {
+			camera().setRotateMode(real(arguments, 0), real(arguments, 1), real(arguments, 2), real(arguments, 3));
+			return null;
+		});
+		add("SetCameraOrientController", (arguments, globalScope, triggerScope) -> {
+			final CUnit unit = object(arguments, 0);
+			camera().setOrientController(unit == null ? null : this.viewer.getRenderPeer(unit), real(arguments, 1),
+					real(arguments, 2));
+			return null;
+		});
 		add("BlzCameraSetupApplyForceDurationSmooth", (arguments, globalScope, triggerScope) -> {
 			final com.etheller.warsmash.viewer5.handlers.w3x.camera.CustomCameraSetup setup = object(arguments, 0);
 			if (setup != null) {
@@ -751,7 +775,6 @@ final class CampaignNatives {
 			return new StringJassValue(
 					(gameUI != null) && gameUI.hasSkinField(key) ? gameUI.getSkinField(key) : key);
 		});
-		add("BlzIsSelectionEnabled", (arguments, globalScope, triggerScope) -> BooleanJassValue.TRUE);
 		add("EnableSelect", (arguments, globalScope, triggerScope) -> {
 			final MeleeUI meleeUI = meleeUI();
 			if (meleeUI != null) {
@@ -820,18 +843,36 @@ final class CampaignNatives {
 		});
 		registerUbersplats();
 		registerTerrainDeformations();
-		// Occlusion and the fog at the map edge have no drawing here yet; HD water and terrain fog extras do not exist
-		// in the classic graphics.
-		// The old fog natives and the water ripples have no counterpart in the classic graphics; a single player game
-		// has no other player to wait for at a sync point, and the intro shot belongs to the loading screen.
-		ignored("SetTerrainFog", "SetUnitFog", "SetWaterDeforms", "TriggerSyncStart", "TriggerSyncReady",
-				"SetIntroShotText", "SetIntroShotModel");
-		ignored("EnableOcclusion", "EnableWorldFogBoundary", "SetHDWaterParamsEx", "BlzSetTerrainFogDrawOverSky",
-				"BlzSetTerrainFogMaxLinearDensity", "SetTerrainFogExV", "PreloadRefresh", "PreloadEndEx",
-				"SyncSelections",
-				"CreateCommandButtonEffect", "CreateUpgradeCommandButtonEffect", "CreateLearnCommandButtonEffect",
-				"DestroyCommandButtonEffect", "TriggerRegisterCommandEvent", "TriggerRegisterUpgradeCommandEvent",
-				"SetItemColor");
+		// Nothing draws occluded units or the water ripples yet. HD water does not exist in the classic graphics.
+		add("EnableOcclusion", (arguments, globalScope, triggerScope) -> {
+			this.viewer.viewSettings.occlusion = bool(arguments, 0);
+			return null;
+		});
+		add("EnableWorldFogBoundary", (arguments, globalScope, triggerScope) -> {
+			this.viewer.viewSettings.worldFogBoundary = bool(arguments, 0);
+			if (this.viewer.terrain != null) {
+				this.viewer.terrain.setWorldFogBoundary(this.viewer.viewSettings.worldFogBoundary);
+			}
+			return null;
+		});
+		add("SetWaterDeforms", (arguments, globalScope, triggerScope) -> {
+			this.viewer.viewSettings.waterDeforms = bool(arguments, 0);
+			return null;
+		});
+		// The old fog natives take the style, the z range and the density of SetTerrainFogEx, with no colour and one
+		// more value this engine has no use for. Terrain and units are fogged by the one world fog.
+		for (final String name : new String[] { "SetTerrainFog", "SetUnitFog" }) {
+			add(name, (arguments, globalScope, triggerScope) -> {
+				final FogSettings fog = this.viewer.worldScene.fogSettings;
+				fog.setStyleByIndex(Math.round(real(arguments, 0)) + 1);
+				fog.start = real(arguments, 1);
+				fog.end = real(arguments, 2);
+				fog.density = real(arguments, 3);
+				return null;
+			});
+		}
+		ignored("SetIntroShotText", "SetIntroShotModel");
+		ignored("SetHDWaterParamsEx", "PreloadRefresh", "PreloadEndEx");
 	}
 
 	private interface UbersplatAction {
@@ -1338,8 +1379,6 @@ final class CampaignNatives {
 			}
 			return null;
 		});
-		// Hero and unit overrides the classic data has no field for in the interface yet.
-		ignored("BlzShowUnitTeamGlow");
 		add("SetPlayerHandicapDamage", (arguments, globalScope, triggerScope) -> {
 			final CPlayer player = object(arguments, 0);
 			if (player != null) {

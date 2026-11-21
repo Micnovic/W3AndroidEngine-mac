@@ -41,6 +41,7 @@ import com.etheller.interpreter.ast.struct.JassStructMemberType;
 import com.etheller.interpreter.ast.struct.JassStructMemberTypeDefinition;
 import com.etheller.interpreter.ast.type.JassTypeToken;
 import com.etheller.interpreter.ast.util.JassLog;
+import com.etheller.interpreter.ast.util.JassProfiler;
 import com.etheller.interpreter.ast.util.JassSettings;
 import com.etheller.interpreter.ast.value.ArrayJassType;
 import com.etheller.interpreter.ast.value.ArrayJassValue;
@@ -347,12 +348,14 @@ public final class GlobalScope {
 		final InstructionAppendingJassStatementVisitor visitor = new InstructionAppendingJassStatementVisitor(
 				this.instructions, scope, function.getParameters());
 		visitor.setReturnType(function.getReturnType());
+		visitor.addParameterConversions(function.getParameters());
 		for (final JassStatement statement : visitor.cleanStatements(statements)) {
 			statement.accept(visitor);
 		}
 		begin.setOpCost(visitor.getLocalsOpCost());
 		this.instructions.add(new PushLiteralInstruction(JassType.NOTHING.getNullValue()));
 		this.instructions.add(new ReturnInstruction());
+		function.releaseStatements();
 	}
 
 	public void defineGlobals(final int lineNo, final String sourceFile, final List<JassStatement> globalStatements,
@@ -671,10 +674,38 @@ public final class GlobalScope {
 		return this.threads.isEmpty();
 	}
 
+	/**
+	 * Runs the thread on the caller's stack until it finishes or sleeps. A thread that fails stops alone, as in the
+	 * original game: its caller (ForGroup, ExecuteFunc, a timer or an event of the game) goes on.
+	 */
 	public void runThreadUntilCompletion(final JassThread thread) {
+		try {
+			runThreadUntilCompletionOrFail(thread);
+		}
+		catch (final JassException exc) {
+			if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR) {
+				throw exc;
+			}
+			thread.halt();
+		}
+		catch (final StackOverflowError error) {
+			if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR) {
+				throw error;
+			}
+			// Threads started from threads (ExecuteFunc, TriggerEvaluate) nest on the Java stack.
+			Log.error("JASS thread stopped: threads nested too deeply");
+			thread.halt();
+		}
+	}
+
+	private void runThreadUntilCompletionOrFail(final JassThread thread) {
 		final JassThread parentThread = this.currentThread;
 		thread.parent = parentThread;
 		this.currentThread = thread;
+		if (JassProfiler.ENABLED) {
+			JassProfiler.sliceStart(thread);
+		}
+		boolean failed = false;
 		try {
 			while (!thread.isSleeping()) {
 				if (thread.instructionPtr == -1) {
@@ -691,11 +722,15 @@ public final class GlobalScope {
 			}
 		}
 		catch (final Exception exc) {
+			failed = true;
 			final JassException jassException = new JassException(this, "runThreads() encountered exception", exc);
 			JassLog.report(jassException);
 			throw jassException;
 		}
 		finally {
+			if (JassProfiler.ENABLED) {
+				JassProfiler.sliceEnd(thread, failed);
+			}
 			this.currentThread = parentThread;
 		}
 	}
@@ -719,7 +754,7 @@ public final class GlobalScope {
 			final String contextNameForError, final JassValue defaultValue) {
 		JassValue jassReturnValue;
 		try {
-			runThreadUntilCompletion(thread);
+			runThreadUntilCompletionOrFail(thread);
 			if (thread.instructionPtr == -1) {
 				jassReturnValue = thread.stackFrame.getLast(0);
 			}
@@ -734,7 +769,13 @@ public final class GlobalScope {
 			}
 		}
 		catch (final Exception e) {
-			throw new JassException(this, "Exception during " + contextNameForError, e);
+			final JassException jassException = new JassException(this, "Exception during " + contextNameForError, e);
+			if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR || (defaultValue == null)) {
+				throw jassException;
+			}
+			// As in the original game, a failing condition ends alone and reads as its default; the game goes on.
+			JassLog.report(jassException);
+			return defaultValue;
 		}
 		return jassReturnValue;
 	}
@@ -743,6 +784,9 @@ public final class GlobalScope {
 		for (int threadIndex = this.threads.size() - 1; threadIndex >= 0; threadIndex--) {
 			final JassThread thread = this.threads.get(threadIndex);
 			this.currentThread = thread;
+			if (JassProfiler.ENABLED) {
+				JassProfiler.sliceStart(thread);
+			}
 			try {
 				while (!thread.isSleeping()) {
 					if (thread.instructionPtr == -1) {
@@ -762,8 +806,14 @@ public final class GlobalScope {
 				if (thread.isHalted()) {
 					this.threads.remove(threadIndex);
 				}
+				if (JassProfiler.ENABLED) {
+					JassProfiler.sliceEnd(thread, false);
+				}
 			}
 			catch (final Exception exc) {
+				if (JassProfiler.ENABLED) {
+					JassProfiler.sliceEnd(thread, true);
+				}
 				final JassException jassException = new JassException(this, "runThreads() encountered exception", exc);
 				JassLog.report(jassException);
 				if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR) {

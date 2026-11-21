@@ -25,7 +25,7 @@ public class CAbilityTypeAcolyteHarvest extends CAbilityType<CAbilityTypeAcolyte
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeAcolyteHarvestLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeAcolyteHarvestLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityAcolyteHarvest heroAbility = ((CAbilityAcolyteHarvest) existingAbility);
 
 		heroAbility.setCastRange(levelData.getCastRange());

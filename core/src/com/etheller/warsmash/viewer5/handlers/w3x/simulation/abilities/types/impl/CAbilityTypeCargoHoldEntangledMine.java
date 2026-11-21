@@ -26,7 +26,7 @@ public class CAbilityTypeCargoHoldEntangledMine extends CAbilityType<CAbilityTyp
 
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
-		final CAbilityTypeCargoHoldLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeCargoHoldLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityCargoHoldEntangledMine heroAbility = ((CAbilityCargoHoldEntangledMine) existingAbility);
 
 		heroAbility.setDuration(levelData.getDuration());

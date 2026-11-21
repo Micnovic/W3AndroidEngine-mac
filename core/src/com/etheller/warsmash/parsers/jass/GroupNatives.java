@@ -3,15 +3,12 @@ package com.etheller.warsmash.parsers.jass;
 import com.badlogic.gdx.math.Rectangle;
 import com.etheller.interpreter.ast.debug.JassException;
 import com.etheller.interpreter.ast.function.JassFunction;
-import com.etheller.interpreter.ast.scope.GlobalScope;
-import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
 import com.etheller.interpreter.ast.scope.trigger.TriggerBooleanExpression;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.CodeJassValue;
 import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
-import com.etheller.interpreter.ast.value.JassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.CodeJassValueVisitor;
 import com.etheller.interpreter.ast.value.visitor.IntegerJassValueVisitor;
@@ -117,6 +114,9 @@ final class GroupNatives extends CommonNatives {
 		final JassFunction groupGetUnitAt = (arguments, globalScope, triggerScope) -> {
 			final List<CUnit> group = arguments.get(0).visit(ObjectJassValueVisitor.<List<CUnit>>getInstance());
 			final int index = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+			if ((group == null) || (index < 0) || (index >= group.size())) {
+				return unitType.getNullValue();
+			}
 			return new HandleJassValue(unitType, group.get(index));
 		};
 		jassProgramVisitor.getJassNativeManager().createNative("BlzGroupUnitAt", groupGetUnitAt);

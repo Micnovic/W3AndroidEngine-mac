@@ -1,6 +1,5 @@
 package com.etheller.warsmash.parsers.jass;
 
-import com.badlogic.gdx.audio.Sound;
 import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
@@ -28,10 +27,14 @@ final class SoundNatives extends CommonNatives {
 	void register() {
 		final HandleJassType soundType = type("sound");
 
-		// The original picks an EAX reverb preset; measured on 1.29, scripts read nothing back from it. The audio
-		// back ends here (OpenAL through libGDX, Android) have no reverb to set.
+		// Picks an EAX reverb preset; scripts read nothing back from it, and the audio back ends here (OpenAL through
+		// libGDX, Android) have no reverb to set, so the mixer only keeps the name.
 		jassProgramVisitor.getJassNativeManager().createNative("NewSoundEnvironment",
-				(arguments, globalScope, triggerScope) -> null);
+				(arguments, globalScope, triggerScope) -> {
+					war3MapViewer.getSoundMixer()
+							.setEnvironment(arguments.get(0).visit(StringJassValueVisitor.getInstance()));
+					return null;
+				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateMIDISound",
 				(arguments, globalScope, triggerScope) -> {
 					final String soundLabel = arguments.get(0).visit(StringJassValueVisitor.getInstance());
@@ -41,6 +44,7 @@ final class SoundNatives extends CommonNatives {
 					if ((sound == null) || (sound.getSoundCount() == 0)) {
 						return newHandle(soundType, new CMIDISound(soundLabel, fadeInRate, fadeOutRate));
 					}
+					sound.preload();
 					return newHandle(soundType, new CSoundFromLabel(sound,
 							meleeUI.getUiScene().audioContext, true, false, false, fadeInRate, fadeOutRate));
 				});
@@ -160,6 +164,10 @@ final class SoundNatives extends CommonNatives {
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
 					final UnitSound sound = war3MapViewer.getUiSounds().getSound(soundLabel);
+					if ((sound != null) && (looping || sound.isLooping())) {
+						// a loop's sound is wanted whole when it starts, so it is made while the script goes on
+						sound.preload();
+					}
 					return newHandle(soundType,
 							new CSoundFromLabel(sound,
 									is3D ? war3MapViewer.worldScene.audioContext
@@ -176,13 +184,16 @@ final class SoundNatives extends CommonNatives {
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
 					final String eaxSetting = arguments.get(6).visit(StringJassValueVisitor.getInstance());
-					final Sound newSound = UnitSound.createSound(war3MapViewer.mapMpq, fileName);
-					war3MapViewer.rememberFileSound(newSound, fileName);
-					final float fileDuration = UnitSound.fileDuration(war3MapViewer.mapMpq, fileName);
-					final CSoundFilename soundHandle = new CSoundFilename(newSound, fileDuration,
+					final UnitSound.ScriptFile file = war3MapViewer.getScriptSoundFile(fileName);
+					final float fileDuration = file.getDuration();
+					final CSoundFilename soundHandle = new CSoundFilename(null, fileDuration,
 							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
 							stopWhenOutOfRange, fadeInRate, fadeOutRate, eaxSetting);
 					soundHandle.setFileName(fileName);
+					soundHandle.setOwner(war3MapViewer.getFileSoundOwner());
+					soundHandle.awaitSound();
+					war3MapViewer.getFileSoundLater(fileName,
+							sound -> soundHandle.bindSound(sound, this.simulation.getGameTurnTick()));
 					return newHandle(soundType, soundHandle);
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("CreateSoundFilenameWithLabel",
@@ -195,13 +206,16 @@ final class SoundNatives extends CommonNatives {
 					final int fadeInRate = arguments.get(4).visit(IntegerJassValueVisitor.getInstance());
 					final int fadeOutRate = arguments.get(5).visit(IntegerJassValueVisitor.getInstance());
 					final String label = arguments.get(6).visit(StringJassValueVisitor.getInstance());
-					final Sound newSound = UnitSound.createSound(war3MapViewer.mapMpq, fileName);
-					war3MapViewer.rememberFileSound(newSound, fileName);
-					final float fileDuration = UnitSound.fileDuration(war3MapViewer.mapMpq, fileName);
-					final CSoundFilename soundHandle = new CSoundFilename(newSound, fileDuration,
+					final UnitSound.ScriptFile file = war3MapViewer.getScriptSoundFile(fileName);
+					final float fileDuration = file.getDuration();
+					final CSoundFilename soundHandle = new CSoundFilename(null, fileDuration,
 							is3D ? war3MapViewer.worldScene.audioContext : meleeUI.getUiScene().audioContext, looping,
 							stopWhenOutOfRange, fadeInRate, fadeOutRate, "");
 					soundHandle.setFileName(fileName);
+					soundHandle.setOwner(war3MapViewer.getFileSoundOwner());
+					soundHandle.awaitSound();
+					war3MapViewer.getFileSoundLater(fileName,
+							sound -> soundHandle.bindSound(sound, this.simulation.getGameTurnTick()));
 					CampaignNatives.applyLabelParameters(soundHandle, war3MapViewer.getSoundLabel(label));
 					return newHandle(soundType, soundHandle);
 				});

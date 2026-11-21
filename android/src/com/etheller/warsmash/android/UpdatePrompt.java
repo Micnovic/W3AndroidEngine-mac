@@ -22,6 +22,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -44,6 +45,7 @@ import android.widget.TextView;
 
 import com.etheller.warsmash.BuildInfo;
 import com.etheller.warsmash.launcher.LauncherKeys;
+import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.launcher.SkinArt;
 import com.etheller.warsmash.launcher.UpdateCheck;
 
@@ -55,6 +57,8 @@ import com.etheller.warsmash.launcher.UpdateCheck;
 final class UpdatePrompt {
 	private static final String TAG = "Warsmash";
 	private static final String ACTION_RESULT = "com.etheller.warsmash.android.UPDATE_RESULT";
+	/** An intent extra of a debuggable build: the release check answers as {@link UpdateCheck#FAKE_PROPERTY} says. */
+	static final String EXTRA_FAKE_UPDATE = "fakeUpdate";
 	private static final int CHECK_TIMEOUT_MILLIS = 2000;
 	/** How long the window waits for the release check before it goes on without it. */
 	private static final long CHECK_WAIT_MILLIS = 2200;
@@ -94,6 +98,7 @@ final class UpdatePrompt {
 	private FrameLayout root;
 	private TextView title;
 	private TextView detail;
+	private TextView link;
 	private ProgressBar progressBar;
 	/** The skin art when the launcher has prepared it; without it the prompt keeps the plain launcher look. */
 	private SkinCache.Art art;
@@ -127,6 +132,11 @@ final class UpdatePrompt {
 				}
 				started = true;
 				startedAt = System.currentTimeMillis();
+				final String fake = activity.getIntent().getStringExtra(EXTRA_FAKE_UPDATE);
+				if ((fake != null) && ((activity.getApplicationInfo().flags
+						& android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)) {
+					System.setProperty(UpdateCheck.FAKE_PROPERTY, fake);
+				}
 				final Thread thread = new Thread(() -> {
 					release = UpdateCheck.fetchLatest(CHECK_TIMEOUT_MILLIS);
 					checked = true;
@@ -298,6 +308,10 @@ final class UpdatePrompt {
 	}
 
 	private void finish() {
+		final UpdateCheck.Release latest = release;
+		if ((latest != null) && latest.isUnknown()) {
+			UpdateCheck.dismissUnknown();
+		}
 		synchronized (LOCK) {
 			state = State.DONE;
 		}
@@ -387,6 +401,15 @@ final class UpdatePrompt {
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		detailParams.topMargin = px(this.tablet ? 40 : 18);
 		panel.addView(this.detail, detailParams);
+		this.link = text(this.tablet ? 38 : 26, this.gold, Typeface.SANS_SERIF);
+		this.link.setText(ProjectInfo.SOURCE_URL.replaceFirst("^https://", ""));
+		this.link.setPaintFlags(this.link.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
+		this.link.setOnClickListener(v -> open(ProjectInfo.SOURCE_URL));
+		final LinearLayout.LayoutParams linkParams = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		linkParams.topMargin = px(this.tablet ? 28 : 14);
+		linkParams.gravity = Gravity.CENTER_HORIZONTAL;
+		panel.addView(this.link, linkParams);
 		this.progressBar = new ProgressBar(this.activity, null, android.R.attr.progressBarStyleHorizontal);
 		this.progressBar.setMax(1000);
 		this.progressBar.setProgressTintList(ColorStateList.valueOf(this.gold));
@@ -431,19 +454,26 @@ final class UpdatePrompt {
 		final UpdateCheck.Release latest = release;
 		final String size = latest != null ? Formatter.formatShortFileSize(this.activity, latest.apkSize) : "";
 		this.progressBar.setVisibility(View.GONE);
+		this.link.setVisibility(now == State.OFFER ? View.VISIBLE : View.GONE);
 		this.title.setTextColor(this.gold);
 		this.detail.setTextColor(this.text);
 		switch (now) {
 		case OFFER:
 			this.title.setText(R.string.update_title);
-			this.detail.setText(this.activity.getString(
-					latest.hasApk() ? (BuildInfo.current().isOfficial() ? R.string.update_offer : R.string.update_offer_unofficial)
-							: R.string.update_offer_page, latest.tag,
-					installedVersion(this.activity), size));
-			setButton(this.first, latest.hasApk() ? R.string.update_now : R.string.update_open_page, true,
+			if (latest.isUnknown()) {
+				this.detail.setText(R.string.update_unknown);
+			}
+			else {
+				this.detail.setText(this.activity.getString(
+						latest.hasApk() ? (BuildInfo.current().isOfficial() ? R.string.update_offer : R.string.update_offer_unofficial)
+								: R.string.update_offer_page, latest.tag,
+						installedVersion(this.activity), size));
+			}
+			setButton(this.first, latest.hasApk() ? R.string.update_now : R.string.update_github, true,
 					latest.hasApk() ? this::download : this::openPage);
-			setButton(this.second, R.string.update_later, false, this::finish);
-			setButton(this.third, R.string.update_skip, false, this::skip);
+			setButton(this.second, latest.isUnknown() ? R.string.update_continue : R.string.update_later, false,
+					this::finish);
+			setButton(this.third, latest.isUnknown() ? 0 : R.string.update_skip, false, this::skip);
 			break;
 		case DOWNLOADING:
 			this.title.setText(this.activity.getString(R.string.update_downloading, latest.tag));
@@ -502,12 +532,15 @@ final class UpdatePrompt {
 	}
 
 	private void openPage() {
-		final UpdateCheck.Release latest = release;
+		open(release.pageUrl);
+	}
+
+	private void open(final String url) {
 		try {
-			this.activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(latest.pageUrl)));
+			this.activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
 		}
 		catch (final RuntimeException e) {
-			Log.w(TAG, "Unable to open the release page", e);
+			Log.w(TAG, "Unable to open " + url, e);
 		}
 	}
 

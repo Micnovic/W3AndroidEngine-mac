@@ -116,6 +116,10 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 		if ((this.menuBaseOrderId == 0 || this.menuBaseOrderId == ability.getIconVisibleMenuId())
 				&& ability.isIconShowing()) {
 			final AbilityUI ui = this.abilityDataUI.getUI(ability.getAlias());
+			if (ui == null) {
+				// An ability the object data has no interface row for (a map's own hidden helper) has no button.
+				return null;
+			}
 			final boolean autoCastOn = ability.isAutoCastOn();
 			if (ability.isSeparateOnAndOff()) {
 				final War3ID onTt = ability.getOnTooltipOverride();
@@ -278,6 +282,10 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 		}
 		if ((this.menuBaseOrderId == 0) && ability.isIconShowing()) {
 			final AbilityUI ui = this.abilityDataUI.getUI(ability.getAlias());
+			if (ui == null) {
+				// An ability the object data has no interface row for (a map's own hidden helper) has no button.
+				return null;
+			}
 			final boolean autoCastOn = ability.isAutoCastOn();
 			addCommandButton(ability,
 					ability.isToggleOn() ? ui.getOffIconUI(ability.getLevel() - 1)
@@ -361,7 +369,11 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 			} else {
 				autoCastId = OrderIds.uncoldarrows;
 			}
-			final IconUI onIconUI = this.abilityDataUI.getUI(ability.getAlias()).getOnIconUI(ability.getLevel() - 1);
+			final AbilityUI autoCastUI = this.abilityDataUI.getUI(ability.getAlias());
+			if (autoCastUI == null) {
+				return null;
+			}
+			final IconUI onIconUI = autoCastUI.getOnIconUI(ability.getLevel() - 1);
 			addCommandButton(ability, onIconUI, ability.getHandleId(), OrderIds.coldarrowstarg, autoCastId,
 					autoCastActive, false);
 		}
@@ -374,6 +386,9 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 			for (final COrderButton order : ability.getOrderButtons()) {
 				if ((this.menuBaseOrderId == order.getContainerMenuOrderId()) && !order.isHidden()) {
 					final OrderButtonUI renderPeer = this.abilityDataUI.getRenderPeer(order);
+					if (renderPeer == null) {
+						continue;
+					}
 					addCommandButton(ability, renderPeer.getIcon(), renderPeer.getIconDisabled(), renderPeer.getTip(),
 							renderPeer.getUberTip(), renderPeer.getButtonPositionX(), renderPeer.getButtonPositionY(),
 							ability.getHandleId(), order.getOrderId(),
@@ -473,6 +488,9 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 
 	private void addCommandButton(final CAbility ability, final IconUI iconUI, final int handleId, final int orderId,
 			final int autoCastOrderId, final boolean autoCastActive, final boolean menuButton) {
+		if (iconUI == null) {
+			return;
+		}
 		addCommandButton(ability, iconUI, handleId, orderId, autoCastOrderId, autoCastActive, menuButton, 0, 0, 0, 0,
 				-1);
 	}
@@ -480,6 +498,10 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 	private void addCommandButton(final CAbility ability, final IconUI iconUI, final int handleId, final int orderId,
 			final int autoCastOrderId, final boolean autoCastActive, final boolean menuButton, final int goldCost,
 			final int lumberCost, final int foodCost, final int manaCost, final int numberOverlay) {
+		if (iconUI == null) {
+			// An ability without an interface row in the object data has no button.
+			return;
+		}
 		addCommandButton(ability, iconUI, iconUI.getToolTip(), iconUI.getButtonPositionX(), iconUI.getButtonPositionY(),
 				handleId, orderId, autoCastOrderId, autoCastActive, menuButton, goldCost, lumberCost, foodCost,
 				manaCost, numberOverlay);
@@ -489,6 +511,9 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 			final int handleId, final int orderId, final int autoCastOrderId, final boolean autoCastActive,
 			final boolean menuButton, final int goldCost, final int lumberCost, final int foodCost, final int manaCost,
 			final int numberOverlay) {
+		if ((iconUI == null) || (tooltipOverride == null)) {
+			return;
+		}
 		addCommandButton(ability, iconUI.getIcon(), iconUI.getIconDisabled(), tooltipOverride.getToolTip(),
 				tooltipOverride.getUberTip(), iconUI.getButtonPositionX(), iconUI.getButtonPositionY(), handleId,
 				orderId, autoCastOrderId, autoCastActive, menuButton, goldCost, lumberCost, foodCost, manaCost,
@@ -499,6 +524,9 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 			final int buttonPosX, final int buttonPosY, final int handleId, final int orderId,
 			final int autoCastOrderId, final boolean autoCastActive, final boolean menuButton, final int goldCost,
 			final int lumberCost, final int foodCost, final int manaCost, final int numberOverlay) {
+		if (iconUI == null) {
+			return;
+		}
 		addCommandButton(ability, iconUI.getIcon(), iconUI.getIconDisabled(), toolTip, iconUI.getUberTip(), buttonPosX,
 				buttonPosY, handleId, orderId, autoCastOrderId, autoCastActive, menuButton, goldCost, lumberCost,
 				foodCost, manaCost, numberOverlay, iconUI.getHotkey());
@@ -653,7 +681,8 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 	public Void accept(final CAbilitySellItems ability) {
 		if ((this.menuBaseOrderId == 0) && ability.isIconShowing()) {
 			for (final War3ID unitType : ability.getItemsSold()) {
-				final IconUI unitUI = this.abilityDataUI.getItemUI(unitType).getIconUI();
+				final ItemUI soldItemUI = this.abilityDataUI.getItemUI(unitType);
+				final IconUI unitUI = soldItemUI == null ? null : soldItemUI.getIconUI();
 				if (unitUI != null) {
 					final CItemType simulationUnitType = this.game.getItemData().getItemType(unitType);
 					int goldCost, lumberCost;
@@ -767,6 +796,9 @@ public class CommandCardPopulatingAbilityVisitor implements CAbilityVisitor<Void
 				if (abilityUI != null) {
 					final int nextLevel = this.unit.getAbilityLevel(unitType) + 1;
 					final IconUI learnIconUI = abilityUI.getLearnIconUI();
+					if (learnIconUI == null) {
+						continue;
+					}
 					addCommandButton(ability, learnIconUI, String.format(Locale.ROOT, learnIconUI.getToolTip(), nextLevel),
 							learnIconUI.getButtonPositionX(), learnIconUI.getButtonPositionY(), ability.getHandleId(),
 							unitType.getValue(), 0, false, false, 0, 0, 0, 0, nextLevel);

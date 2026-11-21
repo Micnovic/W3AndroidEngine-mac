@@ -29,7 +29,7 @@ public class CAbilityTypeHumanRepair extends CAbilityType<CAbilityTypeHumanRepai
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility,
 			final int level) {
 
-		final CAbilityTypeHumanRepairLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeHumanRepairLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityHumanRepair heroAbility = ((CAbilityHumanRepair) existingAbility);
 
 		heroAbility.setTargetsAllowed(levelData.getTargetsAllowed());

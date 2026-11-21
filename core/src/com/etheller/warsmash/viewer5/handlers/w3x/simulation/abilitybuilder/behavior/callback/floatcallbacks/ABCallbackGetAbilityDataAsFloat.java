@@ -6,6 +6,7 @@ import java.util.Map;
 import com.etheller.warsmash.parsers.jass.JassTextGenerator;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABDataText;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABLocalStoreKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.DataFieldLetter;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
@@ -23,11 +24,7 @@ public class ABCallbackGetAbilityDataAsFloat extends ABFloatCallback {
 		final int level = (int) localStore.get(ABLocalStoreKeys.CURRENTLEVEL);
 
 		final String data = levelData.get(level - 1).getData().get(this.dataField.getIndex());
-		if (data.contains("-") || data.isEmpty()) {
-			return 0f;
-		}
-
-		return Float.parseFloat(data);
+		return ABDataText.parseFloat(data);
 	}
 
 	@Override

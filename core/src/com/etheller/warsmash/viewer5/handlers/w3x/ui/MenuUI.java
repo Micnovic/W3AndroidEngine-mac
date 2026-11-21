@@ -26,6 +26,7 @@ import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.lan.LanGameStart;
 import com.etheller.warsmash.datasources.GraphicsSettings;
 import com.etheller.warsmash.launcher.CustomContent;
+import com.etheller.warsmash.launcher.MapIssue;
 import com.etheller.warsmash.launcher.ProjectInfo;
 import com.etheller.warsmash.launcher.RenderScaleStore;
 import com.etheller.warsmash.input.touch.VirtualCursor;
@@ -493,6 +494,11 @@ public class MenuUI {
 		return this.mapStart.mapLoadFailureReason();
 	}
 
+	/** The known cause of the last failed start (Lua map, encrypted map, map not in the data), else NONE. */
+	public MapIssue mapLoadFailureIssue() {
+		return this.mapStart.mapLoadFailureIssue();
+	}
+
 	public void showMapLoadError() {
 		this.mapStart.showMapLoadError();
 	}
@@ -772,11 +778,13 @@ public class MenuUI {
 		}
 	}
 
+	private final Color loadingCreditPreviousColor = new Color();
+
 	/** The project's name in the corner of a map's loading screen, small enough to leave the screen's own text alone. */
 	private void drawLoadingCredit(final SpriteBatch batch, final GlyphLayout glyphLayout) {
 		final BitmapFont font = this.rootFrame.getFont14();
 		final Rectangle screen = this.rootFrame.getRenderBounds();
-		final Color previous = font.getColor().cpy();
+		final Color previous = this.loadingCreditPreviousColor.set(font.getColor());
 		glyphLayout.setText(font, ProjectInfo.CREDIT);
 		final float x = (screen.x + screen.width) - glyphLayout.width - 8;
 		final float y = screen.y + glyphLayout.height + 8;
@@ -1059,7 +1067,9 @@ public class MenuUI {
 						@Override
 						public void loadGame(final String name) {
 							holder.setVisible(false);
-							startSavedGame(name);
+							if (!startSavedGame(name)) {
+								MenuUI.this.showMapLoadError();
+							}
 						}
 
 						@Override
@@ -1336,7 +1346,19 @@ public class MenuUI {
 		return false;
 	}
 
+	/** The menu does not read its frame templates while a game runs; they come back before it is used again. */
+	public void releaseTemplates() {
+		if (this.rootFrame != null) {
+			this.rootFrame.releaseTemplates();
+		}
+	}
+
+	public void releaseLoadingScreen() {
+		this.loadingScreen.releaseTextures();
+	}
+
 	public void onReturnFromGame(final boolean forceCampaignSelect) {
+		this.rootFrame.restoreTemplates();
 		this.loadingScreen.hide();
 		final SavedGame.Loadability loadFailure = SavedGame.consumeLoadFailure();
 		if (loadFailure != null) {

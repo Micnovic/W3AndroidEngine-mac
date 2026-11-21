@@ -16,8 +16,14 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceTy
 
 public class CWorldCollision {
 	private static final float MINIMUM_COLLISION_SIZE = 0.001f /* THIS IS TO STOP QUADTREE FROM BUSTING */;
-	private static final Rectangle tempRect = new Rectangle();
 	private static final Rectangle tempFootprintArea = new Rectangle();
+	private static final int ANY_TREE = 1;
+	private static final int DEAD_TREE = 2;
+	private static final int GROUND_TREE = 4;
+	private static final int AIR_TREE = 8;
+	private static final int SEA_TREE = 16;
+	private static final int BUILDING_TREE = 32;
+	private static final boolean REACH_CHECK = Boolean.getBoolean("warsmash.collisionReachCheck");
 	private final Quadtree<CUnit> deadUnitCollision;
 	private final Quadtree<CUnit> groundUnitCollision;
 	private final Quadtree<CUnit> airUnitCollision;
@@ -27,6 +33,9 @@ public class CWorldCollision {
 	private final Quadtree<CDestructable> destructablesForEnum;
 	private final Quadtree<CItem> itemsForEnum;
 	private final float maxCollisionRadius;
+	// The largest footprint (in cells) of any unit that was put in: units above MaxCollisionRadius have a square
+	// clamped to it, but their footprint is not.
+	private int maxRegisteredCells = 1;
 	private final List<Set<CUnit>> enumSets = new ArrayList<>();
 	private int enumSetDepth;
 	private final List<Set<Object>> otherEnumSets = new ArrayList<>();
@@ -52,6 +61,14 @@ public class CWorldCollision {
 
 	public void addUnit(final CUnit unit) {
 		Rectangle bounds = unit.getCollisionRectangle();
+		if ((bounds != null) && (unit.placement.collisionTrees != 0)) {
+			// Still registered (a hero revived from its own death trigger or from its bones): taken out first, so
+			// that it is not left where it was nor kept twice.
+			removeFromTrees(unit, bounds, unit.placement.collisionTrees);
+			bounds = null;
+		}
+		maxRegisteredCells = Math.max(this.maxRegisteredCells,
+				PathingGrid.getFootprintCells(unit.getUnitType().getCollisionSize()));
 		if (bounds == null) {
 			final float collisionSize = Math.max(MINIMUM_COLLISION_SIZE,
 					Math.min(this.maxCollisionRadius, unit.getUnitType().getCollisionSize()));
@@ -59,42 +76,85 @@ public class CWorldCollision {
 					collisionSize * 2);
 			unit.setCollisionRectangle(bounds);
 		}
-		if (unit.isUsableCorpse()) {
+		final int trees = treesFor(unit);
+		unit.placement.collisionTrees = trees;
+		if ((trees & DEAD_TREE) != 0) {
 			this.deadUnitCollision.add(unit, bounds);
 		}
-		else {
+		if ((trees & ANY_TREE) != 0) {
 			this.anyUnitEnumerableCollision.add(unit, bounds);
-			if (unit.isBuilding()) {
-				// buildings are here so that we can include them when enumerating all units in
-				// a rect, but they don't really move dynamically, this is kind of pointless
-				this.buildingUnitCollision.add(unit, bounds);
-			}
-			else {
-				final MovementType movementType = unit.getMovementType();
-				if (movementType != null) {
-					switch (movementType) {
-					case AMPHIBIOUS:
-						this.seaUnitCollision.add(unit, bounds);
-						this.groundUnitCollision.add(unit, bounds);
-						break;
-					case FLOAT:
-						this.seaUnitCollision.add(unit, bounds);
-						break;
-					case FLY:
-						this.airUnitCollision.add(unit, bounds);
-						break;
-					case DISABLED:
-						break;
-					default:
-					case FOOT:
-					case FOOT_NO_COLLISION:
-					case HORSE:
-					case HOVER:
-						this.groundUnitCollision.add(unit, bounds);
-						break;
-					}
-				}
-			}
+		}
+		if ((trees & BUILDING_TREE) != 0) {
+			this.buildingUnitCollision.add(unit, bounds);
+		}
+		if ((trees & SEA_TREE) != 0) {
+			this.seaUnitCollision.add(unit, bounds);
+		}
+		if ((trees & GROUND_TREE) != 0) {
+			this.groundUnitCollision.add(unit, bounds);
+		}
+		if ((trees & AIR_TREE) != 0) {
+			this.airUnitCollision.add(unit, bounds);
+		}
+	}
+
+	// The trees a unit goes into for what it is now. Buildings are in the building tree so that we can include them
+	// when enumerating all units in a rect, but they don't really move dynamically.
+	private static int treesFor(final CUnit unit) {
+		if (unit.isUsableCorpse()) {
+			return DEAD_TREE;
+		}
+		if (unit.isBuilding()) {
+			return ANY_TREE | BUILDING_TREE;
+		}
+		final MovementType movementType = unit.getMovementType();
+		if (movementType == null) {
+			return ANY_TREE;
+		}
+		switch (movementType) {
+		case AMPHIBIOUS:
+			return ANY_TREE | SEA_TREE | GROUND_TREE;
+		case FLOAT:
+			return ANY_TREE | SEA_TREE;
+		case FLY:
+			return ANY_TREE | AIR_TREE;
+		case DISABLED:
+			return ANY_TREE;
+		default:
+		case FOOT:
+		case FOOT_NO_COLLISION:
+		case HORSE:
+		case HOVER:
+			return ANY_TREE | GROUND_TREE;
+		}
+	}
+
+	// The trees the unit was put in. A snare or a removed move ability makes its movement type DISABLED, and a
+	// death makes it a corpse, without it being put in again, so what it is now does not tell. A save from before
+	// this was kept has none: then what it is now, as before.
+	private static int registeredTrees(final CUnit unit) {
+		final int trees = unit.placement.collisionTrees;
+		return trees != 0 ? trees : (treesFor(unit) | ANY_TREE);
+	}
+
+	private void removeFromTrees(final CUnit unit, final Rectangle bounds, final int trees) {
+		if ((trees & ANY_TREE) != 0) {
+			this.anyUnitEnumerableCollision.remove(unit, bounds);
+		}
+		if ((trees & DEAD_TREE) != 0) {
+			this.deadUnitCollision.remove(unit, bounds);
+		}
+		if ((trees & BUILDING_TREE) != 0) {
+			this.buildingUnitCollision.remove(unit, bounds);
+		}
+		if ((trees & SEA_TREE) != 0) {
+			this.seaUnitCollision.remove(unit, bounds);
+		}
+		if ((trees & GROUND_TREE) != 0) {
+			this.groundUnitCollision.remove(unit, bounds);
+		}
+		if ((trees & AIR_TREE) != 0) {
+			this.airUnitCollision.remove(unit, bounds);
 		}
 	}
 
@@ -121,90 +181,60 @@ public class CWorldCollision {
 	public void removeUnit(final CUnit unit) {
 		final Rectangle bounds = unit.getCollisionRectangle();
 		if (bounds != null) {
-			this.anyUnitEnumerableCollision.remove(unit, bounds);
-			if (unit.isUsableCorpse()) {
-				this.deadUnitCollision.remove(unit, bounds);
-			}
-			else {
-				if (unit.isBuilding()) {
-					this.buildingUnitCollision.remove(unit, bounds);
-				}
-				else {
-					final MovementType movementType = unit.getMovementType();
-					if (movementType != null) {
-						switch (movementType) {
-						case AMPHIBIOUS:
-							this.seaUnitCollision.remove(unit, bounds);
-							this.groundUnitCollision.remove(unit, bounds);
-							break;
-						case FLOAT:
-							this.seaUnitCollision.remove(unit, bounds);
-							break;
-						case FLY:
-							this.airUnitCollision.remove(unit, bounds);
-							break;
-						case DISABLED:
-							break;
-						default:
-						case FOOT:
-						case FOOT_NO_COLLISION:
-						case HORSE:
-						case HOVER:
-							this.groundUnitCollision.remove(unit, bounds);
-							break;
-						}
-					}
-				}
-			}
+			removeFromTrees(unit, bounds, registeredTrees(unit));
 		}
+		unit.placement.collisionTrees = 0;
 		unit.setCollisionRectangle(null);
 	}
 
 	public void enumUnitsInRect(final Rectangle rect, final CUnitEnumFunction callback) {
-		final Set<CUnit> intersectedUnits = acquireEnumSet();
-		try {
-			this.anyUnitEnumerableCollision.intersect(rect, (unit) -> {
-				if (unit.isHidden() || unit.isUnenumerable() || !intersectedUnits.add(unit)) {
-					return false;
-				}
-				return callback.call(unit);
-			});
-		}
-		finally {
-			releaseEnumSet();
-		}
+		enumSnapshot(rect, callback, true, false);
 	}
 
 	public void enumCorpsesInRect(final Rectangle rect, final CUnitEnumFunction callback) {
-		final Set<CUnit> intersectedUnits = acquireEnumSet();
-		try {
-			this.deadUnitCollision.intersect(rect, (unit) -> {
-				if (unit.isHidden() || unit.isUnenumerable() || !intersectedUnits.add(unit)) {
-					return false;
-				}
-				return callback.call(unit);
-			});
-		}
-		finally {
-			releaseEnumSet();
-		}
+		enumSnapshot(rect, callback, false, true);
 	}
 
 	public void enumUnitsOrCorpsesInRect(final Rectangle rect, final CUnitEnumFunction callback) {
+		enumSnapshot(rect, callback, true, true);
+	}
+
+	/**
+	 * Found first, called after: a callback that removes a unit (RemoveUnit in a filter) would otherwise shift the
+	 * leaf under the walk and skip the next one. As in 1.29 a unit removed meanwhile is still visited; one that is
+	 * hidden meanwhile is not. A callback can start another enumeration, so each nesting depth gets its own set and
+	 * list.
+	 */
+	private void enumSnapshot(final Rectangle rect, final CUnitEnumFunction callback, final boolean units,
+			final boolean corpses) {
 		final Set<CUnit> intersectedUnits = acquireEnumSet();
+		final List<CUnit> found = new ArrayList<>();
 		try {
-			final QuadtreeIntersector<CUnit> intersectorFxn = (unit) -> {
+			final QuadtreeIntersector<CUnit> collector = (unit) -> {
 				if (unit.isHidden() || unit.isUnenumerable() || !intersectedUnits.add(unit)) {
 					return false;
 				}
-				return callback.call(unit);
+				found.add(unit);
+				return false;
 			};
-			if (!this.anyUnitEnumerableCollision.intersect(rect, intersectorFxn)) {
-				this.deadUnitCollision.intersect(rect, intersectorFxn);
+			if (units) {
+				this.anyUnitEnumerableCollision.intersect(rect, collector);
+			}
+			if (corpses) {
+				this.deadUnitCollision.intersect(rect, collector);
 			}
 		}
 		finally {
 			releaseEnumSet();
+		}
+		for (final CUnit unit : found) {
+			// RemoveUnit hides the unit and takes it out of the collision at once.
+			if ((unit.getCollisionRectangle() != null) && (unit.isHidden() || unit.isUnenumerable())) {
+				continue;
+			}
+			if (callback.call(unit)) {
+				return;
+			}
 		}
 	}
 
@@ -259,17 +289,26 @@ public class CWorldCollision {
 	// once; the set lets each callback see it once. Lambdas, not the shared intersectors, so that a callback can
 	// start another enumeration.
 	public void enumItemsInRect(final Rectangle rect, final CItemEnumFunction callback) {
+		// Found first, called after: a callback that removes its item (RemoveItem on each picked item) would
+		// otherwise shift the leaf under the walk and skip the next item.
+		final List<CItem> found = new ArrayList<>();
 		final Set<Object> seen = acquireOtherEnumSet();
 		try {
 			this.itemsForEnum.intersect(rect, (item) -> {
-				if (item.isHidden() || !seen.add(item)) {
-					return false;
+				if (!item.isHidden() && seen.add(item)) {
+					found.add(item);
 				}
-				return callback.call(item);
+				return false;
 			});
 		}
 		finally {
 			this.otherEnumSetDepth--;
+		}
+		for (final CItem item : found) {
+			// One that an earlier callback removed or gave to a unit is no longer on the ground.
+			if (!item.isHidden() && callback.call(item)) {
+				return;
+			}
 		}
 	}
 
@@ -389,7 +428,7 @@ public class CWorldCollision {
 			final MovementType movementType, final int gameTurnTick) {
 		final int firstX = pathingGrid.getFootprintCellX(x, footprintCells);
 		final int firstY = pathingGrid.getFootprintCellY(y, footprintCells);
-		final float reach = 32f * (footprintCells + PathingGrid.getFootprintCells(this.maxCollisionRadius) + 1);
+		final float reach = footprintReach(footprintCells);
 		final Rectangle area = tempFootprintArea;
 		area.set(x - reach, y - reach, reach * 2, reach * 2);
 		final AnyUnitExceptTwoIntersector intersector = this.anyUnitExceptTwoIntersector;
@@ -398,7 +437,11 @@ public class CWorldCollision {
 		intersector.footprint(pathingGrid, firstX, firstY, footprintCells);
 		intersector.walkingTick = gameTurnTick;
 		try {
-			if (movementType == MovementType.AMPHIBIOUS) {
+			final boolean amphibious = movementType == MovementType.AMPHIBIOUS;
+			if (REACH_CHECK) {
+				checkFootprintReach(pathingGrid, x, y, footprintCells, intersector, area, amphibious);
+			}
+			if (amphibious) {
 				return this.seaUnitCollision.intersect(area, intersector)
 						|| this.groundUnitCollision.intersect(area, intersector);
 			}
@@ -410,57 +453,89 @@ public class CWorldCollision {
 		}
 	}
 
+	/**
+	 * Half the side of the square that holds every unit whose footprint can share a cell with one of footprintCells.
+	 * A unit of c cells stands within 32 * (f / 2 + c / 2 + 1) of the point, and its collision square reaches c * 16 -
+	 * 16 (all of MaxCollisionRadius for a bigger one) of that; a cell more for the rounding of the odd sizes.
+	 */
+	private float footprintReach(final int footprintCells) {
+		final float extra = Math.max(0f, (16f * this.maxRegisteredCells) - 16f - this.maxCollisionRadius);
+		return Math.min((16f * footprintCells) + 64f + extra, fullFootprintReach(footprintCells));
+	}
+
+	private float fullFootprintReach(final int footprintCells) {
+		return 32f * (footprintCells + PathingGrid.getFootprintCells(this.maxCollisionRadius) + 1);
+	}
+
+	// Looks for what the square of footprintReach would miss: every unit that passes the footprint test in the square
+	// of the full reach has to pass it in the small one too.
+	private void checkFootprintReach(final PathingGrid pathingGrid, final float x, final float y,
+			final int footprintCells, final AnyUnitExceptTwoIntersector intersector, final Rectangle smallArea,
+			final boolean amphibious) {
+		final float fullReach = fullFootprintReach(footprintCells);
+		final Rectangle fullArea = new Rectangle(x - fullReach, y - fullReach, fullReach * 2, fullReach * 2);
+		final List<CUnit> inFull = new ArrayList<>();
+		final List<CUnit> inSmall = new ArrayList<>();
+		collectPassing(fullArea, intersector, amphibious, inFull);
+		collectPassing(smallArea, intersector, amphibious, inSmall);
+		if (!new HashSet<>(inSmall).containsAll(inFull)) {
+			inFull.removeAll(inSmall);
+			throw new IllegalStateException("collision reach missed " + inFull.size() + " unit(s) at " + x + ", " + y
+					+ " footprint " + footprintCells + " reach " + smallArea.width / 2 + ": " + inFull.get(0).getUnitType()
+							.getCollisionSize() + " at " + inFull.get(0).getX() + ", " + inFull.get(0).getY());
+		}
+	}
+
+	private void collectPassing(final Rectangle area, final AnyUnitExceptTwoIntersector intersector,
+			final boolean amphibious, final List<CUnit> out) {
+		final QuadtreeIntersector<CUnit> collector = (unit) -> {
+			if (intersector.onIntersect(unit)) {
+				out.add(unit);
+			}
+			return false;
+		};
+		if (amphibious) {
+			this.seaUnitCollision.intersect(area, collector);
+		}
+		this.groundUnitCollision.intersect(area, collector);
+	}
+
 	public void translate(final CUnit unit, final float xShift, final float yShift) {
-		final MovementType movementType = unit.getMovementType();
 		final Rectangle bounds = unit.getCollisionRectangle();
 		if (bounds != null) {
-			if (unit.isUsableCorpse()) {
-				this.deadUnitCollision.translate(unit, bounds, xShift, yShift);
+			// Also the trees it belongs in now: one put in while it could not move goes into the ground tree once it
+			// moves again.
+			final int trees = unit.placement.collisionTrees | treesFor(unit);
+			unit.placement.collisionTrees = trees;
+			final float oldX = bounds.x;
+			final float oldY = bounds.y;
+			if ((trees & DEAD_TREE) != 0) {
+				translateIn(this.deadUnitCollision, unit, bounds, oldX, oldY, xShift, yShift);
 			}
-			else {
-				final float oldX = bounds.x;
-				final float oldY = bounds.y;
-				this.anyUnitEnumerableCollision.translate(unit, bounds, xShift, yShift);
-				if (unit.isBuilding()) {
-					bounds.x = oldX;
-					bounds.y = oldY;
-					this.buildingUnitCollision.translate(unit, bounds, xShift, yShift);
-				}
-				else if (movementType != null) {
-					switch (movementType) {
-					case AMPHIBIOUS:
-						bounds.x = oldX;
-						bounds.y = oldY;
-						this.seaUnitCollision.translate(unit, bounds, xShift, yShift);
-						bounds.x = oldX;
-						bounds.y = oldY;
-						this.groundUnitCollision.translate(unit, bounds, xShift, yShift);
-						break;
-					case FLOAT:
-						bounds.x = oldX;
-						bounds.y = oldY;
-						this.seaUnitCollision.translate(unit, bounds, xShift, yShift);
-						break;
-					case FLY:
-						bounds.x = oldX;
-						bounds.y = oldY;
-						this.airUnitCollision.translate(unit, bounds, xShift, yShift);
-						break;
-					case DISABLED:
-						break;
-					default:
-					case FOOT:
-					case FOOT_NO_COLLISION:
-					case HORSE:
-					case HOVER:
-						bounds.x = oldX;
-						bounds.y = oldY;
-						this.groundUnitCollision.translate(unit, bounds, xShift, yShift);
-						break;
-					}
-				}
+			if ((trees & ANY_TREE) != 0) {
+				translateIn(this.anyUnitEnumerableCollision, unit, bounds, oldX, oldY, xShift, yShift);
+			}
+			if ((trees & BUILDING_TREE) != 0) {
+				translateIn(this.buildingUnitCollision, unit, bounds, oldX, oldY, xShift, yShift);
+			}
+			if ((trees & SEA_TREE) != 0) {
+				translateIn(this.seaUnitCollision, unit, bounds, oldX, oldY, xShift, yShift);
+			}
+			if ((trees & GROUND_TREE) != 0) {
+				translateIn(this.groundUnitCollision, unit, bounds, oldX, oldY, xShift, yShift);
+			}
+			if ((trees & AIR_TREE) != 0) {
+				translateIn(this.airUnitCollision, unit, bounds, oldX, oldY, xShift, yShift);
 			}
 		} // else probably moving a dead unit that isn't corpse yet
+	}
+
+	// The trees share one rectangle: each finds the unit under where it was.
+	private static void translateIn(final Quadtree<CUnit> tree, final CUnit unit, final Rectangle bounds,
+			final float oldX, final float oldY, final float xShift, final float yShift) {
+		bounds.x = oldX;
+		bounds.y = oldY;
+		tree.translate(unit, bounds, xShift, yShift);
 	}
 
 	public void translate(final CItem item, final float xShift, final float yShift) {

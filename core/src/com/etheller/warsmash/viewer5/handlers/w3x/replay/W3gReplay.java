@@ -116,10 +116,15 @@ public final class W3gReplay {
 				final byte[] block = readBytes(in, compressed);
 				inflater.reset();
 				inflater.setInput(block);
-				final byte[] plain = new byte[size];
+				if (size < 0) {
+					throw new IOException("damaged replay");
+				}
+				// Only the start of the data is read; a damaged size must not ask for more memory than that.
+				final int wanted = Math.min(size, START_DATA);
+				final byte[] plain = new byte[wanted];
 				int done = 0;
-				while ((done < size) && !inflater.finished()) {
-					final int n = inflater.inflate(plain, done, size - done);
+				while ((done < wanted) && !inflater.finished()) {
+					final int n = inflater.inflate(plain, done, wanted - done);
 					if ((n == 0) && (inflater.needsInput() || inflater.needsDictionary())) {
 						break;
 					}
@@ -141,9 +146,22 @@ public final class W3gReplay {
 		if (count < 0) {
 			throw new IOException("damaged replay");
 		}
-		final byte[] bytes = new byte[count];
-		in.readFully(bytes);
-		return bytes;
+		if (count <= START_DATA) {
+			final byte[] bytes = new byte[count];
+			in.readFully(bytes);
+			return bytes;
+		}
+		// A damaged count runs out of data instead of asking for that much memory.
+		final ByteArrayOutputStream out = new ByteArrayOutputStream(START_DATA);
+		final byte[] buffer = new byte[START_DATA];
+		int left = count;
+		while (left > 0) {
+			final int n = Math.min(left, START_DATA);
+			in.readFully(buffer, 0, n);
+			out.write(buffer, 0, n);
+			left -= n;
+		}
+		return out.toByteArray();
 	}
 
 	private static W3gReplay parse(final byte[] bytes, final String version, final long length,

@@ -227,7 +227,8 @@ final class CUnitDamage {
 			}
 			final CUnitAttackDamageTakenModificationListenerDamageModResult result = new CUnitAttackDamageTakenModificationListenerDamageModResult(
 					damage, bonusDamage);
-			for (final CUnitAttackDamageTakenModificationListener listener : self.damageTakenModificationListeners) {
+			for (final CUnitAttackDamageTakenModificationListener listener : new ArrayList<>(
+					self.damageTakenModificationListeners)) {
 				listener.onDamage(simulation, source, self, flags, attackType, damageType, result);
 			}
 

@@ -29,6 +29,8 @@ final class PooledSounds {
 	private static final String TAG = "Warsmash";
 
 	private static PooledSounds instance;
+	// Set while the game is off the screen, which a sound that finishes decoding then must respect.
+	private static boolean inBackground;
 
 	private final SoundPool pool;
 	private final SparseArray<PooledSound> loading = new SparseArray<>();
@@ -46,6 +48,7 @@ final class PooledSounds {
 
 	/** Pauses every sound with the activity, as the backend does with its own. */
 	static synchronized void pauseAll() {
+		inBackground = true;
 		if (instance != null) {
 			instance.pool.autoPause();
 		}
@@ -53,6 +56,7 @@ final class PooledSounds {
 	}
 
 	static synchronized void resumeAll() {
+		inBackground = false;
 		if (instance != null) {
 			instance.pool.autoResume();
 		}
@@ -74,7 +78,7 @@ final class PooledSounds {
 			synchronized (this) {
 				this.streamedSounds++;
 			}
-			return new StreamedSound(this, path);
+			return new StreamedSound(this, path, format.seconds);
 		}
 		synchronized (this) {
 			final int sampleId = this.pool.load(path, 1);
@@ -122,6 +126,14 @@ final class PooledSounds {
 		if (sound != null) {
 			sound.loaded(ok);
 		}
+		if (!ok) {
+			// A sample that did not decode still holds its slot in the pool and its share of the bytes counted.
+			unload(sampleId);
+		}
+	}
+
+	static synchronized boolean isInBackground() {
+		return inBackground;
 	}
 
 	synchronized long nextPlayId() {
@@ -194,6 +206,10 @@ final class PooledSounds {
 			}
 			if (play.paused) {
 				this.pool.pause(play.streamId);
+			}
+			else if (isInBackground()) {
+				// autoPause only holds what played when it was called, and autoResume lets go of the same.
+				this.pool.autoPause();
 			}
 			return true;
 		}

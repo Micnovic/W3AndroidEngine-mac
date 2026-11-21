@@ -88,7 +88,7 @@ public class EngineSettings {
 
 	/** Written beside the file first, as the engine does, so that a full disk cannot take the old settings. */
 	private void save() {
-		final File partial = new File(this.options.getParentFile(), this.options.getName() + ".tmp");
+		final File partial = partialOf(this.options);
 		try {
 			this.options.getParentFile().mkdirs();
 			try (DataOutputStream out = new DataOutputStream(
@@ -226,7 +226,7 @@ public class EngineSettings {
 				lines.add(at, entry);
 			}
 		}
-		final File partial = new File(this.ini.getAbsoluteFile().getParentFile(), this.ini.getName() + ".part");
+		final File partial = partialOf(this.ini);
 		try {
 			Files.write(partial.toPath(), lines, StandardCharsets.UTF_8);
 			replace(partial, this.ini);
@@ -235,6 +235,15 @@ public class EngineSettings {
 			LauncherLog.e("Unable to write " + this.ini, e);
 			partial.delete();
 		}
+	}
+
+	/**
+	 * A name of its own for every write: the engine and other launcher pages write beside the same files, and a shared
+	 * temporary name lets two writers overwrite each other's half-written data before the rename.
+	 */
+	static File partialOf(final File target) {
+		return new File(target.getAbsoluteFile().getParentFile(),
+				target.getName() + "." + Thread.currentThread().getId() + "." + System.nanoTime() + ".part");
 	}
 
 	/** File.renameTo does not replace an existing file on Windows, which would lose every change after the first. */

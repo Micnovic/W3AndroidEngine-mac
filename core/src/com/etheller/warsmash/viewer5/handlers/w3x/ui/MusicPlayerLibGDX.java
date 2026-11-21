@@ -14,6 +14,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundMixer;
 
 public class MusicPlayerLibGDX implements MusicPlayer {
 	private static final float GAME_MSECS_DIVISOR = 1000f;
+	private static final long RETRY_NANOS = 1500000000L;
 	private String[] currentPaths;
 	// Only the track that plays is open: every open track holds a decoder (a MediaPlayer on Android) until disposed.
 	private Music currentMusic;
@@ -22,12 +23,20 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 	private boolean currentMusicRandomizeIndex;
 	// The map music starts with the game, as soon as the map script has named it.
 	private boolean currentMusicActive = true;
+	// A track that does not start (or stops at once) is not retried every frame: the next try waits, each one
+	// moves on in the list, and a list where nothing plays goes quiet.
+	private long nextStartNanos;
+	private boolean currentMusicStarted;
+	private int failedStarts;
 	private final DataSource dataSource;
 	private final DataTable musicSLK;
 	private float volume = 1.0f;
 	private String defaultMusicField;
 	private boolean defaultMusicRandom;
 	private int defaultMusicIndex;
+	private boolean pausedByFocus;
+	private boolean playingBeforeFocusLoss;
+	private boolean playOnce;
 
 	public MusicPlayerLibGDX(DataSource dataSource, DataTable musicSLK) {
 		this.dataSource = dataSource;
@@ -35,19 +44,66 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 	}
 
 	@Override
+	public void setPausedByFocus(final boolean paused) {
+		if (paused == this.pausedByFocus) {
+			return;
+		}
+		this.pausedByFocus = paused;
+		try {
+			if (paused) {
+				this.playingBeforeFocusLoss = (this.currentMusic != null) && this.currentMusic.isPlaying();
+				if (this.playingBeforeFocusLoss) {
+					this.currentMusic.pause();
+				}
+			}
+			else if (this.playingBeforeFocusLoss && (this.currentMusic != null)) {
+				this.playingBeforeFocusLoss = false;
+				this.currentMusic.play();
+			}
+		}
+		catch (final RuntimeException exc) {
+			Log.error(exc);
+		}
+	}
+
+	@Override
 	public void update() {
+		// A track held for the lost focus is not a finished one: the next must not start over it.
+		if (this.pausedByFocus) {
+			return;
+		}
 		if (this.currentMusicActive) {
 			if (this.currentPaths == null) {
 				playDefaultMusic();
 			}
-			if ((this.currentPaths != null) && (this.currentPaths.length > 0) && (this.currentMusic != null)
-					&& !this.currentMusic.isPlaying()) {
-				if (this.currentMusicRandomizeIndex) {
-					startTrack((int) (Math.random() * this.currentPaths.length), 0);
+			if ((this.currentPaths == null) || (this.currentPaths.length == 0)
+					|| (this.failedStarts >= Math.max(2, this.currentPaths.length))) {
+				return;
+			}
+			if ((this.currentMusic != null) && this.currentMusic.isPlaying()) {
+				this.currentMusicStarted = true;
+				this.failedStarts = 0;
+				return;
+			}
+			if (this.playOnce && this.currentMusicStarted) {
+				playDefaultMusic();
+				return;
+			}
+			if (System.nanoTime() - this.nextStartNanos < 0) {
+				return;
+			}
+			if (!this.currentMusicStarted) {
+				this.failedStarts++;
+				if (this.failedStarts >= Math.max(2, this.currentPaths.length)) {
+					closeCurrentMusic();
+					return;
 				}
-				else {
-					startTrack((this.currentMusicIndex + 1) % this.currentPaths.length, 0);
-				}
+			}
+			if (this.currentMusicRandomizeIndex) {
+				startTrack((int) (Math.random() * this.currentPaths.length), 0);
+			}
+			else {
+				startTrack((this.currentMusicIndex + 1) % this.currentPaths.length, 0);
 			}
 		}
 	}
@@ -104,7 +160,14 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 	}
 
 	@Override
+	public void playMusicOnce(final String musicField) {
+		playMusicEx(musicField, false, 0, 0, -1);
+		this.playOnce = true;
+	}
+
+	@Override
 	public Music playMusicEx(String musicField, boolean random, int index, int fromMSecs, int fadeInMSecs) {
+		this.playOnce = false;
 		stopMusic();
 		if (musicField == null) {
 			return null;
@@ -129,6 +192,7 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 		}
 		this.currentPaths = musicPaths.toArray(new String[musicPaths.size()]);
 		this.currentMusicRandomizeIndex = random;
+		this.failedStarts = 0;
 		if (this.currentPaths.length == 0) {
 			closeCurrentMusic();
 			return null;
@@ -146,6 +210,8 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 	 */
 	private Music startTrack(final int index, final int fromMSecs) {
 		this.currentMusicIndex = index;
+		this.currentMusicStarted = false;
+		this.nextStartNanos = System.nanoTime() + RETRY_NANOS;
 		final String path = this.currentPaths[index];
 		if ((this.currentMusic != null) && path.equals(this.currentMusicPath)) {
 			this.currentMusic.stop();
@@ -163,9 +229,16 @@ public class MusicPlayerLibGDX implements MusicPlayer {
 			this.currentMusicPath = path;
 			this.currentMusic.setVolume(this.volume * CSoundMixer.audible().musicScale());
 		}
-		this.currentMusic.play();
-		if (fromMSecs != 0) {
-			this.currentMusic.setPosition(fromMSecs / GAME_MSECS_DIVISOR);
+		try {
+			this.currentMusic.play();
+			if (fromMSecs != 0) {
+				this.currentMusic.setPosition(fromMSecs / GAME_MSECS_DIVISOR);
+			}
+		}
+		catch (final RuntimeException exc) {
+			Log.error(exc);
+			closeCurrentMusic();
+			return null;
 		}
 		return this.currentMusic;
 	}

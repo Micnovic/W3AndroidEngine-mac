@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.replay;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -23,7 +24,7 @@ import java.util.zip.ZipException;
  * header (uncompressed, so a replay list reads it without the body): see {@link CReplayHeader}
  * body: a deflate stream of records, each a type byte and then
  *   COMMAND  varint step, byte player, varint length, the command's bytes (CPlayerCommandCodec)
- *   CHECKSUM varint step, int checksum of the game after that step
+ *   CHECKSUM varint step, int checksum of the game; format 8 on, the one made in the steps up to that step
  *   CACHE    varint step, varint length + 1 (0: no file), the bytes the game caches were read from
  *   LOCAL    varint step, float: a value only this player's program has (the camera) as a script read it
  *   END      varint step the game ended at
@@ -35,12 +36,13 @@ import java.util.zip.ZipException;
 public final class CReplay {
 	public static final int MAGIC = ('W' << 24) | ('S' << 16) | ('R' << 8) | 'P';
 	/** A replay of another format version is refused rather than played wrong. */
-	public static final int FORMAT_VERSION = 6;
+	public static final int FORMAT_VERSION = 8;
 	/**
-	 * Format 4 has no keyboard and mouse mask in its header, formats before 6 no authorship line; the rest is the
-	 * same, so they still play.
+	 * Format 4 has no keyboard and mouse mask in its header, formats before 6 no authorship line, formats before 7 no campaign game mark (the map's folder tells), and the checksums of formats before 8 are made
+	 * all at once at their step, not spread over the steps before it; the rest is the same, so they still play.
 	 */
 	static final int OLDEST_FORMAT_VERSION = 4;
+	private static final int MAX_RECORD_BYTES = 1 << 26;
 
 	static final int END = 0;
 	static final int COMMAND = 1;
@@ -150,8 +152,7 @@ public final class CReplay {
 					case COMMAND: {
 						final int tick = readVarInt(in);
 						final int player = in.readUnsignedByte();
-						final byte[] bytes = new byte[readVarInt(in)];
-						in.readFully(bytes);
+						final byte[] bytes = readBytes(in, recordLength(readVarInt(in)));
 						commands.add(new Command(tick, player, bytes));
 						break;
 					}
@@ -163,8 +164,10 @@ public final class CReplay {
 						final int length = readVarInt(in) - 1;
 						byte[] bytes = null;
 						if (length >= 0) {
-							bytes = new byte[length];
-							in.readFully(bytes);
+							bytes = readBytes(in, recordLength(length));
+						}
+						else if (length < -1) {
+							throw new CReplayException("broken length");
 						}
 						cacheReads.add(new CacheRead(tick, bytes));
 						break;
@@ -190,6 +193,38 @@ public final class CReplay {
 			inflater.end();
 		}
 		return new CReplay(header, commands, checksums, cacheReads, localValues, endTick);
+	}
+
+	/** A damaged length must not become an allocation of that size; nothing a game records comes near this. */
+	private static int recordLength(final int length) throws CReplayException {
+		if ((length < 0) || (length > MAX_RECORD_BYTES)) {
+			throw new CReplayException("broken record length " + length);
+		}
+		return length;
+	}
+
+	private static final int READ_CHUNK = 1 << 16;
+
+	/** The next {@code length} bytes; a damaged length runs out of data instead of asking for that much memory. */
+	static byte[] readBytes(final DataInputStream in, final int length) throws IOException {
+		if (length < 0) {
+			throw new CReplayException("broken length");
+		}
+		if (length <= READ_CHUNK) {
+			final byte[] bytes = new byte[length];
+			in.readFully(bytes);
+			return bytes;
+		}
+		final ByteArrayOutputStream out = new ByteArrayOutputStream(READ_CHUNK);
+		final byte[] buffer = new byte[READ_CHUNK];
+		int left = length;
+		while (left > 0) {
+			final int n = Math.min(left, READ_CHUNK);
+			in.readFully(buffer, 0, n);
+			out.write(buffer, 0, n);
+			left -= n;
+		}
+		return out.toByteArray();
 	}
 
 	static int readVarInt(final DataInputStream in) throws IOException {

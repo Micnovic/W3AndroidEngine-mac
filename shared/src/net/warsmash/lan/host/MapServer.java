@@ -83,11 +83,12 @@ public final class MapServer {
 
 	/**
 	 * Starts (or restarts) sending to a participant from {@code offset}. Returns false if there is nothing to send or
-	 * the file no longer has the announced size.
+	 * the file no longer has the announced size. A request at the end is refused: the receiver has every byte and
+	 * never asks, and a chunk without data is a protocol violation for it.
 	 */
 	public boolean serve(final int participantId, final LanConnection conn, final int offset) {
 		cancel(participantId);
-		if (this.file == null || offset < 0 || offset > this.size) {
+		if (this.file == null || offset < 0 || offset >= this.size) {
 			return false;
 		}
 		final RandomAccessFile raf;
@@ -168,7 +169,6 @@ public final class MapServer {
 			t.waiting = true;
 			return;
 		}
-		boolean sent = false;
 		try {
 			for (int i = 0; i < CHUNKS_PER_STEP && pending < HIGH_WATER && t.offset < this.size; i++) {
 				final int n = (int) Math.min(t.buffer.length, this.size - t.offset);
@@ -176,12 +176,8 @@ public final class MapServer {
 				t.conn.send(new LanMessages.MapChunk((int) t.offset, this.size, Arrays.copyOf(t.buffer, n)));
 				t.offset += n;
 				pending += n;
-				sent = true;
 			}
 			if (t.offset >= this.size) {
-				if (!sent) {
-					t.conn.send(new LanMessages.MapChunk((int) t.offset, this.size, new byte[0]));
-				}
 				report(t, true);
 				end(t);
 				return;

@@ -58,6 +58,17 @@ public final class SessionResources {
 		return resource;
 	}
 
+	/** Disposes a tracked resource before its scope ends, so that the scope neither keeps it nor disposes it again. */
+	public static synchronized void release(final Disposable resource) {
+		if (resource == null) {
+			return;
+		}
+		for (final Scope scope : OPEN) {
+			scope.resources.remove(resource);
+		}
+		resource.dispose();
+	}
+
 	/** Stops tracking into this scope; what it has is kept for its dispose. */
 	public static synchronized void end(final Scope scope) {
 		OPEN.remove(scope);

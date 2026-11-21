@@ -49,14 +49,15 @@ public class CPlayerSelectionTest {
 	}
 
 	@Test
-	public void commandAppliedTwiceFiresOnce() {
+	public void clickOnSelectedUnitSelectsItAgainButDeselectsOnce() {
 		final CPlayerSelection selection = new CPlayerSelection();
 		final CUnit a = unit();
 		selection.apply(list(), list(a), this.recorder);
 		selection.apply(list(), list(a), this.recorder);
+		assertEquals(list(a), selection.getUnits());
 		selection.apply(list(a), list(), this.recorder);
 		selection.apply(list(a), list(), this.recorder);
-		assertEquals(List.of(event(true, a), event(false, a)), this.events);
+		assertEquals(List.of(event(true, a), event(true, a), event(false, a)), this.events);
 		assertFalse(selection.isSelected(a));
 	}
 

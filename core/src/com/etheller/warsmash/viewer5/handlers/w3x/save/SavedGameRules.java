@@ -294,7 +294,7 @@ final class SavedGameRules implements SavedObjectGraph.Rules {
 		return null;
 	}
 
-	private static boolean isNameable(final Class<?> type) {
+	static boolean isNameable(final Class<?> type) {
 		Boolean nameable = NAMEABLE_CLASSES.get(type);
 		if (nameable == null) {
 			nameable = JassInstruction.class.isAssignableFrom(type) || CodeJassValue.class.isAssignableFrom(type)
@@ -307,7 +307,7 @@ final class SavedGameRules implements SavedObjectGraph.Rules {
 		return nameable;
 	}
 
-	private static boolean isReplaceable(final Class<?> type) {
+	static boolean isReplaceable(final Class<?> type) {
 		Boolean replaceable = REPLACEABLE_CLASSES.get(type);
 		if (replaceable == null) {
 			replaceable = JassThread.class.isAssignableFrom(type) || CodeJassValue.class.isAssignableFrom(type)
@@ -343,7 +343,7 @@ final class SavedGameRules implements SavedObjectGraph.Rules {
 		return dropped;
 	}
 
-	private static boolean isDroppedClass(final Class<?> type) {
+	static boolean isDroppedClass(final Class<?> type) {
 		if (CTimerDialog.class.isAssignableFrom(type)) {
 			return false;
 		}
@@ -485,9 +485,7 @@ final class SavedGameRules implements SavedObjectGraph.Rules {
 			return this.viewer.getUiSounds().getSound(name.substring(8));
 		}
 		if (name.startsWith("filesound:")) {
-			final Sound sound = UnitSound.createSound(this.viewer.mapMpq, name.substring(10));
-			this.viewer.rememberFileSound(sound, name.substring(10));
-			return sound;
+			return this.viewer.getRestoredFileSound(name.substring(10));
 		}
 		final int colon = name.indexOf(':');
 		if (colon > 0) {

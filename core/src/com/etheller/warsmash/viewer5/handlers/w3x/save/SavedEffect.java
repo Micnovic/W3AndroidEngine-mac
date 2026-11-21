@@ -23,6 +23,14 @@ public final class SavedEffect extends AllocatedHandle implements SimulationRend
 	private float y;
 	private float z;
 	private float yaw;
+	private float pitch;
+	private float roll;
+	@SavedDefault("1")
+	private float scaleX = 1;
+	@SavedDefault("1")
+	private float scaleY = 1;
+	@SavedDefault("1")
+	private float scaleZ = 1;
 	private boolean ended;
 	private LiveRenderObject<RenderSpellEffect> liveObject;
 
@@ -48,10 +56,15 @@ public final class SavedEffect extends AllocatedHandle implements SimulationRend
 		saved.z = effect.getLocalZ();
 		if (saved.widget == null) {
 			// Triggers may have moved or turned it since it was made.
-			saved.x = effect.getModelInstance().localLocation.x;
-			saved.y = effect.getModelInstance().localLocation.y;
+			saved.x = effect.getPlacedX();
+			saved.y = effect.getPlacedY();
 			saved.yaw = effect.getYaw();
 		}
+		saved.pitch = effect.getScriptPitch();
+		saved.roll = effect.getScriptRoll();
+		saved.scaleX = effect.getSavedScaleX();
+		saved.scaleY = effect.getSavedScaleY();
+		saved.scaleZ = effect.getSavedScaleZ();
 		saved.ended = !effect.isLasting();
 		return saved;
 	}
@@ -78,6 +91,12 @@ public final class SavedEffect extends AllocatedHandle implements SimulationRend
 			effect.setAnimations(RenderSpellEffect.STAND_THEN_DEATH, false);
 			if (this.widget == null) {
 				effect.setHeight(this.z);
+				if ((this.pitch != 0) || (this.roll != 0)) {
+					effect.setScriptOrientation(this.yaw, this.pitch, this.roll);
+				}
+			}
+			if ((this.scaleX != 1) || (this.scaleY != 1) || (this.scaleZ != 1)) {
+				effect.setScriptMatrixScale(this.scaleX, this.scaleY, this.scaleZ);
 			}
 		}
 	}

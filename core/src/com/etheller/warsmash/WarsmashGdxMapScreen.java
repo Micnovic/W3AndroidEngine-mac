@@ -81,6 +81,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRace;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CMapDifficulty;
+import com.etheller.warsmash.launcher.DataFolderCheck;
 import com.etheller.warsmash.launcher.GameResult;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameExit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.campaign.CGameCache;
@@ -158,6 +159,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 	@Override
 	public void show() {
 		final long showStart = System.nanoTime();
+		ImageUtils.beginUiTextureRecording();
 		final ByteBuffer tempByteBuffer = ByteBuffer.allocateDirect(4);
 		tempByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 		final IntBuffer temp = tempByteBuffer.asIntBuffer();
@@ -195,7 +197,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		Gdx.gl30.glClearColor(0.0f, 0.0f, 0.0f, 1); // TODO remove white background
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 
-		final Scene portraitScene = this.viewer.addSimpleScene();
+		final Scene portraitScene = this.viewer.addPortraitScene();
 		this.uiScene = this.viewer.addSimpleScene();
 		this.uiScene.alpha = true;
 		if (ENABLE_AUDIO) {
@@ -330,6 +332,9 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		modalContentInstance.setScene(this.uiScene);
 		final long t1 = System.nanoTime();
 		this.meleeUI.main();
+		if (this.viewer.isScriptSpeakingLines()) {
+			this.baseMeleeUI.prepareLipSync();
+		}
 		final long t2 = System.nanoTime();
 		toggleUI.setCurrentUI(0);
 
@@ -358,6 +363,14 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 				SavedGame.loadFailed(savedGame, e);
 				Gdx.app.postRunnable(this.baseMeleeUI::quitMission);
 			}
+			catch (final RuntimeException e) {
+				// Past the point where the map's own state was replaced nothing can be started again, so the game
+				// leaves for the menu, which tells that the save could not be loaded.
+				Log.error("Could not finish loading the saved game " + savedGame.name());
+				Log.error(e);
+				SavedGame.loadFailed(savedGame, new IOException("Could not load the saved game", e));
+				Gdx.app.postRunnable(this.baseMeleeUI::quitMission);
+			}
 		}
 		else if (this.commonEnv.getScriptError() != null) {
 			// The original game shows an error for a map whose script does not compile and does not play it.
@@ -370,7 +383,13 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		}
 		final long t4 = System.nanoTime();
 		this.viewer.preloadSoundsAtStart(this.baseMeleeUI.getInterfaceSoundKeys());
+		this.menuScreen.releaseMenuTemplates();
+		this.menuScreen.releaseLoadingScreen();
 		DataErrors.logReport("map start");
+		ImageUtils.endUiTextureRecording();
+		if ((savedGame == null) && !this.scriptFailed) {
+			this.viewer.prepareFirstFrame();
+		}
 		PerfStats.showDone(showStart, t1, t2, t3, t4);
 	}
 
@@ -393,6 +412,8 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			final List<DataSourceDescriptor> dataSourcesList, final List<String> allCascPrefixes) {
 		final Element dataSourcesConfig = warsmashIni.get("DataSources");
 		final String language = GameLanguage.configured(warsmashIni);
+		GameLanguage.useForSkin(language);
+		GameLanguage.useInGame(warsmashIni);
 		for (int i = 0; i < dataSourcesConfig.size(); i++) {
 			final String numberText = (i < 10 ? "0" : "") + i;
 			final String type = dataSourcesConfig.getField("Type" + numberText);
@@ -414,7 +435,11 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 			case "CASC": {
 				final String prefixes = dataSourcesConfig.getField("Prefixes" + numberText);
 				final String product = dataSourcesConfig.getField("Product" + numberText);
-				final boolean oldFormat = dataSourcesConfig.getFieldValue("OldFormat" + numberText) == 1;
+				// An ini without the key (written before 1.30 was told apart) reads the layout from the install.
+				final String oldFormatField = dataSourcesConfig.getField("OldFormat" + numberText);
+				final boolean oldFormat = oldFormatField.isEmpty()
+						? DataFolderCheck.usesOldCascFormat(new File(path))
+						: dataSourcesConfig.getFieldValue("OldFormat" + numberText) == 1;
 				final List<String> parsedPrefixes = new ArrayList<>(
 						GameLanguage.prefixes(Arrays.asList(prefixes.split(",")), language));
 				allCascPrefixes.addAll(parsedPrefixes);
@@ -429,12 +454,18 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		}
 	}
 
-	/** The language folder of the chosen language over the folder of the data's own, when the folder has one. */
-	private static void addLanguageFolder(final List<DataSourceDescriptor> sources, final String path,
+	/**
+	 * The language folder of the chosen language over the folder of the data's own, when the folder has one: a sibling
+	 * of a "_locales\xx.w3mod" folder, or the "_locales" folder of a flat Classic folder.
+	 */
+	static void addLanguageFolder(final List<DataSourceDescriptor> sources, final String path,
 			final String language) {
-		final String sibling = GameLanguage.siblingFolder(path, language);
-		if ((sibling != null) && new File(sibling).isDirectory()) {
-			sources.add(new FolderDataSourceDescriptor(sibling));
+		String layer = GameLanguage.siblingFolder(path, language);
+		if (layer == null) {
+			layer = GameLanguage.childFolder(path, language);
+		}
+		if ((layer != null) && new File(layer).isDirectory()) {
+			sources.add(new FolderDataSourceDescriptor(layer));
 		}
 	}
 
@@ -457,6 +488,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 
 	@Override
 	public void render(final float delta) {
+		PerfStats.beginFrame();
 		this.uiCamera.update();
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 		// Like the game, which runs slower on a slow frame instead of catching up, the interface's fades do not skip
@@ -465,13 +497,21 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		final float deltaTime = Math.min(Gdx.graphics.getDeltaTime(), MAX_INTERFACE_FRAME_TIME);
 		Gdx.gl30.glBindVertexArray(WarsmashGdxGame.VAO);
 		this.meleeUI.update(deltaTime);
+		PerfStats.end(PerfStats.Section.MELEE_UI);
 		this.viewer.updateAndRender();
 
 		WarsmashGdxGame.leaveViewerState(this.viewer.webGL);
 
 		Gdx.gl30.glActiveTexture(GL30.GL_TEXTURE0);
 		GammaOverlay.render(this.batch);
+		PerfStats.end(PerfStats.Section.FRAME_END);
+		if (PerfStats.finishWanted()) {
+			Gdx.gl30.glFinish();
+			PerfStats.end(PerfStats.Section.GPU_WAIT);
+		}
 		FrameLimiter.limit();
+		PerfStats.end(PerfStats.Section.LIMITER);
+		PerfStats.renderEnd();
 	}
 
 	private void renderLibGDXContent(final boolean modal) {
@@ -906,6 +946,9 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 
 	@Override
 	public void pause() {
+		if (this.viewer != null) {
+			this.viewer.scriptUiState.setClientActive(false);
+		}
 		// A single player game waits while the app is away from the screen; a network game cannot stop for one
 		// player. The desktop backend calls this whenever the window loses focus, and a game there keeps running.
 		if ((Gdx.app.getType() == ApplicationType.Android) && !this.viewer.isNetworkGame()) {
@@ -916,7 +959,10 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 
 	@Override
 	public void resume() {
-		if (this.viewer.isGamePaused(War3MapViewer.PauseSource.BACKGROUND)) {
+		if (this.viewer != null) {
+			this.viewer.scriptUiState.setClientActive(true);
+		}
+		if ((this.viewer != null) && this.viewer.isGamePaused(War3MapViewer.PauseSource.BACKGROUND)) {
 			this.viewer.setGamePaused(War3MapViewer.PauseSource.BACKGROUND, false);
 			Gdx.app.log("Warsmash", "Game resumed at step " + gameStep());
 		}

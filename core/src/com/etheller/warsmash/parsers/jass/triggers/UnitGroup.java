@@ -2,12 +2,15 @@ package com.etheller.warsmash.parsers.jass.triggers;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.ListIterator;
+import java.util.Map;
 import java.util.Spliterator;
 import java.util.function.Consumer;
 
 import com.etheller.interpreter.ast.util.CAllocatedHandle;
+import com.etheller.warsmash.viewer5.handlers.w3x.save.SavedTransient;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 
 /**
@@ -15,10 +18,29 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
  * CountUnitsInGroup, FirstOfGroup and IsUnitInGroup no longer see it. Removed members are dropped on read.
  */
 public class UnitGroup extends ArrayList<CUnit> implements CAllocatedHandle {
+	/**
+	 * Counts the units removed from the game. Only a change signal: it lets a group skip a pass over its members that
+	 * could not find anything new; what a pass finds depends on the members alone.
+	 */
+	private static long removalEpoch = 1;
+
+	public static void unitRemoved() {
+		removalEpoch++;
+	}
+
 	private int handleId;
 	private boolean handleReleased;
 	private boolean handleIdKept;
 	private int referenceCount;
+	/** How many times each unit is in the list, for contains; read only by key, never iterated. */
+	@SavedTransient
+	private Map<CUnit, Integer> counts;
+	/** The list's modCount the counts match; any change made around the overrides below makes them stale. */
+	@SavedTransient
+	private int countsModCount;
+	/** The removal epoch of the last pass that dropped removed units; 0 when none is known to be current. */
+	@SavedTransient
+	private long prunedEpoch;
 
 	public UnitGroup(int handleId) {
 		this.handleId = handleId;
@@ -82,8 +104,104 @@ public class UnitGroup extends ArrayList<CUnit> implements CAllocatedHandle {
 				}
 			}
 		}
+		final boolean indexed = countsValid();
 		super.add(index, unit);
+		if ((unit != null) && unit.isRemovedFromGame()) {
+			this.prunedEpoch = 0;
+		}
+		if (indexed) {
+			increment(unit);
+			this.countsModCount = this.modCount;
+		}
 		return true;
+	}
+
+	@Override
+	public void add(final int index, final CUnit unit) {
+		this.prunedEpoch = 0;
+		super.add(index, unit);
+	}
+
+	@Override
+	public boolean addAll(final int index, final Collection<? extends CUnit> units) {
+		this.prunedEpoch = 0;
+		return super.addAll(index, units);
+	}
+
+	private boolean countsValid() {
+		return (this.counts != null) && (this.countsModCount == this.modCount);
+	}
+
+	private void increment(final CUnit unit) {
+		this.counts.merge(unit, 1, Integer::sum);
+	}
+
+	private void decrement(final Object unit) {
+		this.counts.computeIfPresent((CUnit) unit, (key, count) -> (count > 1) ? count - 1 : null);
+	}
+
+	private Map<CUnit, Integer> counts() {
+		if (!countsValid()) {
+			this.counts = new HashMap<>();
+			for (int i = 0; i < super.size(); i++) {
+				increment(super.get(i));
+			}
+			this.countsModCount = this.modCount;
+		}
+		return this.counts;
+	}
+
+	@Override
+	public boolean remove(final Object o) {
+		if (!counts().containsKey(o)) {
+			return false;
+		}
+		super.remove(o);
+		decrement(o);
+		this.countsModCount = this.modCount;
+		return true;
+	}
+
+	@Override
+	public CUnit remove(final int index) {
+		final boolean indexed = countsValid();
+		final CUnit removed = super.remove(index);
+		if (indexed) {
+			decrement(removed);
+			this.countsModCount = this.modCount;
+		}
+		return removed;
+	}
+
+	@Override
+	public boolean removeAll(final Collection<?> units) {
+		if (units == this) {
+			final boolean changed = !super.isEmpty();
+			clear();
+			return changed;
+		}
+		counts();
+		final boolean changed = super.removeIf(units::contains);
+		if (changed) {
+			for (final Object unit : units) {
+				this.counts.remove(unit);
+			}
+			this.countsModCount = this.modCount;
+		}
+		return changed;
+	}
+
+	@Override
+	public void clear() {
+		super.clear();
+		this.counts = null;
+	}
+
+	@Override
+	public CUnit set(final int index, final CUnit unit) {
+		this.counts = null;
+		this.prunedEpoch = 0;
+		return super.set(index, unit);
 	}
 
 	public static boolean precedes(final CUnit unit, final CUnit other) {
@@ -112,7 +230,23 @@ public class UnitGroup extends ArrayList<CUnit> implements CAllocatedHandle {
 	}
 
 	private void dropRemovedUnits() {
-		removeIf(unit -> (unit != null) && unit.isRemovedFromGame());
+		if (this.prunedEpoch == removalEpoch) {
+			return;
+		}
+		this.prunedEpoch = removalEpoch;
+		final boolean indexed = countsValid();
+		final boolean changed = super.removeIf(unit -> {
+			if ((unit != null) && unit.isRemovedFromGame()) {
+				if (indexed) {
+					decrement(unit);
+				}
+				return true;
+			}
+			return false;
+		});
+		if (changed && indexed) {
+			this.countsModCount = this.modCount;
+		}
 	}
 
 	@Override
@@ -136,13 +270,13 @@ public class UnitGroup extends ArrayList<CUnit> implements CAllocatedHandle {
 	@Override
 	public boolean contains(final Object o) {
 		dropRemovedUnits();
-		return super.contains(o);
+		return counts().containsKey(o);
 	}
 
 	@Override
 	public int indexOf(final Object o) {
 		dropRemovedUnits();
-		return super.indexOf(o);
+		return counts().containsKey(o) ? super.indexOf(o) : -1;
 	}
 
 	@Override

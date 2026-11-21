@@ -35,7 +35,7 @@ public class CAbilityTypeReturnResources extends CAbilityType<CAbilityTypeReturn
 	@Override
 	public void setLevel(final CSimulation game, final CUnit unit, final CLevelingAbility existingAbility, final int level) {
 
-		final CAbilityTypeReturnResourcesLevelData levelData = getLevelData(level - 1);
+		final CAbilityTypeReturnResourcesLevelData levelData = getLevelData(existingAbility, level - 1);
 		final CAbilityReturnResources heroAbility = (CAbilityReturnResources) existingAbility;
 
 		final EnumSet<ResourceType> acceptedResourceTypes = EnumSet.noneOf(ResourceType.class);

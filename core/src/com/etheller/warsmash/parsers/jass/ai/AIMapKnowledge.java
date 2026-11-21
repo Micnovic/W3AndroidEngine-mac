@@ -3,9 +3,10 @@ package com.etheller.warsmash.parsers.jass.ai;
 import static com.etheller.warsmash.parsers.jass.ai.AIUnits.distance;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
@@ -22,7 +23,30 @@ final class AIMapKnowledge {
 	private AIMapKnowledge() {
 	}
 
-	static CUnit getCreepCamp(final AIController ai, final int minLevel, final int maxLevel, final boolean flyersOk) {
+	/** A group of creeps standing within linking distance of each other, as of one tick. */
+	static final class Camp {
+		final List<CUnit> members = new ArrayList<>();
+		int level;
+		boolean flyers;
+		CUnit strongest;
+		float x;
+		float y;
+	}
+
+	private static long cellKey(final int cx, final int cy) {
+		return (((long) cx) << 32) ^ (cy & 0xFFFFFFFFL);
+	}
+
+	private static int cellOf(final float v) {
+		return (int) Math.floor(v / CAMP_LINK_DISTANCE);
+	}
+
+	/** The camps do not change within a tick, so the grouping is made once per tick and reused. */
+	private static List<Camp> campsOf(final AIController ai) {
+		final int tick = ai.simulation.getGameTurnTick();
+		if ((ai.campCache != null) && (ai.campCacheTick == tick)) {
+			return ai.campCache;
+		}
 		final List<CUnit> creeps = new ArrayList<>();
 		for (final CUnit unit : ai.simulation.getUnits()) {
 			if (!unit.isDead() && !unit.isHidden() && ai.simulation.isNeutralAggressive(unit.getPlayerIndex())
@@ -30,65 +54,114 @@ final class AIMapKnowledge {
 				creeps.add(unit);
 			}
 		}
-		final float homeX = ai.attackCaptain.getHomeX();
-		final float homeY = ai.attackCaptain.getHomeY();
-		final Set<CUnit> visited = new HashSet<>();
-		CUnit best = null;
-		float bestDistance = Float.MAX_VALUE;
-		for (final CUnit seed : creeps) {
-			if (visited.contains(seed)) {
+		// Creeps are bucketed by cell so that linking only looks at the neighbouring cells; candidates are still
+		// visited in list order, so the groups come out exactly as an all-pairs scan would make them.
+		final Map<Long, List<Integer>> cells = new HashMap<>();
+		for (int i = 0; i < creeps.size(); i++) {
+			final CUnit creep = creeps.get(i);
+			cells.computeIfAbsent(cellKey(cellOf(creep.getX()), cellOf(creep.getY())), (key) -> new ArrayList<>())
+					.add(i);
+		}
+		final boolean[] visited = new boolean[creeps.size()];
+		final List<Camp> camps = new ArrayList<>();
+		final List<Integer> candidates = new ArrayList<>();
+		for (int seed = 0; seed < creeps.size(); seed++) {
+			if (visited[seed]) {
 				continue;
 			}
-			final List<CUnit> camp = new ArrayList<>();
-			camp.add(seed);
-			visited.add(seed);
+			final Camp result = new Camp();
+			final List<CUnit> camp = result.members;
+			camp.add(creeps.get(seed));
+			visited[seed] = true;
 			for (int i = 0; i < camp.size(); i++) {
 				final CUnit member = camp.get(i);
-				for (final CUnit other : creeps) {
-					if (!visited.contains(other) && (distance(member.getX(), member.getY(), other.getX(),
+				final int cx = cellOf(member.getX());
+				final int cy = cellOf(member.getY());
+				candidates.clear();
+				for (int dx = -1; dx <= 1; dx++) {
+					for (int dy = -1; dy <= 1; dy++) {
+						final List<Integer> cell = cells.get(cellKey(cx + dx, cy + dy));
+						if (cell != null) {
+							candidates.addAll(cell);
+						}
+					}
+				}
+				Collections.sort(candidates);
+				for (final int index : candidates) {
+					final CUnit other = creeps.get(index);
+					if (!visited[index] && (distance(member.getX(), member.getY(), other.getX(),
 							other.getY()) < CAMP_LINK_DISTANCE)) {
-						visited.add(other);
+						visited[index] = true;
 						camp.add(other);
 					}
 				}
 			}
-			int level = 0;
-			boolean flyers = false;
-			CUnit strongest = null;
 			float x = 0;
 			float y = 0;
 			for (final CUnit member : camp) {
-				level += member.getUnitType().getLevel();
-				flyers |= member.getUnitType().getMovementType() == PathingGrid.MovementType.FLY;
-				if ((strongest == null) || (member.getUnitType().getLevel() > strongest.getUnitType().getLevel())) {
-					strongest = member;
+				result.level += member.getUnitType().getLevel();
+				result.flyers |= member.getUnitType().getMovementType() == PathingGrid.MovementType.FLY;
+				if ((result.strongest == null)
+						|| (member.getUnitType().getLevel() > result.strongest.getUnitType().getLevel())) {
+					result.strongest = member;
 				}
 				x += member.getX();
 				y += member.getY();
 			}
-			x /= camp.size();
-			y /= camp.size();
-			boolean reachable = true;
-			for (final CUnit member : camp) {
-				reachable &= !ai.unreachable.contains(member);
-			}
-			if ((level < minLevel) || (level > maxLevel) || (flyers && !flyersOk) || !reachable
-					|| nearEnemyBase(ai, x, y)) {
+			result.x = x / camp.size();
+			result.y = y / camp.size();
+			camps.add(result);
+		}
+		ai.campCache = camps;
+		ai.campCacheTick = tick;
+		return camps;
+	}
+
+	static CUnit getCreepCamp(final AIController ai, final int minLevel, final int maxLevel, final boolean flyersOk) {
+		final float homeX = ai.attackCaptain.getHomeX();
+		final float homeY = ai.attackCaptain.getHomeY();
+		List<CUnit> enemyBuildings = null;
+		CUnit best = null;
+		float bestDistance = Float.MAX_VALUE;
+		for (final Camp camp : campsOf(ai)) {
+			if ((camp.level < minLevel) || (camp.level > maxLevel) || (camp.flyers && !flyersOk)) {
 				continue;
 			}
-			final float d = distance(homeX, homeY, x, y);
+			boolean reachable = true;
+			for (final CUnit member : camp.members) {
+				reachable &= !ai.unreachable.contains(member);
+			}
+			if (!reachable) {
+				continue;
+			}
+			if (enemyBuildings == null) {
+				enemyBuildings = enemyBuildings(ai);
+			}
+			if (nearEnemyBase(enemyBuildings, camp.x, camp.y)) {
+				continue;
+			}
+			final float d = distance(homeX, homeY, camp.x, camp.y);
 			if (d < bestDistance) {
 				bestDistance = d;
-				best = strongest;
+				best = camp.strongest;
 			}
 		}
 		return best;
 	}
 
-	private static boolean nearEnemyBase(final AIController ai, final float x, final float y) {
+	private static List<CUnit> enemyBuildings(final AIController ai) {
+		final List<CUnit> buildings = new ArrayList<>();
 		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (!unit.isDead() && unit.isBuilding() && ai.isOpponent(unit.getPlayerIndex())
-					&& (distance(x, y, unit.getX(), unit.getY()) < 1500)) {
+			if (!unit.isDead() && unit.isBuilding() && ai.isOpponent(unit.getPlayerIndex())) {
+				buildings.add(unit);
+			}
+		}
+		return buildings;
+	}
+
+	private static boolean nearEnemyBase(final List<CUnit> buildings, final float x, final float y) {
+		for (final CUnit unit : buildings) {
+			if (distance(x, y, unit.getX(), unit.getY()) < 1500) {
 				return true;
 			}
 		}
@@ -105,15 +178,21 @@ final class AIMapKnowledge {
 	}
 
 	static CUnit getEnemyBase(final AIController ai) {
-		if ((ai.enemyBase == null) || ai.enemyBase.isDead()) {
+		// Measured: asked in the run that started the search, with no wait between, there is no answer yet.
+		if (ai.enemyBaseSearchTick == ai.simulation.getGameTurnTick()) {
+			return null;
+		}
+		if ((ai.enemyBase == null) || ai.isGone(ai.enemyBase)) {
 			ai.enemyBase = findEnemyBase(ai, -1);
 		}
 		return ai.enemyBase;
 	}
 
 	/**
+	 * Measured: the opponent's building nearest to our town, a town hall no better than any other; with none left,
+	 * one of its units.
+	 *
 	 * @param onlyPlayer -1 for the nearest opponent
-	 * @return the town hall nearest to that opponent's start location, else any of its buildings
 	 */
 	static CUnit findEnemyBase(final AIController ai, final int onlyPlayer) {
 		final AITown home = AITowns.getTown(ai, 0);
@@ -121,24 +200,27 @@ final class AIMapKnowledge {
 		final float hx = home == null ? start[0] : home.getX();
 		final float hy = home == null ? start[1] : home.getY();
 		CUnit best = null;
-		float bestScore = Float.MAX_VALUE;
+		float bestDistance = Float.MAX_VALUE;
+		CUnit bestUnit = null;
+		float bestUnitDistance = Float.MAX_VALUE;
 		for (final CUnit unit : ai.simulation.getUnits()) {
-			if (unit.isDead() || !unit.isBuilding() || !ai.isOpponent(unit.getPlayerIndex())
+			if (unit.isDead() || !ai.isOpponent(unit.getPlayerIndex())
 					|| ((onlyPlayer != -1) && (unit.getPlayerIndex() != onlyPlayer))) {
 				continue;
 			}
-			final float[] enemyStart = ai.simulation.getPlayer(unit.getPlayerIndex()).getStartLocation();
-			float score = distance(hx, hy, enemyStart[0], enemyStart[1])
-					+ distance(unit.getX(), unit.getY(), enemyStart[0], enemyStart[1]);
-			if (!unit.getClassifications().contains(CUnitClassification.TOWNHALL)) {
-				score += 3000;
+			final float d = distance(hx, hy, unit.getX(), unit.getY());
+			if (unit.isBuilding()) {
+				if (d < bestDistance) {
+					bestDistance = d;
+					best = unit;
+				}
 			}
-			if (score < bestScore) {
-				bestScore = score;
-				best = unit;
+			else if (!unit.isHidden() && (d < bestUnitDistance)) {
+				bestUnitDistance = d;
+				bestUnit = unit;
 			}
 		}
-		return best;
+		return best != null ? best : bestUnit;
 	}
 
 	static CUnit getEnemyExpansion(final AIController ai) {

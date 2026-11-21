@@ -6,6 +6,7 @@ import com.etheller.interpreter.ast.scope.trigger.TriggerBooleanExpression;
 import com.etheller.interpreter.ast.util.AllocatedHandle;
 import com.etheller.interpreter.ast.value.BooleanJassValue;
 import com.etheller.interpreter.ast.value.CodeJassValue;
+import com.etheller.interpreter.ast.value.DummyJassValue;
 import com.etheller.interpreter.ast.value.JassValue;
 import com.etheller.interpreter.ast.value.visitor.BooleanJassValueVisitor;
 
@@ -31,6 +32,11 @@ public class BoolExprCondition extends AllocatedHandle implements TriggerBoolean
 	public boolean evaluate(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
 		final JassValue jassReturnValue = this.takesNothingReturnsBooleanFunction.callAndExecuteCapturingReturnValue(
 				globalScope, triggerScope, "BoolExprCondition", BooleanJassValue.FALSE);
+		if (jassReturnValue instanceof DummyJassValue) {
+			// Scripts pass a function that returns nothing to Condition or Filter to run it on the event: it reads
+			// as false.
+			return false;
+		}
 		final Boolean booleanReturnValue = jassReturnValue.visit(BooleanJassValueVisitor.getInstance());
 		return booleanReturnValue.booleanValue();
 	}

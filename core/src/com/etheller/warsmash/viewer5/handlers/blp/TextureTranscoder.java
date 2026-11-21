@@ -8,7 +8,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -119,9 +118,9 @@ public final class TextureTranscoder {
 	}
 
 	static CompressedMips encode(final MipLevels levels, final boolean normals) {
+		final byte[] top = levels.getArray(0);
 		final int format = normals ? CompressedMips.FORMAT_RG11_EAC
-				: hasAlpha(levels.getRgba(0)) ? CompressedMips.FORMAT_RGBA8_ETC2_EAC
-						: CompressedMips.FORMAT_RGB8_ETC2;
+				: hasAlpha(top) ? CompressedMips.FORMAT_RGBA8_ETC2_EAC : CompressedMips.FORMAT_RGB8_ETC2;
 		final CompressedMips out = new CompressedMips(format);
 		final int count = levels.count();
 		final byte[][] pixels = new byte[count][];
@@ -130,10 +129,7 @@ public final class TextureTranscoder {
 		for (int level = 0; level < count; level++) {
 			widths[level] = levels.getWidth(level);
 			heights[level] = levels.getHeight(level);
-			pixels[level] = new byte[widths[level] * heights[level] * 4];
-			final ByteBuffer source = levels.getRgba(level).duplicate();
-			source.position(0);
-			source.get(pixels[level], 0, pixels[level].length);
+			pixels[level] = level == 0 ? top : levels.getArray(level);
 		}
 		final int kind = format == CompressedMips.FORMAT_RG11_EAC ? Etc2Encoder.KIND_RG
 				: format == CompressedMips.FORMAT_RGBA8_ETC2_EAC ? Etc2Encoder.KIND_RGBA : Etc2Encoder.KIND_RGB;
@@ -145,14 +141,18 @@ public final class TextureTranscoder {
 		return out;
 	}
 
-	private static boolean hasAlpha(final ByteBuffer rgba) {
-		final ByteBuffer pixels = rgba.duplicate();
-		for (int at = 3; at < pixels.limit(); at += 4) {
-			if (pixels.get(at) != (byte) 0xFF) {
+	private static boolean hasAlpha(final byte[] pixels) {
+		for (int at = 3; at < pixels.length; at += 4) {
+			if (pixels[at] != (byte) 0xFF) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/** The folder the decoded textures are kept in, which also holds what other loaders learn; null where there is none. */
+	public static File cacheFolder() {
+		return folder();
 	}
 
 	private static synchronized File folder() {

@@ -32,9 +32,9 @@ final class PathIndex {
 			if (!plain) {
 				this.exotic.put(i, form);
 			}
-			int slot = mix(hash(null, form, form.length(), plain)) & this.mask;
+			int slot = mix(hash(null, form, form.length(), plain ? LETTERS : EXACT)) & this.mask;
 			while (this.table[slot] != 0) {
-				if (matches(this.table[slot] - 1, null, form, form.length(), plain)) {
+				if (matches(this.table[slot] - 1, null, form, form.length(), plain ? LETTERS : EXACT)) {
 					break;
 				}
 				slot = (slot + 1) & this.mask;
@@ -54,28 +54,34 @@ final class PathIndex {
 		return indexOf(null, path);
 	}
 
-	/** @return the position of the listed path that is prefix + "\\" + path (just path for a null prefix), or -1 */
-	int indexOf(final String prefix, final String path) {
+	/**
+	 * @return the position of the listed path that is prefix + "\\" + path (just path for a null prefix), or -1. The
+	 *         path may be as asked, not made lower case with backslashes: '/' and ':' in it count as backslashes.
+	 */
+	int indexOf(final String prefix, String path) {
+		if (!isAscii(path)) {
+			path = path.toLowerCase(Locale.US).replace('/', '\\').replace(':', '\\');
+		}
 		int end = ((prefix == null) ? 0 : prefix.length() + 1) + path.length();
-		while ((end > 0) && (charAt(prefix, path, end - 1) == '\\')) {
+		while ((end > 0) && isSeparator(charAt(prefix, path, end - 1), end - 1, prefix)) {
 			end--;
 		}
 		String first = prefix;
 		String second = path;
-		boolean fold = true;
+		int mode = QUERY;
 		if (!isAscii(path) || ((prefix != null) && !isAscii(prefix))) {
 			first = null;
 			second = ((prefix == null) ? path : prefix + "\\" + path).substring(0, end).toLowerCase(Locale.ROOT);
 			end = second.length();
-			fold = false;
+			mode = EXACT;
 		}
-		int slot = mix(hash(first, second, end, fold)) & this.mask;
+		int slot = mix(hash(first, second, end, mode)) & this.mask;
 		while (true) {
 			final int entry = this.table[slot];
 			if (entry == 0) {
 				return -1;
 			}
-			if (matches(entry - 1, first, second, end, fold)) {
+			if (matches(entry - 1, first, second, end, mode)) {
 				return entry - 1;
 			}
 			slot = (slot + 1) & this.mask;
@@ -99,18 +105,37 @@ final class PathIndex {
 		return path.charAt(index - prefix.length() - 1);
 	}
 
-	private static int hash(final String prefix, final String path, final int length, final boolean fold) {
+	private static final int EXACT = 0;
+	private static final int LETTERS = 1;
+	/** Letters folded, and '/' and ':' as backslashes, except in the prefix, which the storage names as it is. */
+	private static final int QUERY = 2;
+
+	private static boolean isSeparator(final char c, final int index, final String prefix) {
+		return (c == '\\') || (((prefix == null) || (index > prefix.length())) && ((c == '/') || (c == ':')));
+	}
+
+	private static char fold(final String prefix, final String path, final int k, final int mode) {
+		final char c = charAt(prefix, path, k);
+		if (mode == EXACT) {
+			return c;
+		}
+		if ((mode == QUERY) && ((c == '/') || (c == ':')) && ((prefix == null) || (k > prefix.length()))) {
+			return '\\';
+		}
+		return fold(c);
+	}
+
+	private static int hash(final String prefix, final String path, final int length, final int mode) {
 		int hash = 0;
 		for (int k = 0; k < length; k++) {
-			final char c = charAt(prefix, path, k);
-			hash = (31 * hash) + (fold ? fold(c) : c);
+			hash = (31 * hash) + fold(prefix, path, k, mode);
 		}
 		return hash;
 	}
 
 	/** Whether the entry's lower case form is the first length characters of prefix + "\\" + path. */
 	private boolean matches(final int entry, final String prefix, final String path, final int length,
-			final boolean foldQuery) {
+			final int queryMode) {
 		final String lowered = this.exotic.isEmpty() ? null : this.exotic.get(entry);
 		final String listed = lowered != null ? lowered : this.paths.get(entry);
 		if (listed.length() != length) {
@@ -119,7 +144,7 @@ final class PathIndex {
 		final boolean foldEntry = lowered == null;
 		for (int k = 0; k < length; k++) {
 			final char a = foldEntry ? fold(listed.charAt(k)) : listed.charAt(k);
-			final char b = foldQuery ? fold(charAt(prefix, path, k)) : charAt(prefix, path, k);
+			final char b = fold(prefix, path, k, queryMode);
 			if (a != b) {
 				return false;
 			}

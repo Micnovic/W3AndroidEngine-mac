@@ -6,6 +6,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRaceManage
 import com.etheller.interpreter.ast.util.JassNumbers;
 import com.etheller.interpreter.ast.util.JassProgram;
 import com.etheller.interpreter.ast.util.JassStringHash;
+import com.etheller.interpreter.ast.util.JassStrings;
 import com.etheller.interpreter.ast.value.HandleJassType;
 import com.etheller.interpreter.ast.value.HandleJassValue;
 import com.etheller.interpreter.ast.value.IntegerJassValue;
@@ -19,7 +20,6 @@ import com.etheller.interpreter.ast.value.visitor.StringJassValueVisitor;
 import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.units.custom.WTS;
 import com.etheller.warsmash.util.DataErrors;
-import com.etheller.warsmash.util.Log;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.ai.AIDifficulty;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CItemTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIdUtils;
@@ -55,7 +55,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CWeaponSoundTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitTypeJass;
 import java.util.Arrays;
-import java.util.Locale;
 import java.util.function.ToIntFunction;
 
 import static com.etheller.warsmash.parsers.jass.CommonNatives.enumValue;
@@ -457,29 +456,17 @@ final class ConversionNatives {
 			final String s = arguments.get(0).visit(StringJassValueVisitor.getInstance());
 			int start = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
 			int end = arguments.get(2).visit(IntegerJassValueVisitor.getInstance());
-			if (start > s.length()) {
-				start = s.length();
-			}
-			if (start < 0) {
-				start = 0;
-			}
-			if (end > s.length()) {
-				end = s.length();
-			}
-			if (end < start) {
-				end = start;
-			}
-			return new StringJassValue(s.substring(start, end));
+			return new StringJassValue(JassStrings.substring(s, start, end));
 		});
 		jassProgramVisitor.getJassNativeManager().createNative("StringLength",
 				(arguments, globalScope, triggerScope) -> {
 					final String s = gameUI.getTrigStr(nullable(arguments, 0, StringJassValueVisitor.getInstance()));
-					return IntegerJassValue.of(s == null ? 0 : s.length());
+					return IntegerJassValue.of(JassStrings.length(s));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("StringCase", (arguments, globalScope, triggerScope) -> {
 			final String s = gameUI.getTrigStr(arguments.get(0).visit(StringJassValueVisitor.getInstance()));
 			final boolean upper = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
-			return new StringJassValue(upper ? s.toUpperCase(Locale.US) : s.toLowerCase(Locale.US));
+			return new StringJassValue(JassStrings.changeCase(s, upper));
 		});
 		jassProgramVisitor.getJassNativeManager().createNative("StringHash", (arguments, globalScope, triggerScope) -> {
 			final String s = arguments.get(0).visit(StringJassValueVisitor.getInstance());

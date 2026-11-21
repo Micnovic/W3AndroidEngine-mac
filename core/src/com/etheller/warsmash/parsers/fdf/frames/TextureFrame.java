@@ -13,6 +13,8 @@ import com.etheller.warsmash.parsers.fdf.datamodel.Vector4Definition;
 public class TextureFrame extends AbstractRenderableFrame {
 	public static final Vector4Definition DEFAULT_TEX_COORDS = new Vector4Definition(0, 1, 0, 1);
 	private TextureRegion texture;
+	/** Whether {@link #texture} was made here, so it can be set again instead of replaced. */
+	private boolean ownsRegion;
 	private final boolean decorateFileNames;
 	private final Vector4Definition texCoord;
 	private Color color;
@@ -79,6 +81,18 @@ public class TextureFrame extends AbstractRenderableFrame {
 	public void setTexture(final Texture texture) {
 		if (texture == null) {
 			this.texture = null;
+			this.ownsRegion = false;
+			return;
+		}
+		if (this.ownsRegion && (this.texture.getTexture() == texture)) {
+			// Status bars set their texture every frame; the region they have is set the way a new one would be.
+			if (this.texCoord != null) {
+				this.texture.setRegion(this.texCoord.getX(), this.texCoord.getZ(), this.texCoord.getY(),
+						this.texCoord.getW());
+			}
+			else {
+				this.texture.setRegion(texture);
+			}
 			return;
 		}
 		final TextureRegion texRegion;
@@ -90,9 +104,11 @@ public class TextureFrame extends AbstractRenderableFrame {
 			texRegion = new TextureRegion(texture);
 		}
 		this.texture = texRegion;
+		this.ownsRegion = true;
 	}
 
 	public void setTexture(final TextureRegion texture) {
 		this.texture = texture;
+		this.ownsRegion = false;
 	}
 }

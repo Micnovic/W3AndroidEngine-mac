@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.item.CEquipmentType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
@@ -55,6 +56,13 @@ public final class CStoredUnit {
 				final CItem item = inventory.getItemInSlot(slot);
 				if (item != null) {
 					this.items.add(new StoredItem(item.getTypeId(), item.getCharges(), slot));
+				}
+			}
+			// A worn item is stored with the loadout slot as -1 - slot, which older files never hold.
+			for (int slot = 0; slot < CEquipmentType.LOADOUT_SLOTS; slot++) {
+				final CItem worn = inventory.getItemInLoadoutSlot(slot);
+				if (worn != null) {
+					this.items.add(new StoredItem(worn.getTypeId(), worn.getCharges(), -1 - slot));
 				}
 			}
 		}
@@ -130,7 +138,14 @@ public final class CStoredUnit {
 				final CItem item = game.createItem(stored.typeId, unit.getX(), unit.getY());
 				if (item != null) {
 					item.setCharges(stored.charges);
-					inventory.giveItem(game, unit, item, stored.slot, false);
+					if (stored.slot < 0) {
+						if (!inventory.equipItem(game, unit, item, -1 - stored.slot)) {
+							game.removeItem(item);
+						}
+					}
+					else {
+						inventory.giveItem(game, unit, item, stored.slot, false);
+					}
 				}
 			}
 		}

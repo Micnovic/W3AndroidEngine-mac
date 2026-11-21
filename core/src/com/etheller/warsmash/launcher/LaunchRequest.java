@@ -61,15 +61,27 @@ public final class LaunchRequest {
 	public boolean lan;
 	/** The session a LAN game belongs to; the launcher's, never carried to another process. */
 	public Object lanSession;
+	/** The map has just been checked for the engine, so the launcher does not check it a second time. */
+	public boolean mapChecked;
+
+	/**
+	 * The version of the campaign maps that is played: the profile's choice, but without the Reforged maps in the
+	 * game data (where the choice is not offered) always the classic one, whatever the profile has kept.
+	 */
+	public static String playedMaps(final CampaignCatalog catalog, final String chosen) {
+		return catalog.hasReforgedMaps() && CAMPAIGN_MAPS_REFORGED.equals(chosen) ? CAMPAIGN_MAPS_REFORGED
+				: CAMPAIGN_MAPS_CLASSIC;
+	}
 
 	/** A campaign mission, on the profile's version of the campaign maps. */
 	public static LaunchRequest mission(final CampaignCatalog catalog, final CampaignCatalog.Entry entry,
 			final int mission, final String campaignMaps, final String difficulty) {
 		final LaunchRequest request = new LaunchRequest();
+		final String played = playedMaps(catalog, campaignMaps);
 		request.campaign = entry.getNumber();
 		request.mission = mission;
-		request.campaignMaps = campaignMaps;
-		request.mapFile = catalog.missionMapFilename(entry, mission, CAMPAIGN_MAPS_REFORGED.equals(campaignMaps));
+		request.campaignMaps = played;
+		request.mapFile = catalog.missionMapFilename(entry, mission, CAMPAIGN_MAPS_REFORGED.equals(played));
 		request.difficulty = difficulty;
 		return request;
 	}

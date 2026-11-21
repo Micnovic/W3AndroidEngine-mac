@@ -16,15 +16,76 @@ public class DefaultLanNetwork implements LanNetwork {
 		return true;
 	}
 
-	@Override
-	public boolean isNetworkAvailable() {
-		return !localAddresses().isEmpty();
+	/**
+	 * Listing the adapters costs a few hundred milliseconds on a PC with many virtual ones, and every lobby change asks
+	 * for the broadcast addresses on the network thread, so the answer is kept: fresh for {@link #FRESH_MS}, then the
+	 * broadcast addresses are handed out stale while another thread renews them (what a player asks about their own
+	 * addresses is always current).
+	 */
+	private static final long FRESH_MS = 2000;
+	private static final long STALE_OK_MS = 30000;
+
+	private static final class Snapshot {
+		final List<InetAddress> local = new ArrayList<InetAddress>();
+		final List<InetAddress> broadcast = new ArrayList<InetAddress>();
+		final long taken = System.nanoTime();
 	}
 
-	@Override
-	public List<InetAddress> localAddresses() {
-		final List<InetAddress> result = new ArrayList<InetAddress>();
+	private Snapshot snapshot;
+	private boolean renewing;
+
+	private Snapshot snapshot(final boolean staleOk) {
+		final Snapshot current;
+		synchronized (this) {
+			current = this.snapshot;
+		}
+		final long ageMs = current == null ? Long.MAX_VALUE : (System.nanoTime() - current.taken) / 1000000;
+		if (ageMs < FRESH_MS) {
+			return current;
+		}
+		if (staleOk && ageMs < STALE_OK_MS) {
+			renewInBackground();
+			return current;
+		}
+		return renew();
+	}
+
+	private Snapshot renew() {
+		final Snapshot s = take();
+		synchronized (this) {
+			this.snapshot = s;
+		}
+		return s;
+	}
+
+	private void renewInBackground() {
+		synchronized (this) {
+			if (this.renewing) {
+				return;
+			}
+			this.renewing = true;
+		}
+		final Thread t = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					renew();
+				}
+				finally {
+					synchronized (DefaultLanNetwork.this) {
+						DefaultLanNetwork.this.renewing = false;
+					}
+				}
+			}
+		}, "lan-interfaces");
+		t.setDaemon(true);
+		t.start();
+	}
+
+	private Snapshot take() {
+		final Snapshot result = new Snapshot();
 		try {
+			result.broadcast.add(InetAddress.getByAddress(new byte[] { -1, -1, -1, -1 }));
 			final Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
 			if (ifaces != null) {
 				for (final NetworkInterface ni : Collections.list(ifaces)) {
@@ -33,7 +94,15 @@ public class DefaultLanNetwork implements LanNetwork {
 					}
 					for (final InetAddress a : Collections.list(ni.getInetAddresses())) {
 						if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
-							result.add(a);
+							result.local.add(a);
+						}
+					}
+					for (final InterfaceAddress ia : ni.getInterfaceAddresses()) {
+						// Android reports no broadcast address for some interfaces; the prefix gives it.
+						final InetAddress b = ia.getBroadcast() != null ? ia.getBroadcast()
+								: broadcastOf(ia.getAddress(), ia.getNetworkPrefixLength());
+						if (b != null && !result.broadcast.contains(b)) {
+							result.broadcast.add(b);
 						}
 					}
 				}
@@ -46,31 +115,18 @@ public class DefaultLanNetwork implements LanNetwork {
 	}
 
 	@Override
+	public boolean isNetworkAvailable() {
+		return !localAddresses().isEmpty();
+	}
+
+	@Override
+	public List<InetAddress> localAddresses() {
+		return new ArrayList<InetAddress>(snapshot(false).local);
+	}
+
+	@Override
 	public List<InetAddress> broadcastAddresses() {
-		final List<InetAddress> result = new ArrayList<InetAddress>();
-		try {
-			result.add(InetAddress.getByAddress(new byte[] { -1, -1, -1, -1 }));
-			final Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
-			if (ifaces != null) {
-				for (final NetworkInterface ni : Collections.list(ifaces)) {
-					if (!ni.isUp() || ni.isLoopback() || !acceptInterface(ni)) {
-						continue;
-					}
-					for (final InterfaceAddress ia : ni.getInterfaceAddresses()) {
-						// Android reports no broadcast address for some interfaces; the prefix gives it.
-						final InetAddress b = ia.getBroadcast() != null ? ia.getBroadcast()
-								: broadcastOf(ia.getAddress(), ia.getNetworkPrefixLength());
-						if (b != null && !result.contains(b)) {
-							result.add(b);
-						}
-					}
-				}
-			}
-		}
-		catch (final java.io.IOException e) {
-			LanLog.warn("cannot enumerate interfaces", e);
-		}
-		return result;
+		return new ArrayList<InetAddress>(snapshot(true).broadcast);
 	}
 
 	/** The broadcast address of the subnet the address and prefix length make, or null for a non-IPv4 address. */

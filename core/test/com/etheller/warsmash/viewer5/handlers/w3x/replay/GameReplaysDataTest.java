@@ -87,12 +87,12 @@ class GameReplaysDataTest {
 	void gameGraphicsRules() {
 		final DataTable ini = new DataTable(StringBundle.EMPTY);
 		GraphicsSettings.apply(ini, GraphicsSet.DE, 0);
-		assertEquals(GraphicsSet.DE, GraphicsSettings.gameGraphics(ini, "Maps/Test.w3x", false, false));
-		assertEquals(GraphicsSet.DE, GraphicsSettings.gameGraphics(ini, "Maps/Test.w3x", false, true));
-		assertEquals(GraphicsSet.CLASSIC, GraphicsSettings.gameGraphics(ini, "Campaign/Classic/M1.w3x", false, false));
-		assertEquals(GraphicsSet.REFORGED, GraphicsSettings.gameGraphics(ini, "Campaign/Classic/M1.w3x", true, false));
+		assertEquals(GraphicsSet.DE, GraphicsSettings.gameGraphics(ini, false, false, false));
+		assertEquals(GraphicsSet.DE, GraphicsSettings.gameGraphics(ini, false, false, true));
+		assertEquals(GraphicsSet.CLASSIC, GraphicsSettings.gameGraphics(ini, true, false, false));
+		assertEquals(GraphicsSet.REFORGED, GraphicsSettings.gameGraphics(ini, true, true, false));
 		final DataTable classic = new DataTable(StringBundle.EMPTY);
-		assertEquals(GraphicsSet.REFORGED, GraphicsSettings.gameGraphics(classic, "Maps/Test.w3x", false, true));
+		assertEquals(GraphicsSet.REFORGED, GraphicsSettings.gameGraphics(classic, false, false, true));
 	}
 
 	private static DataSource installed() {

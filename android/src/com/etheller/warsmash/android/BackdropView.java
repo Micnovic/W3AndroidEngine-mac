@@ -27,6 +27,8 @@ final class BackdropView extends FrameLayout implements TextureView.SurfaceTextu
 
 	private final File recording;
 	private final float focus;
+	private final float zoom;
+	private final float pivotY;
 	private final View still;
 	private TextureView video;
 	private MediaPlayer player;
@@ -35,13 +37,30 @@ final class BackdropView extends FrameLayout implements TextureView.SurfaceTextu
 	private int videoHeight;
 
 	BackdropView(final Context context, final Drawable poster, final File recording, final float focus) {
+		this(context, poster, recording, focus, 1, 1);
+	}
+
+	/** With a zoom over 1 the picture is enlarged about the view's left edge, at pivotY of its height. */
+	BackdropView(final Context context, final Drawable poster, final File recording, final float focus,
+			final float zoom, final float pivotY) {
 		super(context);
 		this.recording = recording;
 		this.focus = focus;
+		this.zoom = zoom;
+		this.pivotY = pivotY;
 		this.still = new View(context);
 		this.still.setBackground(poster);
 		addView(this.still, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
 				ViewGroup.LayoutParams.MATCH_PARENT));
+	}
+
+	@Override
+	protected void onSizeChanged(final int w, final int h, final int oldW, final int oldH) {
+		super.onSizeChanged(w, h, oldW, oldH);
+		this.still.setPivotX(0);
+		this.still.setPivotY(h * this.pivotY);
+		this.still.setScaleX(this.zoom);
+		this.still.setScaleY(this.zoom);
 	}
 
 	boolean hasRecording() {
@@ -146,6 +165,7 @@ final class BackdropView extends FrameLayout implements TextureView.SurfaceTextu
 			matrix.setScale(1, scale);
 			matrix.postTranslate(0, -((scale * height) - height) / 2);
 		}
+		matrix.postScale(this.zoom, this.zoom, 0, height * this.pivotY);
 		view.setTransform(matrix);
 	}
 
