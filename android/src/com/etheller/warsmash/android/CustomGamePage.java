@@ -172,7 +172,7 @@ final class CustomGamePage extends LauncherViews {
 		final TextView mark = text("!", icon * 0.5f, this.activity.art.gold());
 		mark.setGravity(Gravity.CENTER);
 		row.addView(mark, new LinearLayout.LayoutParams(px(icon), px(icon)));
-		final TextView title = text(file + " · " + reason, line * 0.46f, this.activity.art.text2());
+		final TextView title = fitWidth(text(file + " · " + reason, line * 0.46f, this.activity.art.text2()), 0.7f);
 		title.setSingleLine(true);
 		title.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		final LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0,
@@ -203,7 +203,8 @@ final class CustomGamePage extends LauncherViews {
 		final boolean playable = entry.issue == MapIssue.NONE;
 		// A map the engine cannot play stays in the list, greyed, with the reason beside its name; a long name is cut
 		// before the reason is.
-		final TextView title = text(name, line * 0.56f, playable ? this.activity.art.text() : this.activity.art.text2());
+		final TextView title = fitWidth(
+				text(name, line * 0.56f, playable ? this.activity.art.text() : this.activity.art.text2()), 0.7f);
 		final LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0,
 				ViewGroup.LayoutParams.WRAP_CONTENT, 1);
 		titleParams.leftMargin = px(18);
@@ -282,7 +283,7 @@ final class CustomGamePage extends LauncherViews {
 			for (int i = 0; i < facts.length; i++) {
 				final float y = frame + 76 + (i * 46);
 				place(map, text(facts[i][0], 30, this.activity.art.gold()), factsX, y, labelW, -1);
-				place(map, text(facts[i][1], 30, this.activity.art.text()), factsX + labelW + 10, y,
+				place(map, fitWidth(text(facts[i][1], 30, this.activity.art.text()), 0.7f), factsX + labelW + 10, y,
 						factsW - labelW - 10, -1);
 			}
 			final float descriptionY = frame + 76 + (3 * 46) + 20;

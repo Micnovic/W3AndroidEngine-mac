@@ -177,14 +177,15 @@ final class ProfilePage extends LauncherViews {
 		if (entry == null) {
 			return "";
 		}
-		final String chapter = chapterOf(entry, progress);
+		final String chapter = chapterOf(entry, progress, name);
 		return glueLabel(entry.getData().getHeader(), entry.getData().getHeader())
 				+ (chapter.isEmpty() ? "" : " · " + chapter);
 	}
 
-	/** The header of the furthest open mission of a campaign. */
-	private String chapterOf(final CampaignCatalog.Entry entry, final CCampaignProgress.Snapshot progress) {
-		final List<CampaignMission> missions = entry.getData().getMissions();
+	/** The header of the furthest open mission of a campaign, in the profile's version of the campaign maps. */
+	private String chapterOf(final CampaignCatalog.Entry entry, final CCampaignProgress.Snapshot progress,
+			final String name) {
+		final List<CampaignMission> missions = entry.getMissions(reforgedMaps(name));
 		int furthest = -1;
 		for (int i = 0; i < missions.size(); i++) {
 			if (CampaignCatalog.isMissionOpen(entry, i, progress)) {
@@ -193,6 +194,10 @@ final class ProfilePage extends LauncherViews {
 		}
 		return furthest < 0 ? ""
 				: glueLabel(missions.get(furthest).getHeader(), missions.get(furthest).getHeader()).toString();
+	}
+
+	private boolean reforgedMaps(final String name) {
+		return this.activity.campaigns.reforgedMaps(this.activity.profiles.campaignMaps(name));
 	}
 
 	private void readProfileProgress(final List<String> names) {
@@ -301,13 +306,13 @@ final class ProfilePage extends LauncherViews {
 				status = getString(R.string.profile_not_started);
 				color = this.activity.art.text2();
 			}
-			else if (CampaignCatalog.isCompleted(entry, progress)) {
+			else if (CampaignCatalog.isCompleted(entry, progress, reforgedMaps(name))) {
 				status = getString(R.string.profile_completed);
 				color = LauncherKit.OK;
 			}
 			else if (CampaignChoice.started(entry, progress)
 					|| (CampaignChoice.playedCampaign(catalog, progress) == entry)) {
-				status = chapterOf(entry, progress);
+				status = chapterOf(entry, progress, name);
 				color = this.activity.art.text();
 			}
 			else {

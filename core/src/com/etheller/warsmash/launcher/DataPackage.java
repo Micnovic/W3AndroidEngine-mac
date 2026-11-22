@@ -75,6 +75,8 @@ public final class DataPackage implements Closeable {
 		NO_CLASSIC,
 		/** A language pack, and the target has no Classic data to add it to. */
 		NO_CLASSIC_LANGUAGE,
+		/** A graphics set or language pack, and the Classic folder in use cannot be written to. */
+		NOT_WRITABLE,
 		/** A file could not be read or written. */
 		IO,
 		CANCELLED
@@ -453,10 +455,18 @@ public final class DataPackage implements Closeable {
 			throw this.language.isEmpty() ? new ImportException(Problem.NO_CLASSIC, setName())
 					: new ImportException(Problem.NO_CLASSIC_LANGUAGE, this.language);
 		}
-		final long free = staging.getAbsoluteFile().getParentFile().getUsableSpace();
+		final File stagingParent = staging.getAbsoluteFile().getParentFile();
+		if (!target.canWrite() || !stagingParent.canWrite()) {
+			throw new ImportException(Problem.NOT_WRITABLE, target.getName());
+		}
+		final long free = stagingParent.getUsableSpace();
 		if (free < neededBytes()) {
 			throw new ImportException(Problem.NO_SPACE, free + " / " + neededBytes());
 		}
+		// What was kept of the folder is checked now, while nothing of the import is in it yet.
+		DataFolderCheck.beforeImport(target);
+		final DataFolderCheck.Tally added = new DataFolderCheck.Tally();
+		boolean done = false;
 		try {
 			unpack(staging, progress, cancelled);
 			final File[] folders = staging.listFiles();
@@ -467,16 +477,21 @@ public final class DataPackage implements Closeable {
 						continue;
 					}
 					final File into = existingChild(target, folder.getName());
-					if (!move(folder, into, true)) {
+					if (!move(folder, into, true, added)) {
 						throw new ImportException(Problem.IO, folder.getName());
 					}
 				}
 			}
+			done = true;
 		}
 		finally {
 			deleteTree(staging);
+			if (!done) {
+				DataFolderCheck.forget(target);
+			}
 		}
-		DataFolderCheck.forget(target);
+		// What was read of the target stays; it is not counted over again for the few files added to it.
+		DataFolderCheck.added(target, added);
 		return target;
 	}
 
@@ -495,7 +510,7 @@ public final class DataPackage implements Closeable {
 				kept |= child.isDirectory() && folder.equalsIgnoreCase(child.getName());
 			}
 			if (kept) {
-				move(child, existingChild(target, child.getName()), false);
+				move(child, existingChild(target, child.getName()), false, null);
 			}
 		}
 	}
@@ -519,9 +534,16 @@ public final class DataPackage implements Closeable {
 	 *
 	 * @return whether everything that was to be moved was moved
 	 */
-	private static boolean move(final File from, final File to, final boolean replace) {
+	private static boolean move(final File from, final File to, final boolean replace,
+			final DataFolderCheck.Tally added) {
 		if (!to.exists()) {
+			// Counted before the move, while the files are still where they were unpacked.
+			final DataFolderCheck.Tally moving = added == null ? null : DataFolderCheck.tally(from, to);
 			if (from.renameTo(to)) {
+				if (moving != null) {
+					added.add(moving);
+					added.touch(to.getParentFile());
+				}
 				return true;
 			}
 			if (!from.isDirectory()) {
@@ -533,7 +555,7 @@ public final class DataPackage implements Closeable {
 			final File[] children = from.listFiles();
 			if (children != null) {
 				for (final File child : children) {
-					moved &= move(child, existingChild(to, child.getName()), replace);
+					moved &= move(child, existingChild(to, child.getName()), replace, added);
 				}
 			}
 			return moved;
@@ -543,10 +565,18 @@ public final class DataPackage implements Closeable {
 			if (!to.mkdirs()) {
 				return false;
 			}
-			return move(from, to, replace);
+			if (added != null) {
+				added.entries++;
+				added.touch(to);
+				added.touch(to.getParentFile());
+			}
+			return move(from, to, replace, added);
 		}
 		if (!replace || from.isDirectory() || to.isDirectory()) {
 			return !replace;
+		}
+		if (added != null) {
+			added.touch(to.getParentFile());
 		}
 		return to.delete() && from.renameTo(to);
 	}

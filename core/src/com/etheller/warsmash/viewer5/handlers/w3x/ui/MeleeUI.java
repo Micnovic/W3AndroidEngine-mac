@@ -17,6 +17,8 @@ import java.util.Map;
 import java.util.Set;
 
 import com.etheller.warsmash.launcher.ButtonFlash;
+import com.etheller.warsmash.viewer5.handlers.w3x.replay.GameMarks;
+import com.etheller.warsmash.viewer5.handlers.w3x.replay.GameReplays;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayPlayback;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplayRecording;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.ReplaySession;
@@ -25,6 +27,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.audio.Music;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -70,6 +73,7 @@ import com.etheller.warsmash.lan.LockstepTurnManager;
 import com.etheller.warsmash.lan.ui.LanOverlay;
 import net.warsmash.lan.protocol.LanProtocol;
 import com.etheller.warsmash.util.Log;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -330,7 +334,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	final List<CTimerDialog> timerDialogs = new ArrayList<>();
 	final List<CScriptDialog> scriptDialogs = new ArrayList<>();
 	int lastScriptDialogShown;
+	/** The dialog shown last; the only one that can be on the screen. */
+	CScriptDialog pausingScriptDialog;
+	private static final int SCRIPT_DIALOG_PAUSE_STEPS = 3;
 	private int simulationDrivenDepth;
+	/** How many moments the player marked in this game. */
+	private int markedMoments;
 	private final CPlayerCommandHost commandHost = new CPlayerCommandHost() {
 		@Override
 		public void clickDialogButton(final int playerIndex, final int dialogHandleId, final int buttonHandleId) {
@@ -538,9 +547,40 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	 */
 	@Override
 	public void main() {
+		while (!mainNext()) {
+		}
+	}
+
+	private int mainSlice;
+
+	/**
+	 * {@link #main} one slice at a time, the skin and templates, the console and its bars, the panels, then the rest, so a
+	 * loading screen can draw between them.
+	 *
+	 * @return whether main is done
+	 */
+	public boolean mainNext() {
+		switch (this.mainSlice++) {
+		case 0:
+			mainSkinAndTemplates();
+			return false;
+		case 1:
+			mainConsoleAndBars();
+			return false;
+		case 2:
+			mainPanels();
+			return false;
+		default:
+			mainRest();
+			return true;
+		}
+	}
+
+	private void mainSkinAndTemplates() {
 		// =================================
 		// Load skins and templates
 		// =================================
+		long part = System.nanoTime();
 		final CRace race = this.localPlayer.getRace();
 		final CRaceManagerEntry raceEntry = this.war3MapViewer.getGameData().getRaceManager().get(race);
 		final String racialSkinKey = raceEntry.getKey();
@@ -578,7 +618,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			}
 		}
 		this.infoPanel.createIconBackdrops();
+		PerfStats.setupPart("interface skin and templates", part);
+	}
 
+	private void mainConsoleAndBars() {
+		long part = System.nanoTime();
 		// =================================
 		// Load major UI components
 		// =================================
@@ -597,12 +641,21 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 							: consoleBackdrop);
 		}
 
+		PerfStats.setupPart("interface console", part);
+		part = System.nanoTime();
 		this.menus.createTopBar();
 		this.groups.createHeroBar();
 		this.minimapPanel.createMinimapButtons();
 		this.menus.createEscMenu();
 		this.menus.createTimeIndicator();
+		PerfStats.setupPart("interface bars and menus", part);
+	}
+
+	private void mainPanels() {
+		long part = System.nanoTime();
 		this.infoPanel.createPortrait();
+		PerfStats.setupPart("interface portrait", part);
+		part = System.nanoTime();
 		this.infoPanel.createInfoPanel();
 		this.infoPanel.createInfoPanelIcons();
 		this.commands.createInventory();
@@ -610,6 +663,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.commands.createCommandCard();
 		this.tooltips.createTooltips();
 		this.cinematics.createCinematicPanel();
+		PerfStats.setupPart("interface panels and command card", part);
+	}
+
+	private void mainRest() {
+		long part = System.nanoTime();
 
 		// this.tooltipFrame = this.rootFrame.createFrameByType("BACKDROP",
 		// "SmashToolTipBackdrop", this.rootFrame, "", 0);
@@ -629,6 +687,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 						}
 					}, this.reforgedSkin);
 			((ReplayPlayback) this.war3MapViewer.getReplaySession()).setChatListener(this::replayChat);
+			((ReplayPlayback) this.war3MapViewer.getReplaySession()).setSkipListener(this::showReplayMoment);
 			if (this.replayPanel != null) {
 				this.smashCommandButtons.setVisible(false);
 			}
@@ -672,6 +731,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 		this.ignoreFrames = new String[] { "SmashHoverTip", "SmashHpBar", "SmashGameMessageFrame" };
 
+		PerfStats.setupPart("interface cursor and replay panel", part);
+		part = System.nanoTime();
 		this.meleeUIMinimap = this.minimapPanel.createMinimap(this.war3MapViewer);
 		this.meleeUIMinimap.setHeroAlertShown(this.groups::isHeroAlertMinimapShown);
 		this.meleeUIMinimap.setAllyColorFilter(this.war3MapViewer.getAllyColorFilter());
@@ -695,10 +756,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			this.rootFrame.add(modalFrame);
 		}
 
+		PerfStats.setupPart("interface minimap", part);
+		part = System.nanoTime();
 		this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
 
 		this.input.selectUnit(null);
-
+		PerfStats.setupPart("interface layout", part);
 	}
 
 	@Override
@@ -793,6 +856,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			this.portrait.resetCinematicSequence();
 			this.portrait.setSelectedUnit(this.selectedUnit);
 		}
+		this.cinematics.advanceScene(this.war3MapViewer.isGamePaused() ? 0
+				: deltaTime * this.war3MapViewer.getTimeScale() * this.war3MapViewer.getReplaySpeed());
 		if (this.cinematicPanel.isVisible()) {
 			this.cinematicPortrait.update(deltaTime);
 		}
@@ -822,7 +887,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 		this.hpBarFrameIndex = 0;
 		if (!this.allowDrag) {
-			if ((this.mouseOverUnit != null) && isSelectionOn(PRE_SELECT_OFF)
+			// While a building's placement ghost follows the cursor, what it passes over gets no bar or hover text.
+			if ((this.mouseOverUnit != null) && isSelectionOn(PRE_SELECT_OFF) && (this.cursorModelInstance == null)
 					&& this.input.isUnitSelectable(this.mouseOverUnit)) {
 				final SimpleStatusBarFrame simpleStatusBarFrame = this.tooltips.getHpBar();
 				this.tooltips.positionHealthBar(simpleStatusBarFrame, this.mouseOverUnit, 1.0f);
@@ -988,6 +1054,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 		if (this.selectedUnit != null) {
 			this.infoPanel.updateBuildTimeIndicators();
+			this.infoPanel.refreshCargoIfChanged();
 		}
 		if ((this.mouseOverUIFrame == null) && !Float.isNaN(this.panelTipX)) {
 			this.panelTipRefreshTime += deltaTime;
@@ -1025,11 +1092,14 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.minimapPanel.updateMinimapPings(currentMillis);
 		this.minimapPanel.updateCreepCamps(currentMillis);
 		final CMultiboard scriptBoard = this.war3MapViewer.simulation.getShownMultiboard();
-		this.multiboard.update(this.teamResources
-				.update((scriptBoard != null) && scriptBoard.isDisplayed() ? scriptBoard : null));
-		this.messages.layoutTimerDialogs();
-		for (final CTimerDialog timerDialog : this.timerDialogs) {
-			timerDialog.update(this.rootFrame, this.war3MapViewer.simulation);
+		// The score screen replaces the whole interface; a board still shown would show itself again every frame.
+		this.multiboard.update(this.scoreScreen.isVisible() ? null
+				: this.teamResources.update((scriptBoard != null) && scriptBoard.isDisplayed() ? scriptBoard : null));
+		if (!this.scoreScreen.isVisible()) {
+			this.messages.layoutTimerDialogs();
+			for (final CTimerDialog timerDialog : this.timerDialogs) {
+				timerDialog.update(this.rootFrame, this.war3MapViewer.simulation);
+			}
 		}
 		this.groups.updateHeroBar();
 		this.groups.updateIdleWorkers();
@@ -1046,7 +1116,64 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 	}
 
-	private static final float USER_UI_DISABLED_WORLD_DIM = 0.64f;
+	/** Measured on 1.29 with a dialog on the screen: the world keeps 0.39 of its brightness, the buttons about 0.47. */
+	private static final float DIALOG_WORLD_DIM = 0.61f;
+	private static final float DIALOG_BUTTON_DIM = 0.53f;
+	private final Rectangle dialogDimPortrait = new Rectangle();
+
+	boolean isScriptDialogShown() {
+		for (final CScriptDialog dialog : this.scriptDialogs) {
+			if (dialog.isVisible()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The world darkens under a dialog, the portrait scene drawn before the interface stays as it is. */
+	private void renderDialogWorldDim(final SpriteBatch batch, final Texture black) {
+		final float left = (this.uiViewport.getMinWorldWidth() - this.uiViewport.getWorldWidth()) / 2;
+		final float right = left + this.uiViewport.getWorldWidth();
+		final float top = this.uiViewport.getWorldHeight();
+		batch.setColor(1, 1, 1, DIALOG_WORLD_DIM);
+		if (this.infoPanel.isPortraitShown()) {
+			final Rectangle portrait = this.infoPanel.portraitBounds(this.dialogDimPortrait);
+			final float openLeft = Math.max(left, Math.min(right, portrait.x));
+			final float openRight = Math.max(openLeft, Math.min(right, portrait.x + portrait.width));
+			final float openBottom = Math.max(0, Math.min(top, portrait.y));
+			final float openTop = Math.max(openBottom, Math.min(top, portrait.y + portrait.height));
+			batch.draw(black, left, 0, openLeft - left, top);
+			batch.draw(black, openRight, 0, right - openRight, top);
+			batch.draw(black, openLeft, 0, openRight - openLeft, openBottom);
+			batch.draw(black, openLeft, openTop, openRight - openLeft, top - openTop);
+		}
+		else {
+			batch.draw(black, left, 0, right - left, top);
+		}
+		batch.setColor(1, 1, 1, 1);
+	}
+
+	/** The hero buttons, the command card and the inventory darken under a dialog; the portrait and minimap do not. */
+	private void renderDialogButtonDim(final SpriteBatch batch, final Texture black) {
+		batch.setColor(1, 1, 1, DIALOG_BUTTON_DIM);
+		for (final CommandCardIcon[] row : this.commandCard) {
+			drawDialogDim(batch, black, row);
+		}
+		for (final CommandCardIcon[] row : this.inventoryIcons) {
+			drawDialogDim(batch, black, row);
+		}
+		batch.setColor(1, 1, 1, 1);
+		this.groups.renderDialogDim(batch, black, DIALOG_BUTTON_DIM);
+	}
+
+	private static void drawDialogDim(final SpriteBatch batch, final Texture black, final CommandCardIcon[] icons) {
+		for (final CommandCardIcon icon : icons) {
+			if ((icon != null) && icon.isVisible()) {
+				final Rectangle bounds = icon.getRenderBounds();
+				batch.draw(black, bounds.x, bounds.y, bounds.width, bounds.height);
+			}
+		}
+	}
 
 	@Override
 	public void render(final SpriteBatch batch, final GlyphLayout glyphLayout) {
@@ -1058,21 +1185,17 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.cineFilter.render(batch, this.rootFrame,
 				(this.uiViewport.getMinWorldWidth() - this.uiViewport.getWorldWidth()) / 2, 0, this.uiViewport.getWorldWidth(),
 				this.uiViewport.getWorldHeight());
-		if (this.cinematics.isUserUIDisabledDim()) {
+		if (this.cinematics.isScriptDialogDim()) {
 			final Texture black = this.rootFrame.loadTexture("Textures\\Black32.blp");
 			if (black != null) {
-				batch.setColor(1, 1, 1, USER_UI_DISABLED_WORLD_DIM);
-				batch.draw(black,
-						(this.uiViewport.getMinWorldWidth() - this.uiViewport.getWorldWidth()) / 2, 0,
-						this.uiViewport.getWorldWidth(), this.uiViewport.getWorldHeight());
-				batch.setColor(1, 1, 1, 1);
+				renderDialogWorldDim(batch, black);
 			}
 		}
 		this.rootFrame.render(batch, this.rootFrame.getFont20(), glyphLayout);
-		if (this.cinematics.isUserUIDisabledDim()) {
+		if (this.cinematics.isScriptDialogDim()) {
 			final Texture black = this.rootFrame.loadTexture("Textures\\Black32.blp");
 			if (black != null) {
-				this.groups.renderDisabledDim(batch, black, USER_UI_DISABLED_WORLD_DIM);
+				renderDialogButtonDim(batch, black);
 			}
 		}
 		for (int i = 0; i < this.modalFrames.length; i++) {
@@ -1835,6 +1958,65 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		return !this.war3MapViewer.isNetworkGame();
 	}
 
+	/**
+	 * Capture a Bug: the step, the camera and the selected units go to the game's marks file, beside its replay,
+	 * for a problem report. Nothing reaches the game.
+	 */
+	void markThisMoment() {
+		final ReplaySession session = this.war3MapViewer.getReplaySession();
+		final boolean recorded = session instanceof ReplayRecording;
+		final FileHandle file = recorded ? ((ReplayRecording) session).marksFile() : GameMarks.unrecorded();
+		final List<GameMarks.Unit> units = new ArrayList<>();
+		for (final RenderUnit renderUnit : this.selectedUnits) {
+			final CUnit unit = renderUnit.getSimulationUnit();
+			units.add(new GameMarks.Unit(unit.getHandleId(), unit.getTypeId().asStringValue(), unit.getPlayerIndex(),
+					unit.getX(), unit.getY(), unit.getLife(), unit.getMaximumLife()));
+		}
+		final int tick = this.war3MapViewer.simulation.getGameTurnTick();
+		final int number = this.markedMoments + 1;
+		try {
+			GameMarks.write(file, number == 1, GameMarks.head(this.war3MapViewer.getMapFileName(), recorded),
+					GameMarks.text(number, tick, tick * WarsmashConstants.SIMULATION_STEP_TIME,
+							this.cameraManager.target.x, this.cameraManager.target.y, units));
+			this.markedMoments = number;
+			this.messages.showGameMessage(String.format(Locale.ROOT, "Bug %d captured (%s).",
+					number, gameClock(tick * WarsmashConstants.SIMULATION_STEP_TIME)), 6);
+		}
+		catch (final IOException e) {
+			Log.error("The moment could not be marked", e);
+			this.messages.showGameMessage("The moment could not be marked.", 6);
+		}
+	}
+
+	private static String gameClock(final float seconds) {
+		final int whole = (int) seconds;
+		return String.format(Locale.ROOT, "%d:%02d:%02d", whole / 3600, (whole / 60) % 60, whole % 60);
+	}
+
+	/**
+	 * A replay played on to a marked moment (a problem report): the camera goes where the player looked, the units the
+	 * player had selected are selected, and the replay pauses there, as the playback's options ask.
+	 */
+	private void showReplayMoment() {
+		final float[] look = GameReplays.lookAt();
+		if (look != null) {
+			this.cameraManager.target.x = look[0];
+			this.cameraManager.target.y = look[1];
+		}
+		final int[] select = GameReplays.selectAtMoment();
+		if (select != null) {
+			runSimulationDriven(() -> this.input.selectUnits(unitsOf(select)));
+		}
+		if (GameReplays.pauseAtMoment()) {
+			if (this.replayPanel == null) {
+				this.war3MapViewer.setGamePaused(War3MapViewer.PauseSource.REPLAY, true);
+			}
+			else if (!this.replayPanel.isPaused()) {
+				this.replayPanel.togglePause();
+			}
+		}
+	}
+
 	public void quitMission() {
 		this.war3MapViewer.gameEnded();
 		this.exitGameRunnable.run();
@@ -1852,6 +2034,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 		state.userControlEnabled = this.userControlEnabled;
 		state.userUIEnabled = this.userUIEnabled;
+		state.interfaceShown = this.cinematics.isInterfaceShown();
+		state.cinematicPanelsHidden = this.cinematics.isCinematicPanelsHidden();
+		state.subtitlesForced = this.cinematics.isSubtitleDisplayOverride();
+		this.cinematics.captureScene(state);
+		state.cineFilter = this.cineFilter.capture();
+		state.cineFilterTexture = this.cineFilter.getTexturePath();
 		state.selectionOff = this.selectionOff;
 		state.allyFilterButtonEnabled = this.minimapPanel.allyFilterEnabled;
 		state.creepFilterButtonEnabled = this.minimapPanel.creepFilterEnabled;
@@ -1913,7 +2101,14 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		if (state.playingMusic != null) {
 			playMusic(state.playingMusic, true, 0);
 		}
+		this.cinematics.forceCinematicSubtitles(state.subtitlesForced);
+		this.cinematics.hideCinematicPanels(state.cinematicPanelsHidden);
+		this.cinematics.showInterface(state.interfaceShown, 0f);
 		this.cinematics.enableUserUI(state.userUIEnabled);
+		this.cinematics.restoreScene(state);
+		if (state.cineFilter != null) {
+			this.cineFilter.restore(state.cineFilterTexture, state.cineFilter);
+		}
 		this.selectionOff = state.selectionOff;
 		this.minimapPanel.enableFilterButtons(state.allyFilterButtonEnabled, state.creepFilterButtonEnabled);
 		if (state.timerDialogs != null) {
@@ -1928,12 +2123,16 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		if (state.scriptDialogs != null) {
 			final List<CScriptDialog> byShownOrder = new ArrayList<>(state.scriptDialogs);
 			byShownOrder.sort(Comparator.comparingInt(CScriptDialog::getShownOrder));
+			final CScriptDialog lastShown = CScriptDialog.shownLast(state.scriptDialogs);
 			for (final CScriptDialog dialog : byShownOrder) {
 				dialog.setShownOrder(++this.lastScriptDialogShown);
 			}
+			this.pausingScriptDialog = lastShown;
 			for (final CScriptDialog dialog : state.scriptDialogs) {
 				final String title = dialog.getTitle();
-				final boolean visible = dialog.isVisible();
+				final boolean visible = dialog == lastShown;
+				final boolean titleLost = dialog.isTitleLost();
+				final boolean titleApplied = dialog.isTitleApplied();
 				final List<CScriptDialogButton> buttons = new ArrayList<>(dialog.getButtons());
 				this.messages.clearDialog(dialog);
 				if (title != null) {
@@ -1947,6 +2146,10 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 					}
 				}
 				dialog.setVisible(visible);
+				if (titleLost) {
+					dialog.loseTitle(this.rootFrame, this.uiViewport);
+				}
+				dialog.setTitleApplied(titleApplied);
 			}
 		}
 		if (state.cameraFields != null) {
@@ -1970,7 +2173,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				this.controlGroups.set(i, unitsOf(state.controlGroupHandleIds[i]));
 			}
 		}
-		this.userControlEnabled = state.userControlEnabled;
+		this.cinematics.enableUserControl(state.userControlEnabled);
 		runSimulationDriven(() -> this.input.selectUnits(unitsOf(state.selectedUnitHandleIds)));
 	}
 
@@ -2111,6 +2314,25 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	@Override
 	public void displayScriptDialog(final CScriptDialog dialog, final boolean flag) {
 		this.messages.displayScriptDialog(dialog, flag);
+	}
+
+	@Override
+	public void setScriptDialogTitle(final CScriptDialog dialog, final String text) {
+		this.messages.setScriptDialogTitle(dialog, text);
+	}
+
+	/**
+	 * A dialog on the screen stops a single player game, but not at once: the game goes on for a few steps first. Every
+	 * dialog's part in it is in the simulation's steps, so a replay needs no stop of its own (the click that ends it is
+	 * in its record at the step it came at), and a network game, where only some of the machines show a dialog, never
+	 * stops.
+	 */
+	boolean isScriptDialogPause() {
+		final CScriptDialog dialog = this.pausingScriptDialog;
+		return (dialog != null) && dialog.isVisible() && !this.war3MapViewer.isLanGame()
+				&& !this.war3MapViewer.isReplayPlayback()
+				&& (this.war3MapViewer.simulation.getGameTurnTick() >= (dialog.getShownTick()
+						+ SCRIPT_DIALOG_PAUSE_STEPS));
 	}
 
 	@Override

@@ -122,6 +122,8 @@ public class AndroidLauncher extends AndroidApplication {
 	private boolean initialized;
 	/** The game started from the launcher that is running, for the crash handler. */
 	private static volatile AndroidLauncher launched;
+	/** The game activity that is running by any start path, for the crash log. */
+	private static volatile AndroidLauncher crashSource;
 	private static boolean crashHandlerSet;
 	private static final int REQUEST_MOVIES = 1;
 	/** The game saved when the GL context was lost, in the app's own files; not one of the player's saves. */
@@ -171,6 +173,9 @@ public class AndroidLauncher extends AndroidApplication {
 	@Override
 	protected void onCreate(final Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		if (GlesSupport.redirect(this)) {
+			return;
+		}
 		final String token = getIntent().getStringExtra(LaunchContract.EXTRA_TOKEN);
 		if (token != null) {
 			// Android restores a closed game activity with its old extras; that must not start the game again.
@@ -190,10 +195,12 @@ public class AndroidLauncher extends AndroidApplication {
 			}
 			this.fromLauncher = true;
 			launched = this;
-			leaveCrashResult();
 			CrashLogs.crashIfAsked(this);
 		}
-		final File iniFile = new File(getExternalFilesDir(null), INI_FILE_NAME);
+		// Every start path, also a map started from outside the launcher, leaves a crash log.
+		crashSource = this;
+		leaveCrashResult();
+		final File iniFile = new File(EngineResources.appFolder(this), INI_FILE_NAME);
 		if (!iniFile.isFile()) {
 			final Intent intent = new Intent(this, DataFolderActivity.class);
 			if (getIntent().getExtras() != null) {
@@ -354,7 +361,19 @@ public class AndroidLauncher extends AndroidApplication {
 			if (save != null) {
 				menuScreen.setStartupMap(continuedMap);
 			}
-			menuScreen.setGameEndListener(this::gameEnded);
+			menuScreen.setGameEndListener(new WarsmashGdxMenuScreen.GameEndListener() {
+				@Override
+				public void gameEnded(final GameResult result) {
+					AndroidLauncher.this.gameEnded(result);
+				}
+
+				@Override
+				public void startupFailed(final Throwable error, final GameResult result) {
+					final Thread thread = Thread.currentThread();
+					new Thread(() -> CrashLogs.write(AndroidLauncher.this, thread, error), "startup-failure-log").start();
+					AndroidLauncher.this.gameEnded(result);
+				}
+			});
 			menuScreen.whenLoaded(menu -> {
 				final boolean started;
 				if (save != null) {
@@ -513,13 +532,15 @@ public class AndroidLauncher extends AndroidApplication {
 		CrashLogs.prepare();
 		final Thread.UncaughtExceptionHandler system = Thread.getDefaultUncaughtExceptionHandler();
 		Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
-			final AndroidLauncher game = launched;
+			final AndroidLauncher game = crashSource;
 			if (game != null) {
-				try {
-					game.writeResult(withoutGame("crash"));
-				}
-				catch (final Throwable e) {
-					Log.e(TAG, "Unable to leave the crash result", e);
+				if (game.fromLauncher) {
+					try {
+						game.writeResult(withoutGame("crash"));
+					}
+					catch (final Throwable e) {
+						Log.e(TAG, "Unable to leave the crash result", e);
+					}
 				}
 				CrashLogs.write(game, thread, error);
 			}
@@ -630,6 +651,9 @@ public class AndroidLauncher extends AndroidApplication {
 		if (launched == this) {
 			launched = null;
 		}
+		if (crashSource == this) {
+			crashSource = null;
+		}
 		Movies.removePlayer(this.moviePlayer);
 		if (this.audioFocus != null) {
 			this.audioFocus.release();
@@ -644,7 +668,7 @@ public class AndroidLauncher extends AndroidApplication {
 			endLanSession();
 		}
 		if (!this.initialized) {
-			skipKeyboardHeightClose();
+			skipKeyboardHeightClose(this);
 		}
 		super.onDestroy();
 		// libGDX keeps the application object in Gdx.app until the next game starts; it must not keep the game.
@@ -656,12 +680,12 @@ public class AndroidLauncher extends AndroidApplication {
 	 * The backend closes its keyboard height provider on destroy without checking that initialize made one, so an
 	 * activity that finished before starting the engine (no data folder, say) would fail there.
 	 */
-	private void skipKeyboardHeightClose() {
+	static void skipKeyboardHeightClose(final AndroidApplication application) {
 		try {
 			final Field field = AndroidApplication.class.getDeclaredField("keyboardHeightProvider");
 			field.setAccessible(true);
-			if (field.get(this) == null) {
-				field.set(this, new KeyboardHeightProvider() {
+			if (field.get(application) == null) {
+				field.set(application, new KeyboardHeightProvider() {
 					@Override
 					public void start() {
 					}
@@ -906,6 +930,11 @@ public class AndroidLauncher extends AndroidApplication {
 				catch (final RuntimeException e) {
 					return null;
 				}
+			}
+
+			@Override
+			public boolean awaitLoading(final long maxMillis) {
+				return PooledSounds.get().awaitLoading(maxMillis);
 			}
 
 			@Override

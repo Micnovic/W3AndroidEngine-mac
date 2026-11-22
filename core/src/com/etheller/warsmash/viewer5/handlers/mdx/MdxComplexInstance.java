@@ -100,6 +100,8 @@ public class MdxComplexInstance extends ModelInstance {
 	public Texture[] replaceableTextures = NO_REPLACEABLE_TEXTURES;
 	/** Layers of the team glow (replaceable texture 2) are left out of the drawing. */
 	public boolean teamGlowHidden;
+	/** The ground this instance is drawn as part of, or null for one drawn on its own. */
+	public GroundShading groundShading;
 	// Only instances of a team colored or skinned HD model have these.
 	public Texture[] replaceableTextures_diffuse;
 	public Texture[] replaceableTextures_normal;
@@ -112,6 +114,8 @@ public class MdxComplexInstance extends ModelInstance {
 	/** A still copy of a model (a fog ghost) shows no particles, ribbons or event effects of its own. */
 	public boolean emittersSuppressed = false;
 	private boolean hasAnyUnselectableMesh = false;
+	/** Only the particles and ribbons made before it was taken out of the world are drawn, until they are gone. */
+	private boolean afterlife;
 
 	/** Most instances have none of a kind of these, so they share the empty list until the first one is added. */
 	private static <T> List<T> growable(final List<T> list) {
@@ -495,7 +499,8 @@ public class MdxComplexInstance extends ModelInstance {
 				// This includes attachments and emitters.
 				final UpdatableObject object = node.object;
 
-				if ((object != null) && !(this.emittersSuppressed && (object instanceof MdxEmitter))) {
+				if ((object != null) && !(this.emittersSuppressed && (object instanceof MdxEmitter))
+						&& !(this.afterlife && (object instanceof AttachmentInstance))) {
 					object.update(dt, objectVisible);
 				}
 
@@ -685,6 +690,11 @@ public class MdxComplexInstance extends ModelInstance {
 	 * Returns false for a model without bones.
 	 */
 	public boolean bindBones(final ShaderProgram shader) {
+		return bindBones(shader, null);
+	}
+
+	/** @param at the shader's locations, or null to find the uniforms by name */
+	boolean bindBones(final ShaderProgram shader, final MdxLocations at) {
 		if (!this.hasBones) {
 			return false;
 		}
@@ -719,6 +729,13 @@ public class MdxComplexInstance extends ModelInstance {
 			base = 0;
 		}
 		texture.bind(15);
+		if (at != null) {
+			shader.setUniformi(at.boneMap, 15);
+			shader.setUniformf(at.vectorSize, 1f / texture.getWidth());
+			shader.setUniformf(at.rowSize, 1f / texture.getHeight());
+			shader.setUniformf(at.boneBase, base);
+			return true;
+		}
 		shader.setUniformi("u_boneMap", 15);
 		shader.setUniformf("u_vectorSize", 1f / texture.getWidth());
 		shader.setUniformf("u_rowSize", 1f / texture.getHeight());
@@ -733,6 +750,9 @@ public class MdxComplexInstance extends ModelInstance {
 		if (!this.additiveOverrideMeshMode) {
 			for (int i = 0, n = model.opaqueGroups.size(); i < n; i++) {
 				final GenericGroup group = model.opaqueGroups.get(i);
+				if (this.afterlife && !(group instanceof EmitterGroup)) {
+					continue;
+				}
 				group.render(this, mvp);
 			}
 		}
@@ -756,11 +776,17 @@ public class MdxComplexInstance extends ModelInstance {
 		if (this.additiveOverrideMeshMode) {
 			for (int i = 0, n = model.opaqueGroups.size(); i < n; i++) {
 				final GenericGroup group = model.opaqueGroups.get(i);
+				if (this.afterlife && !(group instanceof EmitterGroup)) {
+					continue;
+				}
 				group.render(this, this.scene.camera.viewProjectionMatrix);
 			}
 		}
 		for (int i = 0, n = model.translucentGroups.size(); i < n; i++) {
 			final GenericGroup group = model.translucentGroups.get(i);
+			if (this.afterlife && !(group instanceof EmitterGroup)) {
+				continue;
+			}
 			group.render(this, this.scene.camera.viewProjectionMatrix);
 
 			if (WarsmashConstants.ENABLE_DEBUG) {
@@ -948,9 +974,42 @@ public class MdxComplexInstance extends ModelInstance {
 
 	@Override
 	protected void updateLights(final Scene scene) {
+		if (this.afterlife) {
+			return;
+		}
 		for (int i = 0, n = this.lights.size(); i < n; i++) {
 			final LightInstance light = this.lights.get(i);
 			light.update(scene);
+		}
+	}
+
+	@Override
+	public boolean hasParticlesAlive() {
+		for (int i = 0, n = this.particleEmitters2.size(); i < n; i++) {
+			if (this.particleEmitters2.get(i).alive > 0) {
+				return true;
+			}
+		}
+		for (int i = 0, n = this.ribbonEmitters.size(); i < n; i++) {
+			if (this.ribbonEmitters.get(i).alive > 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@Override
+	public void beginAfterlife() {
+		this.afterlife = true;
+		this.emittersSuppressed = true;
+		this.groundShadow = false;
+		this.sceneryShadow = false;
+		if (this.parent != null) {
+			// What it hung on may be gone before its particles are; it stays where it was last drawn.
+			this.localLocation.set(this.worldLocation);
+			this.localRotation.set(this.worldRotation);
+			this.localScale.set(this.worldScale);
+			setParent(null);
 		}
 	}
 

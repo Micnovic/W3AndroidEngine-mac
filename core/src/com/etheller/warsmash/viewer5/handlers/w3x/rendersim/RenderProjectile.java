@@ -141,7 +141,7 @@ public class RenderProjectile implements RenderEffect {
 
 		final boolean everythingDone = this.simulationProjectile.isDone() && (this.modelInstance.sequenceEnded
 				|| (this.deathTimeElapsed >= this.deathTime));
-		if (everythingDone) {
+		if (everythingDone && !war3MapViewer.worldScene.leaveParticles(this.modelInstance)) {
 			war3MapViewer.worldScene.removeInstance(this.modelInstance);
 		}
 		return everythingDone;

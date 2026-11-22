@@ -229,6 +229,10 @@ public class LauncherActivity extends AndroidApplication {
 	@Override
 	protected void onCreate(final Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		if (GlesSupport.redirect(this)) {
+			return;
+		}
+		DataFolderActivity.useFolderCache(this);
 		CCampaignProgress.setAllMissionsOpen(
 				(getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 		BackCallbacks.register(this, this::goBack);
@@ -347,6 +351,10 @@ public class LauncherActivity extends AndroidApplication {
 			lan().gameEnded();
 		}
 		if ((this.returned != null) && "exit".equals(this.returned.result)) {
+			this.afterPrep = PAGE_HOME;
+		}
+		else if ((this.returned == null) && !this.returnedUnexpectedly) {
+			// A game stopped from outside brought no result: this is a fresh start of the launcher, not a return.
 			this.afterPrep = PAGE_HOME;
 		}
 		this.campaignResult = null;
@@ -764,6 +772,12 @@ public class LauncherActivity extends AndroidApplication {
 		return view;
 	}
 
+	/** A campaign's background model skin field in the edition the campaign list is shown for. */
+	String backdropField(final String background) {
+		return CampaignChoice.backdropField(background,
+				this.preferences.getString(KEY_EDITION, LauncherKeys.EDITION_TFT));
+	}
+
 	/** A place of the board in the scene surface's pixels, counted from its bottom as GL counts. */
 	private Rectangle glRect(final float x, final float y, final float w, final float h) {
 		return new Rectangle(px(x), px(this.board.height) - px(y + h), px(w), px(h));
@@ -902,6 +916,15 @@ public class LauncherActivity extends AndroidApplication {
 		}
 	}
 
+	@Override
+	public void onRequestPermissionsResult(final int requestCode, final String[] permissions,
+			final int[] grantResults) {
+		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+		if (requestCode == CustomContentActions.REQUEST_STORAGE) {
+			this.customContent.storageAnswered();
+		}
+	}
+
 	/** The engine configuration was changed by the launcher (the content folder): it is read again with the catalog. */
 	void reloadContent() {
 		if (isDestroyed()) {
@@ -923,6 +946,7 @@ public class LauncherActivity extends AndroidApplication {
 			old.close();
 		}
 		this.customPage.forget();
+		this.campaigns = null;
 	}
 
 	void openGameData() {

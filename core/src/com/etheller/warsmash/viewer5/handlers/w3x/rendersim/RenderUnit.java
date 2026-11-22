@@ -370,8 +370,10 @@ public class RenderUnit implements RenderWidget {
 		final boolean corpse = this.simulationUnit.isCorpse();
 		final boolean boneCorpse = this.simulationUnit.isBoneCorpse();
 		final boolean building = this.simulationUnit.isBuilding();
-		this.instance.groundShadow = !dead && (building ? map.getDynamicShadowManager().isSceneShadows()
-				: this.typeData.getRenderShadowType() != null);
+		// With scene shadows a corpse is geometry lying on the ground and keeps casting until it is gone.
+		this.instance.groundShadow = building ? !dead && map.getDynamicShadowManager().isSceneShadows()
+				: (!dead || map.getDynamicShadowManager().isSceneShadows())
+						&& this.typeData.getRenderShadowType() != null;
 		if (dead) {
 			if (!this.dead) {
 				this.unitAnimationListenerImpl.playAnimation(true, PrimaryTag.DEATH, SequenceUtils.EMPTY, 1.0f, true);

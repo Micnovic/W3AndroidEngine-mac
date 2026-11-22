@@ -60,6 +60,10 @@ final class OrderNatives extends CommonNatives {
 		final JassFunction issuePointOrderById = (arguments, globalScope, triggerScope) -> {
 			final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 			final int orderId = arguments.get(1).visit(IntegerJassValueVisitor.getInstance());
+			// Measured on 1.29: a structure that goes on a gold mine is refused as a point order too, on the mine.
+			if ((whichUnit != null) && isBuiltOnMineOnly(orderId)) {
+				return BooleanJassValue.FALSE;
+			}
 			final boolean issued = (whichUnit != null) && issuePointOrder(whichUnit.getPlayerIndex(), whichUnit,
 					orderId, arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue(),
 					arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue());
@@ -112,6 +116,9 @@ final class OrderNatives extends CommonNatives {
 					if (!isUnitTypeId(unitId)) {
 						return BooleanJassValue.TRUE;
 					}
+					if (isBuiltOnMineOnly(unitId)) {
+						return BooleanJassValue.FALSE;
+					}
 					return BooleanJassValue.of(issuePointOrder(whichUnit.getPlayerIndex(), whichUnit, unitId,
 							arguments.get(2).visit(RealJassValueVisitor.getInstance()).floatValue(),
 							arguments.get(3).visit(RealJassValueVisitor.getInstance()).floatValue()));
@@ -119,9 +126,18 @@ final class OrderNatives extends CommonNatives {
 		jassProgramVisitor.getJassNativeManager().createNative("IssueTargetOrder",
 				(arguments, globalScope, triggerScope) -> {
 					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
+					final String orderString = arguments.get(1).visit(StringJassValueVisitor.getInstance());
+					int orderId = OrderIdUtils.getOrderId(orderString);
+					if ((orderId == 0) && (orderString != null) && !orderString.isEmpty()) {
+						// Measured on 1.29: the name of a unit type gives its id as the order, so an Acolyte ordered
+						// to "undeadgoldmine2" on a gold mine raises the Haunted Gold Mine.
+						final CUnitType buildType = this.simulation.getUnitData().getUnitTypeByJassLegacyName(orderString);
+						if (buildType != null) {
+							orderId = buildType.getTypeId().getValue();
+						}
+					}
 					return BooleanJassValue.of((whichUnit != null) && issueTargetOrder(whichUnit.getPlayerIndex(), whichUnit,
-							OrderIdUtils.getOrderId(arguments.get(1).visit(StringJassValueVisitor.getInstance())),
-							nullable(arguments, 2, ObjectJassValueVisitor.getInstance())));
+							orderId, nullable(arguments, 2, ObjectJassValueVisitor.getInstance())));
 				});
 		jassProgramVisitor.getJassNativeManager().createNative("IssueTargetOrderById",
 				(arguments, globalScope, triggerScope) -> {
@@ -155,7 +171,7 @@ final class OrderNatives extends CommonNatives {
 				(arguments, globalScope, triggerScope) -> {
 					final CUnitType buildType = this.simulation.getUnitData()
 							.getUnitTypeByJassLegacyName(arguments.get(1).visit(StringJassValueVisitor.getInstance()));
-					if (buildType == null) {
+					if ((buildType == null) || buildType.isCanBeBuiltOnThem()) {
 						return BooleanJassValue.FALSE;
 					}
 					final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
@@ -589,6 +605,13 @@ final class OrderNatives extends CommonNatives {
 				Math.min(group.size(), CGroupMove.MAX_SCRIPT_GROUP_ORDER_UNITS)));
 		return CGroupMove.order(this.simulation, units, orderId, x, y,
 				(unit, slotX, slotY) -> unit.order(this.simulation, orderId, new AbilityPointTarget(slotX, slotY)));
+	}
+
+	// Measured on 1.29: a point build order for a structure that goes on a gold mine (Haunted Gold Mine) is refused
+	// and gives no order; it takes the target order on the mine instead.
+	private boolean isBuiltOnMineOnly(final int id) {
+		final CUnitType type = this.simulation.getUnitData().getUnitType(new War3ID(id));
+		return (type != null) && type.isCanBeBuiltOnThem();
 	}
 
 	private boolean isUnitTypeId(final int id) {

@@ -936,6 +936,8 @@ final class MeleeUIMessages {
 	}
 
 	public void destroyDialog(final CScriptDialog dialog) {
+		// A dialog destroyed while shown goes from the screen, and the game it stopped goes on.
+		dialog.setVisible(false);
 		this.ui.scriptDialogs.remove(dialog);
 		if (dialog.getScriptDialogFrame() != null) {
 			this.ui.rootFrame.remove(dialog.getScriptDialogFrame());
@@ -943,10 +945,46 @@ final class MeleeUIMessages {
 	}
 
 	public void displayScriptDialog(final CScriptDialog dialog, final boolean flag) {
-		if (flag && !dialog.isVisible()) {
+		final boolean newlyShown = flag && !dialog.isVisible();
+		if (newlyShown) {
 			dialog.setShownOrder(++this.ui.lastScriptDialogShown);
+			dialog.setShownTick(this.ui.war3MapViewer.simulation.getGameTurnTick());
+		}
+		boolean replaced = false;
+		if (flag) {
+			// As in 1.29, a player has one dialog on the screen: showing another takes the place of the one shown, which
+			// stays hidden when the new one is closed.
+			for (final CScriptDialog other : this.ui.scriptDialogs) {
+				if ((other != dialog) && other.isVisible()) {
+					other.setVisible(false);
+					other.loseTitle(this.ui.rootFrame, this.ui.uiViewport);
+					replaced = true;
+				}
+			}
+			this.ui.pausingScriptDialog = dialog;
+		}
+		if (newlyShown) {
+			// The title is put on the screen once for each message; a dialog shown again in the place of another has none
+			// then, unless a script set its message since it was shown.
+			if (!dialog.isTitleApplied()) {
+				if (dialog.isTitleLost() && (dialog.getTitle() != null)) {
+					setScriptDialogTitle(dialog, dialog.getTitle());
+				}
+			}
+			else if (replaced) {
+				dialog.loseTitle(this.ui.rootFrame, this.ui.uiViewport);
+			}
+			dialog.setTitleApplied(true);
 		}
 		dialog.setVisible(flag);
+	}
+
+	public void setScriptDialogTitle(final CScriptDialog dialog, final String text) {
+		final boolean lost = dialog.isTitleLost();
+		dialog.setTitle(this.ui.rootFrame, text);
+		if (lost) {
+			dialog.layOut(this.ui.rootFrame, this.ui.uiViewport);
+		}
 	}
 
 	public void clearDialog(final CScriptDialog dialog) {

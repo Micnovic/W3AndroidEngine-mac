@@ -652,8 +652,8 @@ public class War3MapRenderController implements SimulationRenderController {
 		final RenderUnit renderPeer = this.viewer.unitToRenderPeer.get(simulationUnit);
 
 		final RenderUnitType typeData = this.viewer.getUnitTypeData(typeId);
-		final int customTeamColor = this.viewer.simulation
-				.getPlayer(simulationUnit.getPlayerIndex()).getColor();
+		final int customTeamColor = simulationUnit.getTeamColorOverride() != -1 ? simulationUnit.getTeamColorOverride()
+				: this.viewer.simulation.getPlayer(simulationUnit.getPlayerIndex()).getColor();
 		final float unitX = simulationUnit.getX();
 		final float unitY = simulationUnit.getY();
 		final float unitZ = Math.max(this.viewer.getWalkableRenderHeight(unitX, unitY),
@@ -701,6 +701,14 @@ public class War3MapRenderController implements SimulationRenderController {
 		if (renderPeer != null) {
 			renderPeer.setPlayerColor(
 					this.viewer.simulation.getPlayer(playerIndex).getColor());
+		}
+	}
+
+	@Override
+	public void setUnitTeamColor(final CUnit unit, final int color) {
+		final RenderUnit renderPeer = this.viewer.unitToRenderPeer.get(unit);
+		if (renderPeer != null) {
+			renderPeer.setPlayerColor(color);
 		}
 	}
 

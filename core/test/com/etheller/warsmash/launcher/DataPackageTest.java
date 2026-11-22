@@ -330,6 +330,139 @@ class DataPackageTest {
 		assertFalse(new File(this.temp, "data.old").exists());
 	}
 
+	private static int filesBelow(final File folder) {
+		int count = 0;
+		for (final File child : folder.listFiles()) {
+			count += child.isDirectory() ? filesBelow(child) : 1;
+		}
+		return count;
+	}
+
+	private static int entriesBelow(final File folder) {
+		int count = 0;
+		for (final File child : folder.listFiles()) {
+			count += 1 + (child.isDirectory() ? entriesBelow(child) : 0);
+		}
+		return count;
+	}
+
+	@Test
+	void aLanguagePackKeepsWhatWasCountedOfTheFolderAndAddsItsFiles() throws IOException {
+		final File target = new File(this.temp, "Games/WC3");
+		importZip(zip("classic.zip", gameFiles("", "3")), target);
+		final String before = DataFolderCheck.describe(DataFolderCheck.Kind.FOLDER, target);
+		DataFolderCheck.readability(target, Integer.MAX_VALUE, 3);
+		assertEquals(String.format("%,d files", filesBelow(target)), before);
+		importZip(zip("lang.zip", languageFiles("esES", "3")), target);
+		// The count after the import is the old count and the added files, not a new walk of the folder.
+		final DataFolderCheck.Readability kept = DataFolderCheck.lastReadability(target);
+		assertEquals(entriesBelow(target), kept.files);
+		assertEquals(0, kept.unreadable);
+		assertEquals(String.format("%,d files", filesBelow(target)),
+				DataFolderCheck.describe(DataFolderCheck.Kind.FOLDER, target));
+		assertEquals(java.util.Arrays.asList("enUS", "esES"), DataFolderCheck.locales(DataFolderCheck.Kind.FOLDER, target));
+		// A second pack of the same language replaces files and adds none.
+		importZip(zip("lang2.zip", languageFiles("esES", "3")), target);
+		assertEquals(String.format("%,d files", filesBelow(target)),
+				DataFolderCheck.describe(DataFolderCheck.Kind.FOLDER, target));
+		assertEquals(entriesBelow(target), DataFolderCheck.lastReadability(target).files);
+	}
+
+	@Test
+	void theCachedResultOfAFolderGrowsWithALanguagePackAndIsKeptForTheNextStart() throws IOException {
+		final File target = new File(this.temp, "Games/WC3c");
+		importZip(zip("classic.zip", gameFiles("", "3")), target);
+		FolderCheckCache.settleMillis = 0;
+		DataFolderCheck.useCache(new File(this.temp, "folder-check.txt"), "v1");
+		try {
+			FolderCheckCacheTest.age(target);
+			DataFolderCheck.readability(target, Integer.MAX_VALUE, 3);
+			importZip(zip("lang.zip", languageFiles("esES", "3")), target);
+			final int walks = DataFolderCheck.WALKS.get();
+			// A new start of the app: what is left is the file, and it fits the folder as the import left it.
+			DataFolderCheck.resetMemory();
+			final DataFolderCheck.Readability kept = DataFolderCheck.readability(target, Integer.MAX_VALUE, 3);
+			assertEquals(walks, DataFolderCheck.WALKS.get());
+			assertEquals(entriesBelow(target), kept.files);
+			assertEquals(filesBelow(target), kept.fileCount);
+			// A file put into the folder after the import is found.
+			Files.write(new File(target, "units/extra.slk").toPath(), new byte[] { 1 });
+			FolderCheckCacheTest.touch(new File(target, "units"));
+			DataFolderCheck.resetMemory();
+			assertEquals(filesBelow(target), DataFolderCheck.readability(target, Integer.MAX_VALUE, 3).fileCount);
+			assertEquals(walks + 1, DataFolderCheck.WALKS.get());
+		}
+		finally {
+			FolderCheckCache.settleMillis = 2500;
+			DataFolderCheck.useCache(null, "");
+			DataFolderCheck.resetMemory();
+		}
+	}
+
+	@Test
+	void aFolderChangedFromOutsideBeforeAnImportIsWalkedAgainAfterIt() throws IOException {
+		final File target = new File(this.temp, "Games/WC3d");
+		importZip(zip("classic.zip", gameFiles("", "3")), target);
+		FolderCheckCache.settleMillis = 0;
+		DataFolderCheck.useCache(new File(this.temp, "folder-check2.txt"), "v1");
+		try {
+			FolderCheckCacheTest.age(target);
+			DataFolderCheck.readability(target, Integer.MAX_VALUE, 3);
+			Files.write(new File(target, "units/outside.slk").toPath(), new byte[] { 1 });
+			FolderCheckCacheTest.touch(new File(target, "units"));
+			importZip(zip("lang.zip", languageFiles("esES", "3")), target);
+			DataFolderCheck.resetMemory();
+			final int walks = DataFolderCheck.WALKS.get();
+			assertEquals(filesBelow(target), DataFolderCheck.readability(target, Integer.MAX_VALUE, 3).fileCount);
+			assertEquals(walks + 1, DataFolderCheck.WALKS.get());
+		}
+		finally {
+			FolderCheckCache.settleMillis = 2500;
+			DataFolderCheck.useCache(null, "");
+			DataFolderCheck.resetMemory();
+		}
+	}
+
+	@Test
+	void aLanguagePackIntoAFolderNotCountedYetLeavesItToBeCounted() throws IOException {
+		final File target = new File(this.temp, "Games/WC3b");
+		importZip(zip("classic.zip", gameFiles("", "3")), target);
+		DataFolderCheck.forget(target);
+		importZip(zip("lang.zip", languageFiles("esES", "3")), target);
+		assertEquals(null, DataFolderCheck.lastReadability(target));
+		assertEquals(String.format("%,d files", filesBelow(target)),
+				DataFolderCheck.describe(DataFolderCheck.Kind.FOLDER, target));
+	}
+
+	@Test
+	void aLanguagePackJoinsAFolderOutsideTheAppFolder() throws IOException {
+		final File own = new File(new File(this.temp, "Games"), "My WC3");
+		importZip(zip("classic.zip", gameFiles("", "3")), own);
+		importZip(zip("lang.zip", languageFiles("esES", "3")), own);
+		assertTrue(new File(own, "_locales/eses.w3mod/ui/worldeditgamestrings.txt").isFile());
+		assertEquals(java.util.Arrays.asList("enUS", "esES"), DataFolderCheck.locales(DataFolderCheck.Kind.FOLDER, own));
+		assertFalse(new File(this.temp, "data/_locales").exists());
+	}
+
+	@Test
+	void aLanguagePackIntoAFolderThatCannotBeWrittenSaysSo() throws IOException {
+		final File own = new File(this.temp, "Locked");
+		importZip(zip("classic.zip", gameFiles("", "3")), own);
+		own.setWritable(false);
+		try {
+			org.junit.jupiter.api.Assumptions.assumeFalse(own.canWrite());
+			try (DataPackage dataPackage = DataPackage.open(zip("lang.zip", languageFiles("esES", "3")))) {
+				final DataPackage.ImportException e = assertThrows(DataPackage.ImportException.class,
+						() -> dataPackage.importInto(own, (bytes, total, files, count) -> {
+						}, () -> false));
+				assertEquals(DataPackage.Problem.NOT_WRITABLE, e.problem);
+			}
+		}
+		finally {
+			own.setWritable(true);
+		}
+	}
+
 	@Test
 	void listsLanguagePacksAfterClassicPackages() throws IOException {
 		zip("a-lang.zip", languageFiles("esES", "3"));

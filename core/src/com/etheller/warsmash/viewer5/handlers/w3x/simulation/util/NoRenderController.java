@@ -373,6 +373,11 @@ public class NoRenderController implements SimulationRenderController {
 	}
 
 	@Override
+	public void setUnitTeamColor(final CUnit unit, final int color) {
+		this.world.setUnitTeamColor(unit, color);
+	}
+
+	@Override
 	public void changeUnitVertexColor(final CUnit unit, final Color color) {
 		this.world.changeUnitVertexColor(unit, color);
 	}

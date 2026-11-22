@@ -37,6 +37,8 @@ public final class DataFolderCheck {
 
 	private static final Map<String, String> DESCRIPTIONS = Collections.synchronizedMap(new HashMap<>());
 	private static final Map<String, Readability> READABILITY = new HashMap<>();
+	/** How many files a folder held when it was last counted whole, so that an import does not count it again. */
+	private static final Map<String, Integer> FILE_COUNTS = new HashMap<>();
 	/** Written last by the data packer into a folder it made. */
 	private static final String PACKER_MARKER = "w3-datapacker.txt";
 	/** A text locale among the build tags, such as "enUS? enUS speech?:enUS text?". */
@@ -221,11 +223,29 @@ public final class DataFolderCheck {
 		final String key = kind + ":" + folder.getAbsolutePath();
 		String description = DESCRIPTIONS.get(key);
 		if (description == null) {
-			description = kind == Kind.CASC ? cascVersion(folder)
-					: String.format(Locale.US, "%,d files", countFiles(folder));
+			description = kind == Kind.CASC ? cascVersion(folder) : filesText(folder);
 			DESCRIPTIONS.put(key, description);
 		}
 		return description;
+	}
+
+	private static String filesText(final File folder) {
+		final String path = folder.getAbsolutePath();
+		Integer count;
+		synchronized (FILE_COUNTS) {
+			count = FILE_COUNTS.get(path);
+		}
+		if (count == null) {
+			final Readability kept = current(folder);
+			count = kept != null ? Integer.valueOf(kept.fileCount) : null;
+		}
+		if (count == null) {
+			count = countFiles(folder);
+			synchronized (FILE_COUNTS) {
+				FILE_COUNTS.put(path, count);
+			}
+		}
+		return String.format(Locale.US, "%,d files", count);
 	}
 
 	/**
@@ -302,7 +322,9 @@ public final class DataFolderCheck {
 			}
 			else {
 				locale = markerField(new File(folder, PACKER_MARKER), "locale");
-				final File layer = locale.isEmpty() ? localeLayer(folder) : null;
+				// Only a local files install keeps its own text in a locale layer; in a flat folder the layers are
+				// language packs added to it and say nothing about the language of the folder itself.
+				final File layer = locale.isEmpty() && kind == Kind.LOCAL_FILES ? localeLayer(folder) : null;
 				if (layer != null) {
 					final String name = layer.getName().replaceAll("(?i)\\.w3mod$", "");
 					locale = name.length() == 4 ? name.substring(0, 2).toLowerCase(Locale.ROOT)
@@ -310,6 +332,10 @@ public final class DataFolderCheck {
 				}
 				if (locale.isEmpty()) {
 					locale = configLocale(new File(folder, "config.txt"));
+				}
+				// A flat folder that only got language packs imported is the English game they were added to.
+				if (locale.isEmpty() && kind != Kind.LOCAL_FILES && child(folder, "_locales") != null) {
+					locale = "enUS";
 				}
 			}
 			DESCRIPTIONS.put(key, locale);
@@ -521,12 +547,16 @@ public final class DataFolderCheck {
 		public final List<String> names;
 		/** The search stopped at its limit, so there may be more. */
 		public final boolean partial;
+		/** Files among those looked at, without the folders. */
+		final int fileCount;
 
-		Readability(final int files, final int unreadable, final List<String> names, final boolean partial) {
+		Readability(final int files, final int unreadable, final List<String> names, final boolean partial,
+				final int fileCount) {
 			this.files = files;
 			this.unreadable = unreadable;
 			this.names = names;
 			this.partial = partial;
+			this.fileCount = fileCount;
 		}
 
 		/** "units/UnitData.slk, ui/" and "…" when there are more than the names kept. */
@@ -549,14 +579,205 @@ public final class DataFolderCheck {
 	 * @param maxNames how many names are kept
 	 */
 	public static Readability readability(final File folder, final int maxFiles, final int maxNames) {
-		final int[] counts = { 0, 0 };
+		final Readability kept = current(folder);
+		if ((kept != null) && (kept.files <= maxFiles)) {
+			return kept;
+		}
+		WALKS.incrementAndGet();
+		final long started = System.currentTimeMillis();
+		final FolderCheckCache.Snapshot snapshot = new FolderCheckCache.Snapshot();
+		final int[] counts = { 0, 0, 0 };
 		final List<String> names = new ArrayList<>();
-		final boolean partial = !walkReadability(folder, "", counts, names, maxFiles, maxNames);
-		final Readability readability = new Readability(counts[0], counts[1], names, partial);
+		final boolean partial = !walkReadability(folder, "", counts, names, maxFiles, maxNames, snapshot);
+		final Readability readability = new Readability(counts[0], counts[1], names, partial, counts[2]);
 		synchronized (READABILITY) {
 			READABILITY.put(folder.getAbsolutePath(), readability);
 		}
+		if (!partial) {
+			// The walk met every file, so the launcher's file count needs no second walk over the same folder.
+			synchronized (FILE_COUNTS) {
+				FILE_COUNTS.put(folder.getAbsolutePath(), counts[2]);
+			}
+			synchronized (DataFolderCheck.class) {
+				DESCRIPTIONS.remove(Kind.FOLDER + ":" + folder.getAbsolutePath());
+				DESCRIPTIONS.remove(Kind.LOCAL_FILES + ":" + folder.getAbsolutePath());
+			}
+		}
+		if (!partial && (counts[1] == 0)) {
+			snapshot.entries = counts[0];
+			snapshot.files = counts[2];
+			FolderCheckCache.put(folder, snapshot, started);
+		}
+		else {
+			FolderCheckCache.remove(folder);
+		}
 		return readability;
+	}
+
+	/** Forgets everything held in memory, as a new start of the app does; for the tests. */
+	static synchronized void resetMemory() {
+		DESCRIPTIONS.clear();
+		synchronized (READABILITY) {
+			READABILITY.clear();
+		}
+		synchronized (FILE_COUNTS) {
+			FILE_COUNTS.clear();
+		}
+		FolderCheckCache.restart();
+	}
+
+	/** Walks made, for the tests. */
+	static final java.util.concurrent.atomic.AtomicInteger WALKS = new java.util.concurrent.atomic.AtomicInteger();
+
+	/**
+	 * Keeps what the walks of folders find in this file, so that the first check after the app starts does not walk a
+	 * large folder again. The stamp names the app version; another stamp reads the folders again.
+	 */
+	public static void useCache(final File file, final String stamp) {
+		FolderCheckCache.use(file, stamp);
+	}
+
+	/**
+	 * The result of a whole walk of the folder when it was made and the folder still looks as it did (the times of
+	 * its folders and of the files every check opens are the same); null when the folder has to be walked. It
+	 * only looks at the folders, not at the files in them.
+	 */
+	public static Readability current(final File folder) {
+		final FolderCheckCache.Snapshot snapshot = FolderCheckCache.get(folder);
+		final String path = folder.getAbsolutePath();
+		if (snapshot == null) {
+			synchronized (READABILITY) {
+				READABILITY.remove(path);
+			}
+			synchronized (FILE_COUNTS) {
+				FILE_COUNTS.remove(path);
+			}
+			return null;
+		}
+		synchronized (READABILITY) {
+			Readability known = READABILITY.get(path);
+			if ((known == null) || (known.files != snapshot.entries) || (known.fileCount != snapshot.files)
+					|| (known.unreadable != 0) || known.partial) {
+				known = new Readability(snapshot.entries, 0, new ArrayList<>(), false, snapshot.files);
+				READABILITY.put(path, known);
+			}
+			synchronized (FILE_COUNTS) {
+				FILE_COUNTS.put(path, snapshot.files);
+			}
+			return known;
+		}
+	}
+
+	/** The content problems found for the folder at the time of its walk; null when the walk is not current. */
+	static List<String> cachedProblems(final File folder) {
+		final FolderCheckCache.Snapshot snapshot = FolderCheckCache.get(folder);
+		return (snapshot == null) || (snapshot.problems == null) ? null : new ArrayList<>(snapshot.problems);
+	}
+
+	static void cacheProblems(final File folder, final List<String> problems) {
+		FolderCheckCache.setProblems(folder, problems);
+	}
+
+	/** Checks what is kept of a folder before an import adds files to it. */
+	static void beforeImport(final File folder) {
+		FolderCheckCache.beforeImport(folder);
+	}
+
+	/** The files and folders below a folder, itself included, that a walk meets, and how many of them are files. */
+	public static final class Tally {
+		int entries;
+		int files;
+		int unreadable;
+		/** The folders the files were added to or that were added, where they are now. */
+		final java.util.Set<File> touched = new java.util.HashSet<>();
+
+		void add(final Tally other) {
+			this.entries += other.entries;
+			this.files += other.files;
+			this.unreadable += other.unreadable;
+			this.touched.addAll(other.touched);
+		}
+
+		/** A folder whose contents changed. */
+		void touch(final File folder) {
+			if (folder != null) {
+				this.touched.add(folder);
+			}
+		}
+	}
+
+	/** Counts a file or a folder with everything in it, as {@link #readability} does. */
+	public static Tally tally(final File file) {
+		return tally(file, null);
+	}
+
+	/** As {@link #tally(File)}, noting the folders below as they will be named once moved to the other place. */
+	public static Tally tally(final File file, final File movedTo) {
+		final Tally tally = new Tally();
+		tally(file, movedTo, tally);
+		return tally;
+	}
+
+	private static void tally(final File file, final File movedTo, final Tally tally) {
+		tally.entries++;
+		if (file.isDirectory()) {
+			if (movedTo != null) {
+				tally.touch(movedTo);
+			}
+			final File[] children = file.listFiles();
+			if (children == null) {
+				tally.unreadable++;
+				return;
+			}
+			for (final File child : children) {
+				tally(child, movedTo == null ? null : new File(movedTo, child.getName()), tally);
+			}
+		}
+		else {
+			tally.files++;
+			if (!file.canRead()) {
+				tally.unreadable++;
+			}
+		}
+	}
+
+	/**
+	 * Takes files that were added to a folder into what was read of it, so that the folder is not walked whole again:
+	 * only its description, language and content are read anew. What was not read before stays unread, and files the
+	 * game cannot read send the next check over the whole folder.
+	 */
+	public static synchronized void added(final File folder, final Tally added) {
+		final String path = folder.getAbsolutePath();
+		DESCRIPTIONS.entrySet().removeIf(entry -> entry.getKey().endsWith(":" + path)
+				&& !entry.getKey().startsWith(Kind.FOLDER + ":") && !entry.getKey().startsWith(Kind.LOCAL_FILES + ":"));
+		final Readability known;
+		synchronized (READABILITY) {
+			known = READABILITY.remove(path);
+		}
+		final Integer count;
+		synchronized (FILE_COUNTS) {
+			count = FILE_COUNTS.remove(path);
+		}
+		if (added.unreadable > 0) {
+			DESCRIPTIONS.entrySet().removeIf(entry -> entry.getKey().endsWith(":" + path));
+			FolderCheckCache.remove(folder);
+			return;
+		}
+		FolderCheckCache.afterImport(folder, added);
+		if (count != null) {
+			final int total = count + added.files;
+			synchronized (FILE_COUNTS) {
+				FILE_COUNTS.put(path, total);
+			}
+			DESCRIPTIONS.remove(Kind.FOLDER + ":" + path);
+			DESCRIPTIONS.remove(Kind.LOCAL_FILES + ":" + path);
+		}
+		if ((known != null) && (known.unreadable == 0) && !known.partial) {
+			synchronized (READABILITY) {
+				READABILITY.put(path, new Readability(known.files + added.entries, 0, known.names, false,
+						known.fileCount + added.files));
+			}
+		}
 	}
 
 	/** Forgets what was read of a folder whose files were replaced, such as by an import. */
@@ -566,6 +787,10 @@ public final class DataFolderCheck {
 		synchronized (READABILITY) {
 			READABILITY.remove(path);
 		}
+		synchronized (FILE_COUNTS) {
+			FILE_COUNTS.remove(path);
+		}
+		FolderCheckCache.remove(folder);
 	}
 
 	/** What the last walk of this folder found, without walking it again; null when it was not walked. */
@@ -576,7 +801,11 @@ public final class DataFolderCheck {
 	}
 
 	private static boolean walkReadability(final File folder, final String relative, final int[] counts,
-			final List<String> names, final int maxFiles, final int maxNames) {
+			final List<String> names, final int maxFiles, final int maxNames,
+			final FolderCheckCache.Snapshot snapshot) {
+		// The time is read before the folder is listed, so that a change during the walk shows at the next check.
+		snapshot.dirs.put(relative.isEmpty() ? "" : relative.substring(0, relative.length() - 1),
+				folder.lastModified());
 		final File[] children = folder.listFiles();
 		if (children == null) {
 			unreadable(relative.isEmpty() ? "./" : relative, counts, names, maxNames);
@@ -589,12 +818,18 @@ public final class DataFolderCheck {
 			}
 			final String path = relative + child.getName();
 			if (child.isDirectory()) {
-				if (!walkReadability(child, path + "/", counts, names, maxFiles, maxNames)) {
+				if (!walkReadability(child, path + "/", counts, names, maxFiles, maxNames, snapshot)) {
 					return false;
 				}
 			}
-			else if (!child.canRead() || (isOpenedFile(path) && !isReadable(child))) {
-				unreadable(path, counts, names, maxNames);
+			else {
+				counts[2]++;
+				if (!child.canRead() || (isOpenedFile(path) && !isReadable(child))) {
+					unreadable(path, counts, names, maxNames);
+				}
+				else if (isOpenedFile(path)) {
+					snapshot.keys.put(path, new long[] { child.length(), child.lastModified() });
+				}
 			}
 		}
 		return true;
@@ -636,7 +871,7 @@ public final class DataFolderCheck {
 		return null;
 	}
 
-	private static boolean isReadable(final File file) {
+	static boolean isReadable(final File file) {
 		if ((file == null) || !file.isFile()) {
 			return false;
 		}

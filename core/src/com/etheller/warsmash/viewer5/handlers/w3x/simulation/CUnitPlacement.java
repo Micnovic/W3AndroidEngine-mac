@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+
+import com.badlogic.gdx.math.Rectangle;
 import com.etheller.warsmash.util.ArgbImage;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
@@ -508,8 +510,38 @@ final class CUnitPlacement {
 		setPointAndCheckUnstuck(self, structure.getX(), structure.getY(), simulation);
 	}
 
-	static boolean isInRegion(final CUnit self, final CRegion region) {
-		return self.containingRegions.contains(region);
+	/**
+	 * The unit's footprint touches the region right now. A region made after the unit last moved (a trigger action
+	 * making one for the unit that just entered a rect) is not in the unit's cached region set yet, so the cache alone
+	 * would answer false for it.
+	 */
+	static boolean isInRegion(final CUnit self, final CRegion region, final CRegionManager regionManager) {
+		if (self.containingRegions.contains(region)) {
+			return true;
+		}
+		final RegionMatchImpl match = new RegionMatchImpl(region);
+		regionManager.checkRegions(
+				self.placement.collisionRectangle == null ? new Rectangle(self.getX(), self.getY(), 0, 0)
+						: self.placement.collisionRectangle,
+				match);
+		return match.found;
+	}
+
+	private static final class RegionMatchImpl implements CRegionEnumFunction {
+		private final CRegion target;
+		private boolean found;
+
+		private RegionMatchImpl(final CRegion target) {
+			this.target = target;
+		}
+
+		@Override
+		public boolean call(final CRegion region) {
+			if (region == this.target) {
+				this.found = true;
+			}
+			return this.found;
+		}
 	}
 
 	static final class RegionCheckerImpl implements CRegionEnumFunction {

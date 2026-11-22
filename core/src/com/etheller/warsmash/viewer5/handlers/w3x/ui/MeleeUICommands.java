@@ -363,7 +363,7 @@ final class MeleeUICommands {
 				abilityToUse.checkCanTargetNoTarget(this.ui.war3MapViewer.simulation,
 						this.ui.selectedUnit.getSimulationUnit(), this.ui.localPlayer.getId(), orderId, false,
 						noTargetReceiver);
-				if (noTargetReceiver.isTargetable()) {
+				if (noTargetReceiver.isTargetable() && !abilityToUse.needsTargetFromCommandCard(orderId)) {
 					final boolean shiftDown = MeleeUIInput.isShiftDown();
 					this.ui.unitOrderListener.issueImmediateOrder(
 							this.ui.selectedUnit.getSimulationUnit().getHandleId(), abilityHandleId, orderId,
@@ -1199,6 +1199,7 @@ final class MeleeUICommands {
 			this.ui.buffBarIcons[i].clear();
 		}
 		this.ui.currentBuffBarIconIndex = 0;
+		this.ui.infoPanel.hideBuffStatus();
 	}
 
 	/** The item hints describe mouse use; on a touch screen the same actions are a tap and a drag. */

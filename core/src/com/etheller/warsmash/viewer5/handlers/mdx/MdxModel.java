@@ -269,7 +269,7 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 	protected boolean prepareLater(final InputStream src, final ExecutorService executor) {
 		final DataSource dataSource = this.viewer.dataSource;
 		// the files a solved path loads are looked up only for the solver that leaves paths as they are
-		final boolean lookUpFiles = (this.pathSolver == PathSolver.DEFAULT) || (this.pathSolver == PathSolver.NOFETCH);
+		final boolean lookUpFiles = this.pathSolver == PathSolver.DEFAULT;
 		byte[] read = null;
 		if (!(src instanceof IndependentStream)) {
 			// an archive's streams share its reader with the game thread
@@ -289,11 +289,15 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 		this.preparation = new FutureTask<>(() -> {
 			final MdlxModel parser;
 			if (bytes != null) {
+				setPreparedFileBytes(bytes.length);
 				parser = new MdlxModel(ByteBuffer.wrap(bytes));
 			}
 			else {
 				try (InputStream stream = src) {
-					parser = StreamBytes.parse(stream, MdlxModel::new);
+					parser = StreamBytes.parse(stream, buffer -> {
+						setPreparedFileBytes(buffer.remaining());
+						return new MdlxModel(buffer);
+					});
 				}
 			}
 			final SetupGeosets.Prepared geometry = SetupGeosets.prepare(parser.getGeosets(), parser.getMaterials(),

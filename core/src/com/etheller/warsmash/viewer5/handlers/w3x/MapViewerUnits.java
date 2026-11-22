@@ -130,12 +130,16 @@ final class MapViewerUnits {
 						angle, buildingPathingPixelMap, editorConfigHitPointPercent, editorConfigManaAmount);
 				unitX = simulationUnit.getX();
 				unitY = simulationUnit.getY();
-				if (!renderUnitType.isAllowCustomTeamColor() || (customTeamColor == -1)) {
+				final boolean placedColor = renderUnitType.isAllowCustomTeamColor() && (customTeamColor != -1);
+				if (!placedColor) {
 					if (renderUnitType.getTeamColor() != -1) {
 						customTeamColor = renderUnitType.getTeamColor();
 					} else {
 						customTeamColor = viewer.simulation.getPlayer(playerIndex).getColor();
 					}
+				} else if (customTeamColor != viewer.simulation.getPlayer(playerIndex).getColor()) {
+					// A color chosen for the placed unit is not derivable from its owner, so a loaded game needs it saved.
+					simulationUnit.setTeamColorOverride(customTeamColor);
 				}
 				final float unitZ = Math.max(viewer.getWalkableRenderHeight(unitX, unitY),
 						viewer.terrain.getGroundHeight(unitX, unitY)) + simulationUnit.getFlyHeight();
@@ -258,6 +262,7 @@ final class MapViewerUnits {
 		}
 		viewer.terrain.setFogOfWarData(viewer.simulation, viewer.simulation.getPlayer(viewer.localPlayerIndex).getFogOfWar());
 		viewer.worldScene.fogFilter = viewer.viewerFogFilter;
+		viewer.settleFogShading();
 		viewer.widgets.wakeAllDestructables();
 	}
 
@@ -281,8 +286,9 @@ final class MapViewerUnits {
 		}
 		final float x = unit.getX();
 		final float y = unit.getY();
-		final int teamColor = renderUnitType.getTeamColor() != -1 ? renderUnitType.getTeamColor()
-				: viewer.simulation.getPlayer(unit.getPlayerIndex()).getColor();
+		final int teamColor = unit.getTeamColorOverride() != -1 ? unit.getTeamColorOverride()
+				: renderUnitType.getTeamColor() != -1 ? renderUnitType.getTeamColor()
+						: viewer.simulation.getPlayer(unit.getPlayerIndex()).getColor();
 		final float z = Math.max(viewer.getWalkableRenderHeight(x, y), viewer.terrain.getGroundHeight(x, y))
 				+ unit.getFlyHeight();
 		final String buildingShadow = renderUnitType.getBuildingShadow();
@@ -293,6 +299,10 @@ final class MapViewerUnits {
 		viewer.unitToRenderPeer.put(unit, renderUnit);
 		viewer.widgets.add(renderUnit);
 		viewer.units.add(renderUnit);
+		final float[] vertexColor = unit.getVertexColor();
+		if (vertexColor != null) {
+			renderUnit.setVertexColoring(viewer, vertexColor[0], vertexColor[1], vertexColor[2], vertexColor[3]);
+		}
 		renderUnit.shadow = createUnitShadow(viewer, renderUnitType.getRenderShadowType(), x, y);
 		if (renderUnitType.getUberSplat() != null) {
 			renderUnit.uberSplat = addUberSplatIngame(viewer, x, y, renderUnitType.getUberSplat(),

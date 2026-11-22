@@ -256,6 +256,7 @@ public class CUnitData {
 	private final Map<War3ID, CUnitType> unitIdToUnitType = new HashMap<>();
 	private final Map<War3ID, CUnitType> unitIdToUnitTypeLightweight = new HashMap<>();
 	private final Map<String, War3ID> jassLegacyNameToUnitId = new HashMap<>();
+	private final Set<String> jassLegacyNameMisses = new HashSet<>();
 	private final Map<War3ID, List<War3ID>> unitIdToTechEquivalents = new HashMap<>();
 	private Map<War3ID, List<War3ID>> unitIdToUpgradedFrom;
 	private int lightweightScannedKeyCount = -1;
@@ -1182,6 +1183,9 @@ public class CUnitData {
 	public CUnitType getUnitTypeByJassLegacyName(final String jassLegacyName) {
 		final War3ID typeId = this.jassLegacyNameToUnitId.get(jassLegacyName);
 		if (typeId == null) {
+			if (this.jassLegacyNameMisses.contains(jassLegacyName)) {
+				return null;
+			}
 			// VERY inefficient, but this is a crazy system anyway, they should not be using
 			// this!
 			Log.warn(
@@ -1196,6 +1200,7 @@ public class CUnitData {
 					return getUnitType(foundTypeId);
 				}
 			}
+			this.jassLegacyNameMisses.add(jassLegacyName);
 			return null;
 		}
 		return getUnitType(typeId);

@@ -63,6 +63,19 @@ public final class DataContentCheck {
 		if (kind == DataFolderCheck.Kind.NONE) {
 			return Collections.emptyList();
 		}
+		final List<String> kept = DataFolderCheck.cachedProblems(folder);
+		if (kept != null) {
+			try {
+				final List<Problem> problems = new ArrayList<>();
+				for (final String name : kept) {
+					problems.add(Problem.valueOf(name));
+				}
+				return problems;
+			}
+			catch (final IllegalArgumentException e) {
+				// A name this version does not know: the data is checked again.
+			}
+		}
 		try {
 			final List<DataSource> sources = new ArrayList<>();
 			sources.add(new FolderDataSource(folder.toPath()));
@@ -75,6 +88,11 @@ public final class DataContentCheck {
 			if (preparedMeleeOnly(folder)) {
 				problems.remove(Problem.NO_CAMPAIGN_MAPS);
 			}
+			final List<String> names = new ArrayList<>();
+			for (final Problem problem : problems) {
+				names.add(problem.name());
+			}
+			DataFolderCheck.cacheProblems(folder, names);
 			return problems;
 		}
 		catch (final RuntimeException e) {
@@ -152,7 +170,7 @@ public final class DataContentCheck {
 	/** Whether one mission of the list has a map the game can open (an encrypted .w3xd or a model cinematic is none). */
 	private static boolean hasCampaignMap(final DataSource data, final CampaignCatalog catalog) {
 		for (final CampaignCatalog.Entry entry : catalog.getEntries()) {
-			final int count = entry.getData().getMissions().size();
+			final int count = entry.getMissions(true).size();
 			for (int mission = 0; mission < count; mission++) {
 				for (final boolean reforged : new boolean[] { false, true }) {
 					final String file = catalog.missionMapFilename(entry, mission, reforged);

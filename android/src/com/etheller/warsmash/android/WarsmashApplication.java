@@ -24,6 +24,7 @@ public class WarsmashApplication extends Application {
 		signer = signingCertificateSha256();
 		BuildInfo.setSigningCertificate(signer);
 		ProfileStorageAndroid.init(this);
+		EngineResources.prepareInBackground(this);
 		com.etheller.warsmash.lan.LanSessions.setNetwork(new AndroidLanNetwork(this));
 		com.etheller.warsmash.launcher.lan.LanText.use((name, arguments) -> {
 			final int id = getResources().getIdentifier(name, "string", getPackageName());

@@ -48,6 +48,7 @@ class StaticStateTest {
 			"simulation.CUnitPlacement#regionCheckerImpl", "simulation.CUnitAcquisition#autoAttackTargetFinderEnum",
 			"simulation.CUnitAcquisition#autocastTargetFinderEnum",
 			// The checksum switch and its file, which holds every game the process runs.
+			"simulation.MovementTrace#all", "simulation.MovementTrace#handles", "simulation.MovementTrace#writer", "simulation.MovementTrace#linesLeft", "simulation.MovementTrace#lastLine",
 			"simulation.SimulationChecksum#enabled", "simulation.SimulationChecksum#fileName",
 			"simulation.SimulationChecksum#detailTicks", "simulation.SimulationChecksum#writer",
 			"simulation.SimulationChecksum#current", "simulation.SimulationChecksum#games",
@@ -180,7 +181,7 @@ class StaticStateTest {
 			"w3x.environment.Terrain#colorTags", "w3x.rendersim.ability.AbilityDataUI#CASTER_ART_ATTACHMENT_POINT",
 			"w3x.rendersim.ability.AbilityDataUI#TARGET_ART_ATTACHMENT_POINT",
 			"w3x.rendersim.ability.AbilityDataUI#BUFF_TARGET_ART_ATTACHMENT_POINT",
-			"w3x.rendersim.RenderDoodad#VERTEX_COLOR_BLACK", "w3x.rendersim.RenderSpellEffect#DEFAULT_ANIMATION_QUEUE",
+			"w3x.rendersim.RenderSpellEffect#DEFAULT_ANIMATION_QUEUE",
 			"w3x.rendersim.RenderSpellEffect#STAND_ONLY", "w3x.rendersim.RenderSpellEffect#DEATH_ONLY",
 			"w3x.rendersim.RenderSpellEffect#STAND_THEN_DEATH", "w3x.rendersim.RenderUnit#ILLUSION_TINT",
 			"w3x.rendersim.RenderUnitTypeData#CLASSIC_MODEL_QUALITIES", "w3x.replay.GameReplays#DATA_FILES",
@@ -268,6 +269,10 @@ class StaticStateTest {
 			// Where the platform keeps the player's Save and Replay; set once at start, not a game's state.
 			"core.launcher.StorageRoot#root",
 			"core.launcher.DataFolderCheck#READABILITY", "core.launcher.DataFolderCheck#OPENED_FILES",
+			// What the launcher kept of its walks of the game data folder; set from the files of the app, not a game's state.
+			"core.launcher.DataFolderCheck#FILE_COUNTS", "core.launcher.FolderCheckCache#SNAPSHOTS",
+			"core.launcher.FolderCheckCache#file", "core.launcher.FolderCheckCache#stamp",
+			"core.launcher.FolderCheckCache#loaded", "core.launcher.FolderCheckCache#settleMillis",
 			"core.launcher.HotkeyCatalog#BUILD_COMMANDS",
 			// The GL memory accounting of a diagnostic switch; counts the platform GL objects, not a game's state.
 			"core.util.GlMemory#ON", "core.util.GlMemory#OWNERS", "core.util.GlMemory#unit", "core.util.GlMemory#vao", "core.util.GlMemory#renderbuffer", "core.util.GlMemory#textureBytes", "core.util.GlMemory#bufferBytes", "core.util.GlMemory#renderbufferBytes", "core.util.GlMemory#unknownFormats",
@@ -275,6 +280,7 @@ class StaticStateTest {
 			"core.util.PerfStats#ENABLED", "core.util.PerfStats#WINDOW_HISTOGRAM", "core.util.PerfStats#RUN_HISTOGRAM", "core.util.PerfStats#firstFrame", "core.util.PerfStats#frameLoads", "core.util.PerfStats#frameLoadNanos", "core.util.PerfStats#frameTextureNanos", "core.util.PerfStats#slowestLoadNanos", "core.util.PerfStats#slowestLoad", "core.util.PerfStats#checkedLocalFile", "core.util.PerfStats#TOTALS",
 			"core.util.PerfStats#STEP_TOTALS", "core.util.PerfStats#textureBytes", "core.util.PerfStats#evictedTextures", "core.util.PerfStats#FRAME_SECTIONS", "core.util.PerfStats#WORST_SECTIONS",
 			"core.util.PerfStats#stepStart", "core.util.PerfStats#frameStart", "core.util.PerfStats#sectionStart",
+			"core.util.PerfStats#lastLoadingFrame", "core.util.PerfStats#worstLoadingFrame", "core.parsers.facefx.FaceFxLibrary#GAME_ANIMSETS", "core.viewer5.gl.ShaderFailure#LIMITS", "core.viewer5.gl.ShaderFailure#LIMIT_NAMES",
 			"core.util.PerfStats#frames", "core.util.PerfStats#frameTotal", "core.util.PerfStats#worstFrame",
 			"core.util.PerfStats#reportStart", "core.util.PerfStats#simulationSteps", "core.util.PerfStats#pathJobs",
 			"core.util.PerfStats#pathIterations", "core.util.PerfStats#pathDiscarded",

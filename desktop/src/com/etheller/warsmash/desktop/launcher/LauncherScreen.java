@@ -63,6 +63,7 @@ import com.etheller.warsmash.launcher.LaunchGuard;
 import com.etheller.warsmash.launcher.LaunchRequest;
 import com.etheller.warsmash.launcher.LauncherBoard;
 import com.etheller.warsmash.launcher.LauncherKeys;
+import com.etheller.warsmash.launcher.ProblemReport;
 import com.etheller.warsmash.launcher.LauncherLog;
 import com.etheller.warsmash.launcher.LauncherOptions;
 import com.etheller.warsmash.launcher.LauncherStore;
@@ -76,6 +77,7 @@ import com.etheller.warsmash.launcher.UpdateCheck;
 import com.etheller.warsmash.movie.Movies;
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.util.DataSourceFileHandle;
+import com.etheller.warsmash.util.PerfStats;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.FogSettings;
 import com.etheller.warsmash.viewer5.handlers.w3x.replay.GameReplays;
@@ -141,7 +143,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		LAN_NOTICE,
 		LAN_BLOCK,
 		LAN_LEAVE,
-		LAN_MAP
+		LAN_MAP,
+		UNLOCK_CAMPAIGN,
+		REPORT_MADE
 	}
 
 	private final WarsmashGdxMultiScreenGame game;
@@ -199,6 +203,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private int optionsTab;
 	/** What the radio rows of the shown options tab add to the row height, when their choices take a line of their own. */
 	private float optionsExtraH;
+	/** The campaigns the Debugging tab lists; null until read. */
+	private List<GameCatalog.UnlockEntry> unlockEntries;
+	private boolean readingUnlock;
+	private GameCatalog.UnlockEntry unlockAsked;
+	private boolean makingReport;
+	private ProblemReport.Result reportMade;
 	private int helpTab;
 	private String profileShown;
 	private final StringBuilder nameField = new StringBuilder();
@@ -309,6 +319,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private void editionChanged() {
 		this.catalog.setEdition(roc() ? LauncherKeys.EDITION_ROC : LauncherKeys.EDITION_TFT);
 		this.campaigns = null;
+		this.unlockEntries = null;
 		this.dataContent = null;
 		this.profileProgress = null;
 		this.catalog.campaigns(found -> this.campaigns = found);
@@ -317,6 +328,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 	private void readCatalog() {
 		this.campaigns = null;
+		this.unlockEntries = null;
 		this.maps = null;
 		this.saveList = null;
 		this.mapDetails = null;
@@ -690,6 +702,11 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		return "roc".equals(this.preferences.getString(LauncherKeys.KEY_EDITION, "tft"));
 	}
 
+	/** A campaign's background model skin field in the edition the campaign list is shown for. */
+	private String backdrop(final String background) {
+		return CampaignChoice.backdropField(background, roc() ? LauncherKeys.EDITION_ROC : LauncherKeys.EDITION_TFT);
+	}
+
 	// ---------------------------------------------------------------- pages
 
 	private void drawPage(final String[] scenes) {
@@ -961,7 +978,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final float fr = b.frame;
 		final Banner next = banner();
 		// The Reforged scenes have their figures near the middle; the classic ones are framed on the model.
-		scenes[1] = scene(1, next.scene, this.art.reforged ? 0.3f : MODEL_FOCUS, next.background, null, next.fog, 0,
+		scenes[1] = scene(1, next.scene, this.art.reforged ? 0.3f : MODEL_FOCUS, backdrop(next.background), next.background, next.fog, 0,
 				bx + (fr / 2), fr / 2, bw - fr, b.height - fr, CampaignChoice.modelX(next.scene));
 		g.gradient(bx, b.height * 0.46f, bw, b.height * 0.38f, 0x00000000, 0xE6000000, true);
 		g.fill(bx, b.height * 0.84f, bw, b.height * 0.16f, 0xE6000000);
@@ -1001,9 +1018,10 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			final CampaignCatalog catalog = this.campaigns.catalog;
 			final CCampaignProgress.Snapshot progress = this.campaigns.progress;
 			final CampaignCatalog.Entry entry = CampaignChoice.playedCampaign(catalog, progress);
-			if ((entry != null) && !entry.getData().getMissions().isEmpty()) {
-				final List<CampaignMission> missions = entry.getData().getMissions();
-				final int mission = Math.max(0, CampaignChoice.furthestMission(entry, progress));
+			final boolean reforgedMaps = reforgedMaps();
+			if ((entry != null) && !entry.getMissions(reforgedMaps).isEmpty()) {
+				final List<CampaignMission> missions = entry.getMissions(reforgedMaps);
+				final int mission = Math.max(0, CampaignChoice.furthestMission(entry, progress, reforgedMaps));
 				next.entry = entry;
 				next.mission = mission;
 				next.scene = CampaignChoice.campaignScene(entry.getSection());
@@ -1062,7 +1080,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		}
 		final CampaignCatalog.Entry entry = chosenCampaign();
 		scenes[0] = scene(0, entry != null ? CampaignChoice.campaignScene(entry.getSection()) : "roc_prologue", 0.22f,
-				entry != null ? entry.getData().getBackground() : "TutorialBackdrop", null,
+				backdrop(entry != null ? entry.getData().getBackground() : "TutorialBackdrop"),
+				entry != null ? entry.getData().getBackground() : "TutorialBackdrop",
 				entry != null ? entry.getData().getBackgroundFogSettings() : null, 0, 0, 0, b.width, b.height, -1);
 		g.gradient(b.width * 0.4f, 0, b.width * 0.6f, b.height, 0x00000000, 0xC7000000, false);
 		if ((this.page == Page.MISSIONS) && (entry != null) && (this.campaignResult != null)) {
@@ -1272,8 +1291,15 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final float dy = (t ? b.contentY + b.contentH : b.height - 8) - boxH;
 		final float dx = b.contentX;
 		final float innerW = boxW - (2 * inner);
-		if (this.campaigns.catalog.hasReforgedMaps()) {
+		final boolean versions = this.campaigns.catalog.hasReforgedMaps();
+		if (!versions && g.over(dx, dy, boxW, boxH)) {
+			g.tip(s("launcher_campaign_maps_missing_tip"));
+		}
+		if (versions) {
 			final float vy = dy - 24 - versionH;
+			if (g.over(dx, vy, boxW, versionH)) {
+				g.tip(s("launcher_campaign_maps_tip"));
+			}
 			g.edit(dx, vy, boxW, versionH, edge, 0);
 			g.text(glue("CAMPAIGN_VERSION", s("launcher_campaign_maps")), dx + inner, vy + inner, innerW, labelH, label,
 					g.palette.gold, Align.left);
@@ -1316,10 +1342,11 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final boolean t = b.tablet;
 		final boolean reforged = this.art.reforged;
 		final CCampaignProgress.Snapshot progress = this.campaigns.progress;
-		final List<CampaignMission> missions = entry.getData().getMissions();
+		final boolean reforgedMaps = reforgedMaps();
+		final List<CampaignMission> missions = entry.getMissions(reforgedMaps);
 		int chosen = this.preferences.getInt(LauncherKeys.KEY_MISSION, -1);
 		if ((chosen < 0) || (chosen >= missions.size()) || !CampaignCatalog.isMissionOpen(entry, chosen, progress)) {
-			chosen = Math.max(0, CampaignChoice.furthestMission(entry, progress));
+			chosen = Math.max(0, CampaignChoice.furthestMission(entry, progress, reforgedMaps));
 		}
 		final float rowH = reforged ? (t ? 124 : 84) : (t ? 135 : 96);
 		final float w = t ? 924 : 600;
@@ -1357,7 +1384,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			final boolean clicked;
 			final MapIssue issue = index < 0 ? MapIssue.NONE : missionIssue(entry, index);
 			if (reforged) {
-				final boolean won = (index >= 0) && CampaignCatalog.isMissionWon(entry, index, progress);
+				final boolean won = (index >= 0)
+						&& CampaignCatalog.isMissionWon(entry, index, progress, reforgedMaps);
 				clicked = chapterRow("m" + index + mission.getMissionName(), mission, isChosen,
 						index < 0 ? SkinArt.CHAPTER_CINEMATIC
 								: CampaignResult.chapterIcon(won,
@@ -1415,6 +1443,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		return GlueText.plain(glueText).toUpperCase(Locale.ROOT);
 	}
 
+	/** The size a text in small capitals is set in to fit the width: the size given, or smaller when it is too wide. */
+	private float fittedCaps(final String text, final float size, final float width) {
+		final float natural = this.gui.smallCapsWidth(text, size);
+		return natural <= width ? size : Math.max(size * 0.6f, (size * width) / natural);
+	}
+
 	/** The text size at most this one at which a line fits a width. */
 	private float fitted(final String text, final float size, final float width) {
 		final float natural = this.gui.width(text, size);
@@ -1450,6 +1484,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final float right = listX() - (t ? 48 : 16);
 		final float y = b.contentY + ((b.contentH - shield - gap - menuH) * 0.5f);
 		g.image(version == 0 ? SkinArt.VERSION_REFORGED : SkinArt.VERSION_CLASSIC, left, y, shield, shield);
+		if (g.over(left, y, right - left, shield)) {
+			g.tip(s(versions ? "launcher_campaign_maps_tip" : "launcher_campaign_maps_missing_tip"));
+		}
 		final float tx = left + shield + (t ? 20 : 10);
 		final float textW = right - tx;
 		final String header = upper(glue(data.getHeader(), data.getHeader()));
@@ -1515,8 +1552,14 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final LauncherBoard b = this.board;
 		final boolean t = b.tablet;
 		campaignBlock(entry, result);
-		final CampaignResult.Layout l = new CampaignResult.Layout(listX() + ((t ? 924 : 600) / 2f), b.width,
-				b.height);
+		final float centre = listX() + ((t ? 924 : 600) / 2f);
+		final String name = missionName(entry, result);
+		// A name wider than the banner goes on in a second line, which moves what follows.
+		final CampaignResult.Layout first = new CampaignResult.Layout(centre, b.width, b.height);
+		g.bold(true);
+		final List<String> nameLines = CampaignResult.nameLines(GlueText.plain(name),
+				line -> g.smallCapsWidth(line, first.nameSize), first.contentW);
+		final CampaignResult.Layout l = new CampaignResult.Layout(centre, b.width, b.height, nameLines.size());
 		// The banner falls in with its title; the numbers, the mission and the difficulty fade in after it.
 		if (this.resultShown != result) {
 			this.resultShown = result;
@@ -1526,10 +1569,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				: ResultMotion.totalMillis();
 		final float fall = ResultMotion.bannerOffset(elapsed) * l.h;
 		final float shown = ResultMotion.contentAlpha(elapsed);
-		g.image(CampaignResult.banner(entry.getSection()), l.x, fall, l.w, l.h);
+		g.image(CampaignResult.banner(entry.getSection()), l.x, l.bannerY + fall, l.w, l.h);
 		final String[] title = CampaignResult.title(result);
-		g.bold(true);
-		g.text(upper(glue(title[0], title[1])), l.contentX, l.titleY + fall, l.contentW, l.titleH, l.titleSize,
+		g.smallCaps(glue(title[0], title[1]), l.contentX, l.titleY + fall, l.contentW, l.titleH, l.titleSize,
 				0xFFFFFFFF, Align.center);
 		for (final float dividerY : l.dividerY) {
 			g.image(SkinArt.RESULT_DIVIDER, l.dividerX, dividerY, l.dividerW, l.dividerH, shown);
@@ -1539,8 +1581,11 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			final int[] numbers = CampaignResult.numbers(result.score, i);
 			final float y = l.rowY[i];
 			g.image(row[0], l.iconX, y, l.icon, l.icon, shown);
+			g.bold(true);
 			g.text(upper(glue(row[1], row[2])), l.detailsX, y + l.headingY, l.columnW * 2, l.headingH, l.headingSize,
 					faded(CampaignResult.HEADING_GOLD, shown), Align.left);
+			// The labels and numbers are set in the lighter weight.
+			g.bold(false);
 			final String[] labels = { glue("SCORE", "Score"), glue(row[3], row[4]) };
 			for (int c = 0; c < 2; c++) {
 				final float x = l.detailsX + (c * l.columnW);
@@ -1550,9 +1595,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 						faded(0xFFFFFFFF, shown), Align.left);
 			}
 		}
-		final String name = missionName(entry, result);
-		g.smallCaps(name, l.contentX, l.nameY, l.contentW, l.nameH, fitted(GlueText.plain(name), l.nameSize, l.contentW),
-				faded(0xFFFFFFFF, shown), Align.center);
+		g.bold(true);
+		for (int i = 0; i < nameLines.size(); i++) {
+			g.smallCaps(nameLines.get(i), l.contentX, l.nameY + (i * l.nameStep), l.contentW, l.nameH,
+					fittedCaps(nameLines.get(i), l.nameSize, l.contentW), faded(0xFFFFFFFF, shown), Align.center);
+		}
+		g.bold(false);
 		g.text(result.playTime(), l.contentX, l.durationY, l.contentW, l.durationH, l.durationSize,
 				faded(CampaignResult.HEADING_GOLD, shown), Align.center);
 		final String[] difficulty = CampaignResult.difficulty(result.difficulty);
@@ -1647,7 +1695,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		if (played < 0) {
 			return "";
 		}
-		final CampaignMission mission = entry.getData().getMissions().get(played);
+		final CampaignMission mission = entry.getMissions(true).get(played);
 		return glue(mission.getMissionName(), mission.getMissionName());
 	}
 
@@ -1655,7 +1703,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private void continueAfter(final CampaignCatalog.Entry entry, final GameResult result) {
 		final int played = CampaignResult.playedMission(this.campaigns.catalog, entry, result.map);
 		final int next = CampaignResult.continueMission(entry, this.campaigns.progress, played,
-				"victory".equals(result.result));
+				"victory".equals(result.result), reforgedMaps());
 		this.campaignResult = null;
 		if (next >= 0) {
 			launchMission(entry, next, Page.MISSIONS);
@@ -1711,6 +1759,11 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 	private MapIssue missionIssue(final CampaignCatalog.Entry entry, final int mission) {
 		return this.campaigns.issue(entry, mission, this.profiles.campaignMaps(this.profiles.current()));
+	}
+
+	/** Whether the current profile plays the Reforged campaign maps, whose mission lists the pages show. */
+	private boolean reforgedMaps() {
+		return this.campaigns.reforgedMaps(this.profiles.campaignMaps(this.profiles.current()));
 	}
 
 	private void launchMission(final CampaignCatalog.Entry entry, final int mission, final Page returnPage) {
@@ -2578,7 +2631,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private float tabsRow(final String[] names, final int selected, final java.util.function.IntConsumer chosen) {
 		final Gui g = this.gui;
 		final LauncherBoard b = this.board;
-		final int n = 6;
+		final int n = Math.max(6, names.length);
 		final float tabW = (b.contentW - ((n - 1) * b.tabGap)) / n;
 		for (int i = 0; i < names.length; i++) {
 			if (g.button("tab" + i, names[i], b.contentX + (i * (tabW + b.tabGap)), b.contentY, tabW, b.tabH, b.tabText,
@@ -2592,8 +2645,17 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 	/** A row of the options panel: the line above it and the gold label. */
 	private float optionRow(final float x, final float y, final float w, final int index, final String label) {
+		return optionRow(x, y, w, index, label, null);
+	}
+
+	/** @param tip shown on hover over the row, or null for a row with nothing to explain */
+	private float optionRow(final float x, final float y, final float w, final int index, final String label,
+			final String tip) {
 		final Gui g = this.gui;
 		final LauncherBoard b = this.board;
+		if ((tip != null) && g.over(x, y, w, b.rowH)) {
+			g.tip(tip);
+		}
 		if (index > 0) {
 			g.fill(x, y, w, 2, 0x14FFFFFF);
 		}
@@ -2608,7 +2670,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		final boolean t = b.tablet;
 		final float pf = b.pageFrame;
 		final float top = tabsRow(new String[] { s("options_graphics"), s("options_sound"), s("options_gameplay"),
-			s("options_controls"), s("options_game_data"), s("options_about") }, this.optionsTab,
+			s("options_controls"), s("options_game_data"), s("options_about"), s("options_debugging") },
+				this.optionsTab,
 				tab -> this.optionsTab = tab);
 		if (this.optionsTab != 3) {
 			this.capturing = null;
@@ -2662,7 +2725,7 @@ public final class LauncherScreen implements Screen, InputProcessor {
 						if (router != null) {
 							router.setPenButton(button);
 						}
-					}));
+					}, s("options_pen_note")));
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_profile"), this.profiles.current()));
 			break;
 		case 3:
@@ -2700,6 +2763,13 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				});
 			}
 			break;
+		case 6:
+			rows.add(checkRow(rowY, index, x, w, controlX, s("options_perf_log"),
+					PerfStats.isSwitchedOn(perfFolder()), on -> PerfStats.setSwitch(perfFolder(), on),
+					s("options_perf_note")));
+			reportRows(rows, rowY, index, x, w, controlX);
+			unlockRows(rows, rowY, index, x, w, controlX);
+			break;
 		default:
 			graphicsRows(rows, rowY, index, x, w, controlX, engine);
 			break;
@@ -2719,6 +2789,174 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			playClick();
 			showPage(Page.HOME);
 		}
+	}
+
+	/** Where the performance log switch file lives: the folder the game runs in. */
+	private static java.io.File perfFolder() {
+		return new java.io.File(System.getProperty("user.dir"));
+	}
+
+	/**
+	 * Campaigns the player opens by hand when the progress got stuck: one switch per campaign of the game data. Only a
+	 * separate flag is kept, so the progress and the saves are the player's own whether the switch is on or off.
+	 */
+	private void unlockRows(final List<Runnable> rows, final float[] rowY, final int[] index, final float x,
+			final float w, final float controlX) {
+		final int headingAt = index[0]++;
+		rows.add(() -> {
+			final LauncherBoard b = this.board;
+			if (headingAt > 0) {
+				this.gui.fill(x, rowY[0], w, 2, 0x14FFFFFF);
+			}
+			this.gui.text(s("options_unlock_campaigns"), x + b.labelX, rowY[0], w - (2 * b.labelX), b.rowH, b.body,
+					this.gui.palette.text2, Align.left);
+			if ((this.unlockEntries == null) || this.unlockEntries.isEmpty()) {
+				this.gui.text(s("options_unlock_none"), controlX, rowY[0], (x + w) - controlX - 20, b.rowH, b.body,
+						SkinArt.Palette.DISABLED, Align.left);
+			}
+			if (this.gui.over(x, rowY[0], w, b.rowH)) {
+				this.gui.tip(s("options_unlock_note"));
+			}
+			rowY[0] += b.rowH;
+		});
+		if (this.unlockEntries == null) {
+			if (!this.readingUnlock) {
+				this.readingUnlock = true;
+				this.catalog.unlockEntries(found -> {
+					this.unlockEntries = found != null ? found : Collections.emptyList();
+					this.readingUnlock = false;
+				});
+			}
+			return;
+		}
+		for (final GameCatalog.UnlockEntry entry : this.unlockEntries) {
+			rows.add(checkRow(rowY, index, x, w, controlX, glue(entry.name, entry.name), entry.unlocked, on -> {
+				if (!on || this.preferences.getBoolean(LauncherKeys.KEY_UNLOCK_ASKED, false)) {
+					setUnlocked(entry, on);
+				}
+				else {
+					this.unlockAsked = entry;
+					this.dialog = Dialog.UNLOCK_CAMPAIGN;
+				}
+			}));
+		}
+	}
+
+	/**
+	 * Report a Bug: one zip with everything the bug needs, written beside the replays and shown in its folder
+	 * on request.
+	 */
+	private void reportRows(final List<Runnable> rows, final float[] rowY, final int[] index, final float x,
+			final float w, final float controlX) {
+		final int consentAt = index[0]++;
+		rows.add(() -> {
+			final LauncherBoard b = this.board;
+			if (consentAt > 0) {
+				this.gui.fill(x, rowY[0], w, 2, 0x14FFFFFF);
+			}
+			this.gui.text(s("options_report_consent"), x + b.labelX, rowY[0], w - (2 * b.labelX), b.rowH, b.small,
+					this.gui.palette.text2, Align.center);
+			rowY[0] += b.rowH;
+		});
+		final int makeAt = index[0]++;
+		rows.add(() -> {
+			final LauncherBoard b = this.board;
+			optionRow(x, rowY[0], w, makeAt, s("options_report"), s("options_report_note"));
+			if (this.gui.button("reportMake", s(this.makingReport ? "options_report_making" : "options_report_make"),
+					controlX, rowY[0] + 8, b.tablet ? 300 : 220, b.rowH - 16, b.tablet ? 32 : 24,
+					this.makingReport ? Gui.TONE_OFF : Gui.TONE_NORMAL) && !this.makingReport) {
+				playClick();
+				makeReport();
+			}
+			rowY[0] += b.rowH;
+		});
+	}
+
+	/** What the computer knows goes in here; the catalog adds the game's part and writes the zip. */
+	private void makeReport() {
+		this.makingReport = true;
+		final ProblemReport.Request request = new ProblemReport.Request();
+		request.time = System.currentTimeMillis();
+		final BuildInfo build = BuildInfo.current();
+		request.facts.put("App version", build.getVersionName());
+		request.facts.put("Commit", build.getBuildId());
+		request.facts.put("Device", System.getProperty("os.name") + " " + System.getProperty("os.version") + " ("
+				+ System.getProperty("os.arch") + "), Java " + System.getProperty("java.version"));
+		request.facts.put("GPU", Gdx.gl.glGetString(GL20.GL_RENDERER) + " (" + Gdx.gl.glGetString(GL20.GL_VENDOR)
+				+ ", " + Gdx.gl.glGetString(GL20.GL_VERSION) + ")");
+		request.facts.put("Graphics", "set=" + graphicsSet() + ", textureSize=" + shownTextureSize()
+				+ ", renderScale=" + renderScalePercent() + ", skin=" + (this.art.reforged ? "Reforged" : "Classic"));
+		final String simulationThread = System.getProperty("warsmash.simthread");
+		if (simulationThread != null) {
+			request.facts.put("Simulation thread", simulationThread);
+		}
+		request.appLog = runLog();
+		request.appLogName = "the log of this run";
+		this.catalog.problemReport(request, new File(this.saves.getAbsoluteFile().getParentFile(), "Reports"),
+				java.time.ZoneId.systemDefault(), result -> {
+					this.makingReport = false;
+					this.reportMade = result;
+					if (result == null) {
+						this.messageTitle = s("options_report");
+						this.messageLine = s("options_report_failed");
+						this.dialog = Dialog.MESSAGE;
+					}
+					else {
+						LauncherLog.i("Problem report written to " + result.file.getAbsolutePath());
+						this.dialog = Dialog.REPORT_MADE;
+					}
+				});
+	}
+
+	/** The engine's own log files of this run (the newest of each kind in Logs), standard output first. */
+	private static List<String> runLog() {
+		final List<String> lines = new ArrayList<>();
+		for (final String suffix : new String[] { ".out.log", ".err.log" }) {
+			final File[] logs = new File("Logs").listFiles((dir, name) -> name.endsWith(suffix));
+			File newest = null;
+			if (logs != null) {
+				for (final File log : logs) {
+					if ((newest == null) || (log.lastModified() > newest.lastModified())) {
+						newest = log;
+					}
+				}
+			}
+			if (newest == null) {
+				continue;
+			}
+			lines.add("--- " + newest.getName());
+			try {
+				lines.addAll(java.nio.file.Files.readAllLines(newest.toPath(), java.nio.charset.StandardCharsets.UTF_8));
+			}
+			catch (final IOException | RuntimeException e) {
+				lines.add("The log could not be read: " + e);
+			}
+		}
+		return lines;
+	}
+
+	/** The report's folder with the report chosen in it, where the platform can do that. */
+	private static void revealReport(final File report) {
+		try {
+			if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows")) {
+				new ProcessBuilder("explorer.exe", "/select," + report.getAbsolutePath()).start();
+			}
+			else if (java.awt.Desktop.isDesktopSupported()) {
+				java.awt.Desktop.getDesktop().open(report.getAbsoluteFile().getParentFile());
+			}
+		}
+		catch (final IOException | RuntimeException | LinkageError e) {
+			LauncherLog.w("Unable to show the problem report's folder", e);
+		}
+	}
+
+	/** Keeps the choice beside the profile; the campaign screens read the progress anew. */
+	private void setUnlocked(final GameCatalog.UnlockEntry entry, final boolean on) {
+		this.catalog.setCampaignUnlocked(entry.section, on, kept -> {
+			this.unlockEntries = null;
+			this.campaigns = null;
+			this.catalog.campaigns(found -> this.campaigns = found);
+		});
 	}
 
 	private void engineRows(final List<Runnable> rows, final float[] rowY, final int[] index, final float x,
@@ -2749,9 +2987,15 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private Runnable checkRow(final float[] rowY, final int[] index, final float x, final float w,
 			final float controlX, final String label, final boolean value,
 			final java.util.function.Consumer<Boolean> changed) {
+		return checkRow(rowY, index, x, w, controlX, label, value, changed, null);
+	}
+
+	private Runnable checkRow(final float[] rowY, final int[] index, final float x, final float w,
+			final float controlX, final String label, final boolean value,
+			final java.util.function.Consumer<Boolean> changed, final String tip) {
 		final int at = index[0]++;
 		return () -> {
-			final float cy = optionRow(x, rowY[0], w, at, label);
+			final float cy = optionRow(x, rowY[0], w, at, label, tip);
 			if (this.gui.check("check" + label, controlX, cy, this.board.control, value)) {
 				playClick();
 				changed.accept(!value);
@@ -2763,6 +3007,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 	private Runnable radioRow(final float[] rowY, final int[] index, final float x, final float w,
 			final float controlX, final String label, final String[] choices, final boolean[] enabled,
 			final int selected, final java.util.function.IntConsumer changed) {
+		return radioRow(rowY, index, x, w, controlX, label, choices, enabled, selected, changed, null);
+	}
+
+	private Runnable radioRow(final float[] rowY, final int[] index, final float x, final float w,
+			final float controlX, final String label, final String[] choices, final boolean[] enabled,
+			final int selected, final java.util.function.IntConsumer changed, final String tip) {
 		final int at = index[0]++;
 		final LauncherBoard b = this.board;
 		final float[] names = new float[choices.length];
@@ -2779,9 +3029,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				}
 				this.gui.text(label, x + b.labelX, y, w - b.labelX - 20, places.labelH, b.body,
 						this.gui.palette.gold, Align.left);
+				if ((tip != null) && this.gui.over(x, y, w, places.height)) {
+					this.gui.tip(tip);
+				}
 			}
 			else {
-				optionRow(x, y, w, at, label);
+				optionRow(x, y, w, at, label, tip);
 			}
 			final float cy = y + places.choicesY + ((b.rowH - b.control) / 2);
 			for (int j = 0; j < choices.length; j++) {
@@ -2838,10 +3091,15 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 	private Runnable infoRow(final float[] rowY, final int[] index, final float x, final float w,
 			final float controlX, final String label, final String value) {
+		return infoRow(rowY, index, x, w, controlX, label, value, null);
+	}
+
+	private Runnable infoRow(final float[] rowY, final int[] index, final float x, final float w,
+			final float controlX, final String label, final String value, final String tip) {
 		final int at = index[0]++;
 		return () -> {
 			final LauncherBoard b = this.board;
-			optionRow(x, rowY[0], w, at, label);
+			optionRow(x, rowY[0], w, at, label, tip);
 			final boolean cut = this.gui.text(value, controlX, rowY[0], (x + w) - controlX - 20, b.rowH, b.body,
 					this.gui.palette.text, Align.left);
 			if (cut && this.gui.over(controlX, rowY[0], (x + w) - controlX, b.rowH)) {
@@ -2987,6 +3245,9 @@ public final class LauncherScreen implements Screen, InputProcessor {
 
 		final float headH = 80 * k;
 		g.text(s("controls_layout"), x0, y0, (360 * k) + 60, headH, big, g.palette.gold, Align.left);
+		if (g.over(x0, y0, (360 * k) + 60, headH)) {
+			g.tip(s("controls_layout_tip"));
+		}
 		final float radio = b.control * (t ? 0.9f : 0.8f);
 		final String[] layouts = { s("controls_classic"), s("controls_grid") };
 		for (int j = 0; j < layouts.length; j++) {
@@ -3242,12 +3503,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				}
 				list.append(entry.getKey()).append(" \u2013 ").append(String.join(" / ", entry.getValue()));
 			}
-			g.lines(s("controls_conflict").replace("%1$s", list), kx, noteY, kw, inner - noteY, small, 0xFFFF8A7A,
-					Align.left);
-		}
-		else {
-			g.lines(s(keys.grid() ? "controls_line_grid" : "controls_line_classic"), kx, noteY, kw, inner - noteY,
-					small, g.palette.text2, Align.left);
+			g.text(s("controls_conflict").replace("%1$s", list), kx, noteY, kw, small * 1.6f, small, g.palette.text,
+					Align.center);
 		}
 	}
 
@@ -3379,11 +3636,12 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			}
 			final String current = GameLanguage.configured(this.ini).isEmpty() ? locale : GameLanguage.configured(this.ini);
 			rows.add(radioRow(rowY, index, x, w, controlX, s("options_language"), names, null,
-					Math.max(0, languages.indexOf(current)), choice -> useLanguage(languages.get(choice))));
+					Math.max(0, languages.indexOf(current)), choice -> useLanguage(languages.get(choice)),
+					s("options_language_note")));
 		}
 		else {
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_locale"),
-					locale.isEmpty() ? s("options_not_stated") : locale));
+					locale.isEmpty() ? s("options_not_stated") : locale, s("options_locale_note")));
 		}
 		if (!casc && (folder != null)) {
 			rows.add(infoRow(rowY, index, x, w, controlX, s("options_files"), filesText(kind, folder)));
@@ -3775,6 +4033,8 @@ public final class LauncherScreen implements Screen, InputProcessor {
 		case NO_CLASSIC_LANGUAGE:
 			return this.strings.get("data_folder_import_no_classic_language", name,
 					GameLanguage.displayName(failure.file));
+		case NOT_WRITABLE:
+			return this.strings.get("data_folder_import_not_writable", name);
 		case CANCELLED:
 			return s("data_folder_import_cancelled");
 		case IO:
@@ -4042,13 +4302,15 @@ public final class LauncherScreen implements Screen, InputProcessor {
 				if (entry == null) {
 					continue;
 				}
-				final int furthest = CampaignChoice.furthestMission(entry, progress);
+				final boolean reforgedMaps = this.campaigns.reforgedMaps(this.profiles.campaignMaps(name));
+				final List<CampaignMission> missions = entry.getMissions(reforgedMaps);
+				final int furthest = CampaignChoice.furthestMission(entry, progress, reforgedMaps);
 				final boolean started = CampaignChoice.started(entry, progress);
 				final String value = !started ? s("profile_not_started")
-						: CampaignCatalog.isCompleted(entry, progress) ? s("profile_completed")
+						: CampaignCatalog.isCompleted(entry, progress, reforgedMaps) ? s("profile_completed")
 								: furthest < 0 ? ""
-										: GlueText.plain(glue(menu.getMissions().get(furthest).getHeader(),
-												menu.getMissions().get(furthest).getHeader()));
+										: GlueText.plain(glue(missions.get(furthest).getHeader(),
+												missions.get(furthest).getHeader()));
 				g.text(CampaignChoice.shortCampaign(GlueText.plain(glue(menu.getHeader(), menu.getHeader()))),
 						x + (14 * k), y, 250 * k, step, rowSize, g.palette.text, Align.left);
 				g.text(value, x + (250 * k), y, columnW - (250 * k), step, rowSize, g.palette.text, Align.left);
@@ -4107,6 +4369,31 @@ public final class LauncherScreen implements Screen, InputProcessor {
 			question(this.messageTitle, this.messageLine, new String[] { s("game_ok") }, choice -> {
 			}, 0);
 			break;
+		case REPORT_MADE: {
+			final ProblemReport.Result made = this.reportMade;
+			String line = made == null ? "" : s("options_report_saved").replace("%1$s", made.file.getAbsolutePath());
+			if ((made != null) && !made.leftOut.isEmpty()) {
+				line += "\n" + s("options_report_left_out").replace("%1$s", String.join("; ", made.leftOut));
+			}
+			question(s("options_report"), line, new String[] { s("options_report_ok"), s("options_report_show") },
+					choice -> {
+						if ((choice == 1) && (made != null)) {
+							revealReport(made.file);
+						}
+					}, 0);
+			break;
+		}
+		case UNLOCK_CAMPAIGN: {
+			final GameCatalog.UnlockEntry entry = this.unlockAsked;
+			question(s("unlock_title"), s("unlock_line"), new String[] { s("unlock_cancel"), s("unlock_turn_on") },
+					choice -> {
+						if ((choice == 1) && (entry != null)) {
+							this.preferences.edit().putBoolean(LauncherKeys.KEY_UNLOCK_ASKED, true).apply();
+							setUnlocked(entry, true);
+						}
+					}, 0);
+			break;
+		}
 		case DELETE_SAVE: {
 			final GameCatalog.SaveEntry entry = this.saveList == null ? null : chosenSave();
 			question(s("game_delete_save").replace("%1$s", entry == null ? "" : entry.name), "",

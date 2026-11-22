@@ -1364,6 +1364,9 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 			}
 		}
 		PerfStats.stepEnd(PerfStats.Step.PATHING);
+		if (MovementTrace.ENABLED) {
+			MovementTrace.afterStep(this);
+		}
 		this.gameTurnTick++;
 		final float timeOfDayBefore = getGameTimeOfDay();
 		if (this.falseTimeOfDay != null) {
@@ -2611,7 +2614,14 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 	}
 
 	public void changeUnitColor(final CUnit unit, final int playerIndex) {
+		unit.setTeamColorOverride(-1);
 		this.simulationRenderController.changeUnitColor(unit, playerIndex);
+	}
+
+	/** SetUnitColor: the unit shows this team color until its owner takes it back or its owner's color changes. */
+	public void setUnitTeamColor(final CUnit unit, final int color) {
+		unit.setTeamColorOverride(color);
+		this.simulationRenderController.setUnitTeamColor(unit, color);
 	}
 
 	public void changeUnitVertexColor(final CUnit unit, final Color color) {
@@ -2798,11 +2808,17 @@ public class CSimulation implements CPlayerAPI, CSightWorld, HandleIdSource {
 		player.setColor(newColor);
 		for (final CUnit unit : this.units) {
 			if (unit.getPlayerIndex() == player.getId()) {
+				if (unit.getTeamColorOverride() == previousColor) {
+					unit.setTeamColorOverride(newColor);
+				}
 				this.simulationRenderController.changeUnitPlayerColor(unit, previousColor, newColor);
 			}
 		}
 		for (final CUnit unit : this.newUnits) {
 			if (unit.getPlayerIndex() == player.getId()) {
+				if (unit.getTeamColorOverride() == previousColor) {
+					unit.setTeamColorOverride(newColor);
+				}
 				this.simulationRenderController.changeUnitPlayerColor(unit, previousColor, newColor);
 			}
 		}

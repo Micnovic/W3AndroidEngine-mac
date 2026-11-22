@@ -118,9 +118,12 @@ public class CAbilityHero extends AbstractCAbility {
 	private void learnSkill(final CSimulation game, final CUnit caster, final War3ID skillId) {
 		final CAbilityType<?> abilityType = game.getAbilityData().getAbilityType(skillId);
 		if (abilityType != null) {
-			this.skillPoints--;
 			final CLevelingAbility existingAbility = caster
 					.getAbility(GetAbilityByRawcodeVisitor.getInstance().reset(skillId));
+			if ((existingAbility != null) && (existingAbility.getLevel() >= abilityType.getLevelCount())) {
+				return;
+			}
+			this.skillPoints--;
 			if (existingAbility == null) {
 				final CAbility newAbility = abilityType.createAbility(game.getHandleIdAllocator().createId());
 				newAbility.setHero(true);

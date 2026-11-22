@@ -136,7 +136,7 @@ final class HotkeyEditorPage extends LauncherViews {
 					keys.setGrid(choice == 1, engineStore());
 					this.capturing = null;
 					build();
-				});
+				}, null, getString(R.string.controls_layout_tip));
 		resetRow(keys);
 
 		final List<HotkeyCatalog.Race> races = this.hotkeys.races;
@@ -459,6 +459,10 @@ final class HotkeyEditorPage extends LauncherViews {
 			build();
 		});
 		key.setContentDescription(getString(R.string.controls_key));
+		key.setOnLongClickListener(v -> {
+			showHint(key, getString(R.string.controls_tap_hint));
+			return true;
+		});
 		place(area, key, detailX, keyY, keyW, keyH);
 		final float defaultW = b.tablet ? 480 : 270;
 		final boolean changed = keys.changed(selected);
@@ -474,8 +478,6 @@ final class HotkeyEditorPage extends LauncherViews {
 				});
 		restore.setEnabled(changed);
 		place(area, restore, detailX + keyW + (b.tablet ? 30 : 16), keyY + (keyH * 0.1f), defaultW, keyH * 0.8f);
-		final TextView hint = lines(getString(R.string.controls_tap_hint), b.small, this.activity.art.text2(), 3);
-		place(area, hint, detailX, keyY + keyH + (b.tablet ? 20 : 8), detailW, -1);
 
 		// The chosen command's tooltip as the game shows it, with its key as the player has it; a conflict under it.
 		final LinearLayout tip = new LinearLayout(this.activity);
@@ -509,14 +511,10 @@ final class HotkeyEditorPage extends LauncherViews {
 			final LinearLayout.LayoutParams conflictParams = new LinearLayout.LayoutParams(MATCH,
 					ViewGroup.LayoutParams.WRAP_CONTENT);
 			conflictParams.topMargin = px(b.tablet ? 16 : 8);
-			tip.addView(lines(getString(R.string.controls_conflict, list), b.small, 0xFFFF8A7A, 4), conflictParams);
-		}
-		else {
-			final LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(MATCH,
-					ViewGroup.LayoutParams.WRAP_CONTENT);
-			noteParams.topMargin = px(b.tablet ? 16 : 8);
-			tip.addView(lines(getString(keys.keys().grid() ? R.string.controls_line_grid : R.string.controls_line_classic),
-					b.small, this.activity.art.text2(), 3), noteParams);
+			final TextView conflict = lines(LauncherKit.glueText(getString(R.string.controls_conflict, list)), b.small,
+					Color.WHITE, 3);
+			conflict.setGravity(Gravity.CENTER_HORIZONTAL);
+			tip.addView(conflict, conflictParams);
 		}
 		this.holder.addView(tip, new LinearLayout.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT));
 	}

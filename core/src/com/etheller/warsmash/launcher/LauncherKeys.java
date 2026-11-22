@@ -16,6 +16,8 @@ public final class LauncherKeys {
 	public static final String KEY_PROFILES_SHARED = "profilesShared";
 	/** Whether a crash leaves a log file on the phone (off by default; the player turns it on knowing what it holds). */
 	public static final String KEY_CRASH_LOGS = "crashLogs";
+	/** Set once the player has read what unlocking a campaign by hand does and agreed. */
+	public static final String KEY_UNLOCK_ASKED = "campaignUnlockAsked";
 	/** The desktop's in-game graphics and texture size limit; Android keeps them in the engine configuration. */
 	public static final String KEY_GRAPHICS = "graphics";
 	public static final String KEY_TEXTURE_SIZE = "textureSize";

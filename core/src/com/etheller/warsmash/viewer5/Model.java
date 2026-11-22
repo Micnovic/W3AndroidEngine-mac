@@ -19,6 +19,8 @@ public abstract class Model<HANDLER extends ModelHandler> extends HandlerResourc
 	/** Whether a step of the model's build is running now. */
 	boolean stepping;
 	long buildNanos;
+	/** The size of the file its helper has read, 0 until then. */
+	private volatile long preparedFileBytes;
 
 	public Model(final HANDLER handler, final ModelViewer viewer, final String extension, final PathSolver pathSolver,
 			final String fetchUrl) {
@@ -92,6 +94,15 @@ public abstract class Model<HANDLER extends ModelHandler> extends HandlerResourc
 	 */
 	protected boolean prepareLater(final InputStream src, final ExecutorService executor) {
 		return false;
+	}
+
+	/** Called by the helper once it has read the file, which tells the viewer how much its result holds. */
+	protected void setPreparedFileBytes(final long bytes) {
+		this.preparedFileBytes = Math.max(1, bytes);
+	}
+
+	long getPreparedFileBytes() {
+		return this.preparedFileBytes;
 	}
 
 	/** Whether the helper of a pending model is done, so that building it does not wait. */

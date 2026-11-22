@@ -36,6 +36,8 @@ public class MdxHandler extends ModelHandler {
 		this.shaders.complex = viewer.webGL.createShaderProgram(MdxShaders.vsComplex(), MdxShaders.fsComplex);
 		this.shaders.extended = viewer.webGL.createShaderProgram("#define EXTENDED_BONES\r\n" + MdxShaders.vsComplex(),
 				MdxShaders.fsComplex);
+		this.shaders.groundComplex = viewer.webGL.createShaderProgram(
+				MdxShaders.GROUND_SHADED + MdxShaders.vsComplex(), MdxShaders.GROUND_SHADED + MdxShaders.fsComplex);
 		this.shaders.complexShadowMap = viewer.webGL.createShaderProgram(MdxShaders.vsComplex(),
 				MdxShaders.fsComplexShadowMap);
 		this.shaders.extendedShadowMap = viewer.webGL.createShaderProgram(
@@ -66,6 +68,8 @@ public class MdxHandler extends ModelHandler {
 		}
 
 		public ShaderProgram complex;
+		/** {@link #complex} for a model drawn as part of the ground, see {@link GroundShading}. */
+		public ShaderProgram groundComplex;
 		public ShaderProgram complexShadowMap;
 		public ShaderProgram extended;
 		public ShaderProgram extendedShadowMap;

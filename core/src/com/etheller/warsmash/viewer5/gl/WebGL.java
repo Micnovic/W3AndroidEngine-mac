@@ -92,13 +92,13 @@ public class WebGL {
 		if (shaderProgram.isCompiled()) {
 			return shaderProgram;
 		}
-		else {
-			Log.warn(shaderProgram.getLog());
-			if (true) {
-				throw new IllegalStateException("Bad shader");
-			}
-		}
-		return null;
+		shaderPrograms.remove(hash);
+		final String report = ShaderFailure.describe(this.gl, vertexSrc, fragmentSrc, shaderProgram.getLog());
+		shaderProgram.dispose();
+		Log.error(report);
+		Log.error(ShaderFailure.numbered("Vertex shader source", vertexSrc));
+		Log.error(ShaderFailure.numbered("Fragment shader source", fragmentSrc));
+		throw new ShaderFailure(report);
 	}
 
 	/**

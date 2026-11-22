@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.zip.CRC32;
 
 import com.etheller.warsmash.datasources.DataSource;
+import com.etheller.warsmash.datasources.GameLanguage;
 import com.etheller.warsmash.parsers.w3x.War3Map;
 import com.etheller.warsmash.parsers.w3x.objectdata.Warcraft3MapObjectData;
 import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3i;
@@ -89,6 +90,7 @@ public final class MapListCache {
 	 */
 	public static Listing load(final File file, final DataTable ini, final DataSource data) {
 		final String header = header(GameCatalog.dataKey(ini), ini);
+		GameLanguage.useInGame(ini);
 		Listing listing = read(file, header);
 		if (listing == null) {
 			listing = scan(data);
@@ -98,7 +100,10 @@ public final class MapListCache {
 	}
 
 	static String header(final String dataKey, final DataTable ini) {
-		return FORMAT + "|" + dataKey + "|" + fingerprint(ini);
+		// The titles are read in the game's language, so a list kept for another language is made again.
+		final String language = GameLanguage.mapFolder(GameLanguage.effective(ini)) == null ? ""
+				: "|" + GameLanguage.effective(ini);
+		return FORMAT + "|" + dataKey + "|" + fingerprint(ini) + language;
 	}
 
 	/**

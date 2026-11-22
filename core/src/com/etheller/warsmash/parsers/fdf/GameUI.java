@@ -1850,6 +1850,23 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 	}
 
 	/**
+	 * Lets frames that are created but never shown with this data (the Reforged cinematic backdrop in Classic
+	 * graphics) ask for a texture that is not there without a data error report.
+	 */
+	public void expectMissingTexture(final String skinField) {
+		final String path = trySkinField(skinField);
+		if ((path != null) && !path.isEmpty() && !path.equals(skinField) && !this.pathToTexture.containsKey(path)
+				&& !this.missingTextures.containsKey(path)) {
+			final String blp = path.substring(0, path.lastIndexOf('.') == -1 ? path.length() : path.lastIndexOf('.'))
+					+ ".blp";
+			if (!this.dataSource.has(path) && !this.dataSource.has(blp) && !this.dataSource
+					.has(blp.substring(0, blp.length() - 4) + ".dds")) {
+				this.missingTextures.put(path, null);
+			}
+		}
+	}
+
+	/**
 	 * @param reportMissing false when the caller has another file to try, so that the data error report lists only
 	 *                      what stays missing
 	 */

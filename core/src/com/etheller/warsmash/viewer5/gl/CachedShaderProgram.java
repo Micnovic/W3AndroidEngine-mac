@@ -25,6 +25,8 @@ public class CachedShaderProgram extends ShaderProgram {
 	private final Map<String, Integer> attributeLocations = new HashMap<>();
 	private final UniformCache uniformCache = new UniformCache();
 	private int cachedHandle;
+	private int links;
+	private Object holder;
 
 	public CachedShaderProgram(final String vertexShader, final String fragmentShader) {
 		super(vertexShader, fragmentShader);
@@ -39,6 +41,20 @@ public class CachedShaderProgram extends ShaderProgram {
 		final int location = super.fetchUniformLocation(name, pedantic);
 		this.uniformLocations.put(name, location);
 		return location;
+	}
+
+	/** Counts the times the program was linked anew, after which locations found before mean nothing. */
+	public int getLinks() {
+		return this.links;
+	}
+
+	/** What a user of the program keeps with it (its locations); dropped when the program is linked anew. */
+	public Object getHolder() {
+		return this.holder;
+	}
+
+	public void setHolder(final Object holder) {
+		this.holder = holder;
 	}
 
 	private int cachedAttributeLocation(final String name) {
@@ -91,6 +107,8 @@ public class CachedShaderProgram extends ShaderProgram {
 		final int handle = getHandle();
 		if (handle != this.cachedHandle) {
 			this.cachedHandle = handle;
+			this.links++;
+			this.holder = null;
 			this.uniformCache.clear();
 			this.uniformLocations.clear();
 			this.attributeLocations.clear();

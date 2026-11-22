@@ -2195,9 +2195,15 @@ public class CPathfindingProcessor {
 					}
 					if (this.pathingGrid.contains(x, y)
 							&& this.pathingGrid.isPathable(x, y, job.movementType, job.collisionSize)
-							&& (!freeOfUnits || !this.worldCollision.intersectsStandingUnitOtherThan(
-									this.tempRect.setCenter(x, y), job.ignoreIntersectionsWithThisUnit,
-									job.ignoreIntersectionsWithThisSecondUnit, job.movementType, this.gameTurnTick))) {
+							// toward a building the spot must be one the walk can stand on: units beside it take a cell
+							// footprint, so a gap between two of them that only the collision squares allow is no spot
+							&& (!freeOfUnits || !(toBuilding && usesFootprint(job.movementType)
+									? !isPathableDynamically(x, y, job.ignoreIntersectionsWithThisUnit,
+											job.ignoreIntersectionsWithThisSecondUnit, job.movementType)
+									: this.worldCollision.intersectsStandingUnitOtherThan(
+											this.tempRect.setCenter(x, y), job.ignoreIntersectionsWithThisUnit,
+											job.ignoreIntersectionsWithThisSecondUnit, job.movementType,
+											this.gameTurnTick)))) {
 						bestDistance = distance;
 						bestStartDistance = startDistance;
 						bestX = x;

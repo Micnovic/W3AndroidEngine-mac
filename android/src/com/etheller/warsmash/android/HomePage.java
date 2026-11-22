@@ -342,10 +342,12 @@ final class HomePage extends LauncherViews {
 		final CampaignCatalog catalog = this.activity.campaigns.catalog;
 		final CCampaignProgress.Snapshot progress = this.activity.campaigns.progress;
 		final CampaignCatalog.Entry entry = CampaignChoice.playedCampaign(catalog, progress);
-		if ((entry == null) || entry.getData().getMissions().isEmpty()) {
+		final List<CampaignMission> missions = entry == null ? null
+				: entry.getMissions(this.activity.campaigns
+						.reforgedMaps(this.activity.profiles.campaignMaps(this.activity.profiles.current())));
+		if ((missions == null) || missions.isEmpty()) {
 			return null;
 		}
-		final List<CampaignMission> missions = entry.getData().getMissions();
 		int mission = 0;
 		for (int i = 0; i < missions.size(); i++) {
 			if (CampaignCatalog.isMissionOpen(entry, i, progress)) {
@@ -446,7 +448,7 @@ final class HomePage extends LauncherViews {
 		}
 		if (live) {
 			this.bannerScene = this.activity.sceneBackdrop(still, shown.scene, focus, LauncherActivity.LAYER_BANNER,
-					shown.background, null,
+					this.activity.backdropField(shown.background), shown.background,
 					shown.fog, 0, x + (b.frame / 2), b.frame / 2, innerW, innerH, CampaignChoice.modelX(shown.scene));
 		}
 		else {
@@ -560,7 +562,7 @@ final class HomePage extends LauncherViews {
 		final TextView version = text(buildLine() + dataVersion(), 24, LauncherKit.CAPTION);
 		version.setPadding(px(20), 0, 0, 0);
 		version.setShadowLayer(0, 0, 0, 0);
-		place(parent, version, 24, WarsmashApplication.originLabel(this.activity).isEmpty() ? 1730 : 1766, 592, 48);
+		place(parent, version, 24, showsBuildBadge() ? 1766 : 1730, 592, 48);
 	}
 
 	private View indicator(final String label, final boolean present) {
@@ -591,12 +593,20 @@ final class HomePage extends LauncherViews {
 				+ (BuildInfo.current().isOfficial() ? "" : " - " + getString(R.string.build_unofficial));
 	}
 
-	/** A small label on Home for a build that is not signed with the project's key; the About page says it too. */
-	private void addBuildBadge(final FrameLayout parent) {
+	private boolean showsBuildBadge() {
 		final String origin = WarsmashApplication.originLabel(this.activity);
-		if (origin.isEmpty()) {
+		return !origin.isEmpty() && !BuildOrigin.DEBUG.equals(origin);
+	}
+
+	/**
+	 * A small label on Home for a build that is not signed with the project's key; the About page says it too. A debug
+	 * build is named in the version line already, so the label would only say it twice.
+	 */
+	private void addBuildBadge(final FrameLayout parent) {
+		if (!showsBuildBadge()) {
 			return;
 		}
+		final String origin = WarsmashApplication.originLabel(this.activity);
 		final LauncherBoard b = this.activity.board;
 		final String notice = BuildOrigin.UNOFFICIAL.equals(origin) ? BuildOrigin.UNOFFICIAL_NOTICE : origin;
 		final TextView badge = text(notice, b.tablet ? 24 : 18, LauncherKit.GOLD);

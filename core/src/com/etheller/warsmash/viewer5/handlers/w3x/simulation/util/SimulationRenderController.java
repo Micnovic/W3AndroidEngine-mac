@@ -128,6 +128,10 @@ public interface SimulationRenderController {
 
 	void changeUnitPlayerColor(CUnit unit, int previousColor, int newColor);
 
+	/** Shows the unit in the team color a script gave it, whatever its owner's color is. */
+	default void setUnitTeamColor(final CUnit unit, final int color) {
+	}
+
 	void changeUnitVertexColor(CUnit unit, Color color);
 
 	void changeUnitVertexColor(CUnit unit, float r, float g, float b);

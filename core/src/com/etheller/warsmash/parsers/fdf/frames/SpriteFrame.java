@@ -22,7 +22,7 @@ import com.hiveworkshop.rms.parsers.mdlx.MdlxExtent;
 
 public class SpriteFrame extends AbstractUIFrame {
 
-	protected final Scene scene;
+	protected Scene scene;
 	protected final Viewport uiViewport;
 	private MdxComplexInstance instance;
 	private float zDepth;
@@ -34,6 +34,11 @@ public class SpriteFrame extends AbstractUIFrame {
 		super(name, parent);
 		this.scene = scene;
 		this.uiViewport = uiViewport;
+	}
+
+	/** The scene the model is drawn in, in place of the interface's; before the model is set. */
+	public void setScene(final Scene scene) {
+		this.scene = scene;
 	}
 
 	public void setModel(final MdxModel model) {

@@ -96,7 +96,7 @@ final class SkinCache {
 	}
 
 	static File iniFile(final Context context) {
-		return new File(context.getExternalFilesDir(null), AndroidLauncher.INI_FILE_NAME);
+		return new File(EngineResources.appFolder(context), AndroidLauncher.INI_FILE_NAME);
 	}
 
 	/** The cache of a skin for the data sources the engine configuration names, or null without a configuration. */

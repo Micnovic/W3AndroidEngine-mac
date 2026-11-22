@@ -275,6 +275,50 @@ public class Geoset {
 				this.skinOffset + this.boneCountOffsetBytes);
 	}
 
+	void bind(final ShaderProgram shader, final MdxLocations at, final int coordId) {
+		attribute(shader, at.position, 3, GL20.GL_FLOAT, false, 0, this.positionOffset);
+		attribute(shader, at.normal, 3, GL20.GL_FLOAT, false, 0, this.normalOffset);
+		attribute(shader, at.uv, 2, GL20.GL_FLOAT, false, 0, this.uvOffset + (coordId * this.vertices * 8));
+		attribute(shader, at.bones, 4, this.openGLSkinType, false, this.skinStride, this.skinOffset);
+		attribute(shader, at.boneNumber, 1, this.openGLSkinType, false, this.skinStride,
+				this.skinOffset + this.boneCountOffsetBytes);
+	}
+
+	void bindExtended(final ShaderProgram shader, final MdxLocations at, final int coordId) {
+		attribute(shader, at.position, 3, GL20.GL_FLOAT, false, 0, this.positionOffset);
+		attribute(shader, at.normal, 3, GL20.GL_FLOAT, false, 0, this.normalOffset);
+		attribute(shader, at.uv, 2, GL20.GL_FLOAT, false, 0, this.uvOffset + (coordId * this.vertices * 8));
+		attribute(shader, at.bones, 4, this.openGLSkinType, false, this.skinStride, this.skinOffset);
+		attribute(shader, at.extendedBones, 4, this.openGLSkinType, false, this.skinStride,
+				this.skinOffset + (this.boneCountOffsetBytes / 2));
+		attribute(shader, at.boneNumber, 1, this.openGLSkinType, false, this.skinStride,
+				this.skinOffset + this.boneCountOffsetBytes);
+	}
+
+	void bindHd(final ShaderProgram shader, final MdxLocations at, final SkinningType skinningType, final int coordId) {
+		attribute(shader, at.position, 3, GL20.GL_FLOAT, false, 0, this.positionOffset);
+		attribute(shader, at.normal, 3, GL20.GL_FLOAT, false, 0, this.normalOffset);
+		attribute(shader, at.uv, 2, GL20.GL_FLOAT, false, 0, this.uvOffset + (coordId * this.vertices * 8));
+		attribute(shader, at.tangent, 4, GL20.GL_FLOAT, false, 0, this.tangentOffset);
+		if (this.wideSkin) {
+			attribute(shader, at.bones, 4, GL20.GL_UNSIGNED_SHORT, false, SetupGeosets.WIDE_SKIN_STRIDE,
+					this.skinOffset);
+			attribute(shader, at.weights, 4, GL20.GL_UNSIGNED_BYTE, true, SetupGeosets.WIDE_SKIN_STRIDE,
+					this.skinOffset + 8);
+		}
+		else {
+			attribute(shader, at.bones, 4, GL20.GL_UNSIGNED_BYTE, false, 8, this.skinOffset);
+			attribute(shader, at.weights, 4, GL20.GL_UNSIGNED_BYTE, true, 8, this.skinOffset + 4);
+		}
+	}
+
+	private static void attribute(final ShaderProgram shader, final int location, final int size, final int type,
+			final boolean normalize, final int stride, final int offset) {
+		if (location != -1) {
+			shader.setVertexAttribute(location, size, type, normalize, stride, offset);
+		}
+	}
+
 	public void bindExtended(final ShaderProgram shader, final int coordId) {
 		// TODO use indices instead of strings for attributes
 		shader.setVertexAttribute("a_position", 3, GL20.GL_FLOAT, false, 0, this.positionOffset);

@@ -266,6 +266,11 @@ final class CUnitAggro {
 				&& !holdsBackOnlyForPassive(self, simulation, source)
 				// Measured on 1.29: a unit holding position stays when it cannot hit back.
 				&& (self.orders.defaultBehavior != self.holdPositionBehavior)) {
+			if ((distance == FLEE_DISTANCE) && simulation.castsSpellsByItself(self.playerIndex)
+					&& !simulation.isNeutralAggressive(self.playerIndex)) {
+				simulation.getHarmfulAreas().runFrom(simulation, self, source);
+				return;
+			}
 			// Measured on 1.29: the run is a real move order (order events fire, the current order is move) to a
 			// point 300 (a critter's 500) straight away from the source whatever the unit's speed; like any move it
 			// ends a little short of the point.
