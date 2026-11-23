@@ -141,6 +141,7 @@ Thumbs.db
 ## data
 /core/data
 /core/assets/Logs
+/desktop/Logs
 /core/assets/Save
 /core/assets/Replay
 /core/assets/texture-cache
@@ -154,3 +155,6 @@ Thumbs.db
 /core/assets/CustomKeys.txt
 ## Texture list the game screen records for the next start
 /core/assets/ui-textures.lst
+
+## Agent and assistant skills
+/skills/
