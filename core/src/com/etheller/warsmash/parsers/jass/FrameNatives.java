@@ -310,7 +310,7 @@ final class FrameNatives implements FrameEventSink {
 			}
 		});
 		add("BlzCreateFrame", (arguments, globalScope, triggerScope) -> {
-			final UIFrame frame = gameUI().createFrame(string(arguments, 0), ownerOrRoot(arguments, 1),
+			final UIFrame frame = gameUI().createScriptFrame(string(arguments, 0), ownerOrRoot(arguments, 1),
 					integer(arguments, 2), integer(arguments, 3));
 			created(frame);
 			return handle(globalScope, frame);
@@ -322,7 +322,7 @@ final class FrameNatives implements FrameEventSink {
 			return handle(globalScope, frame);
 		});
 		add("BlzCreateFrameByType", (arguments, globalScope, triggerScope) -> {
-			final UIFrame frame = gameUI().createFrameByType(string(arguments, 0), string(arguments, 1),
+			final UIFrame frame = gameUI().createScriptFrameByType(string(arguments, 0), string(arguments, 1),
 					ownerOrRoot(arguments, 2), string(arguments, 3), integer(arguments, 4));
 			created(frame);
 			return handle(globalScope, frame);

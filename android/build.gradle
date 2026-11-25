@@ -30,7 +30,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 5067
-        versionName = "0.5.67"
+        versionName = "0.5.67-hotfix1"
         // The ABIs of the libGDX natives below; the project's own small library is built for the same ones.
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
