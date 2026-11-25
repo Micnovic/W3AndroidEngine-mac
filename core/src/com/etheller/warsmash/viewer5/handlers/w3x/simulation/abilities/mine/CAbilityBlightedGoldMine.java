@@ -8,6 +8,7 @@ import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.undead.units.CBuffUnsummoning;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.harvest.CBehaviorAcolyteHarvest;
@@ -21,6 +22,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRend
 
 public class CAbilityBlightedGoldMine extends CAbilityOverlayedMine {
 	public static final int NO_MINER = -1;
+	private static final War3ID UNSUMMON_BUFF_ID = War3ID.fromString("Buns");
+	/** Measured: a Haunted Gold Mine without gold unsummons itself, as with Unsummon Building: half the cost back. */
+	private static final float EMPTY_MINE_SALVAGE_RATIO = 0.5f;
+	private static final float EMPTY_MINE_LIFE_PER_SECOND = 50f;
 	private int goldPerInterval;
 	private float intervalDuration;
 	private int maxNumberOfMiners;
@@ -29,6 +34,7 @@ public class CAbilityBlightedGoldMine extends CAbilityOverlayedMine {
 	private final Vector2[] minerLocs;
 	private int currentActiveMinerCount;
 	private int lastIncomeTick;
+	private boolean mined;
 
 	private final List<SimulationRenderComponent> spellEffects = new ArrayList<>();
 
@@ -79,7 +85,21 @@ public class CAbilityBlightedGoldMine extends CAbilityOverlayedMine {
 
 	@Override
 	public void onTick(final CSimulation game, final CUnit unit) {
-		if (this.currentActiveMinerCount > 0) {
+		final CAbilityGoldMinable emptyCheck = getParentGoldMineAbility();
+		if ((emptyCheck != null) && (emptyCheck.getGold() <= 0) && !unit.isDead()
+				&& (unit.getFirstAbilityOfType(CBuffUnsummoning.class) == null)) {
+			unit.add(game, new CBuffUnsummoning(game.getHandleIdAllocator().createId(), UNSUMMON_BUFF_ID,
+					EMPTY_MINE_SALVAGE_RATIO, EMPTY_MINE_LIFE_PER_SECOND, true));
+		}
+		if (this.currentActiveMinerCount <= 0) {
+			this.mined = false;
+		}
+		else {
+			// Measured: the first payment comes half a second more than an interval after the first miner starts.
+			if (!this.mined) {
+				this.mined = true;
+				this.lastIncomeTick = game.getGameTurnTick() + CTimer.wholeSteps(0.5f);
+			}
 			final float currentInterval = this.intervalDuration
 					* ((float) this.maxNumberOfMiners / this.currentActiveMinerCount);
 			final int nextIncomeTick = this.lastIncomeTick
@@ -90,7 +110,10 @@ public class CAbilityBlightedGoldMine extends CAbilityOverlayedMine {
 			if ((currentTurnTick >= nextIncomeTick) && (parentGoldMineAbility != null) && (totalGoldAvailable > 0)) {
 				this.lastIncomeTick = currentTurnTick;
 				final CPlayer player = game.getPlayer(unit.getPlayerIndex());
-				final int goldGained = Math.min(totalGoldAvailable, this.goldPerInterval);
+				int goldGained = Math.min(totalGoldAvailable, this.goldPerInterval);
+				if (player.getAiScript() != null) {
+					goldGained = player.getAiScript().getController().scaleHarvestedAmount(goldGained);
+				}
 				final int goldReceived = player.addHarvestedGold(game, goldGained);
 				parentGoldMineAbility.setGold(totalGoldAvailable - goldGained);
 				game.unitGainResourceEvent(unit, player.getId(), ResourceType.GOLD, goldReceived);
@@ -166,6 +189,11 @@ public class CAbilityBlightedGoldMine extends CAbilityOverlayedMine {
 
 	@Override
 	public void onCancelFromQueue(final CSimulation game, final CUnit unit, final int playerIndex, final int orderId) {
+	}
+
+	public boolean isEmpty() {
+		final CAbilityGoldMinable parent = getParentGoldMineAbility();
+		return (parent != null) && (parent.getGold() <= 0);
 	}
 
 	public int tryAddMiner(final CUnit acolyte, final CBehaviorAcolyteHarvest behaviorAcolyteHarvest) {

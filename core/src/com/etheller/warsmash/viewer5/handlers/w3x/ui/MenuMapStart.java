@@ -33,6 +33,7 @@ import com.etheller.warsmash.networking.WarsmashClient;
 import com.etheller.warsmash.networking.WarsmashClientSendingOrderListener;
 import com.etheller.warsmash.networking.WarsmashClientWriter;
 import com.etheller.warsmash.parsers.jass.Jass2;
+import com.etheller.warsmash.parsers.lua.LuaMapScript;
 import com.etheller.warsmash.parsers.w3x.War3Map;
 import com.etheller.warsmash.parsers.w3x.objectdata.Warcraft3MapObjectData;
 import com.etheller.warsmash.parsers.w3x.w3i.War3MapW3i;
@@ -83,6 +84,8 @@ final class MenuMapStart {
 	 */
 	static final String CAMPAIGN_GAME_PROPERTY = "warsmash.campaignGame";
 	private static final String MAP_LOAD_ERROR = "";
+	/** The part of the loading bar the game screen's setup takes when no tap comes between. */
+	private static final float SETUP_BAR_SHARE = 0.1f;
 	private final MenuUI menu;
 	/** The map being loaded, for the error when it cannot be. */
 	private String loadingMapFilename;
@@ -422,8 +425,7 @@ final class MenuMapStart {
 						}
 					}
 					// A replay starts at once, as in the original.
-					if (loadingScreen.holdsForTap() && (beginGameInformation.hostInetAddress == null)
-							&& (beginGameInformation.replay == null) && (beginGameInformation.lan == null)) {
+					if (loadingScreen.holdsForTap() && waitsForTap(beginGameInformation)) {
 						loadingScreen.showTapToContinue(deltaTime);
 						return true;
 					}
@@ -507,7 +509,9 @@ final class MenuMapStart {
 					this.menu.hide();
 				}
 				else {
-					loadingScreen.setLoadingProgress(this.loadingMap.activeMapLoader.getCompletionRatio());
+					final float loaded = this.loadingMap.activeMapLoader.getCompletionRatio();
+					loadingScreen.setLoadingProgress(
+							waitsForTap(beginGameInformation) ? loaded : loaded * (1 - SETUP_BAR_SHARE));
 					if (beginGameInformation.lan != null) {
 						beginGameInformation.lan.loadProgress(this.loadingMap.activeMapLoader.getCompletionRatio());
 						loadingScreen.updateLanLoad();
@@ -528,6 +532,15 @@ final class MenuMapStart {
 	}
 
 	/**
+	 * Whether the loaded game waits for a tap before its screen is set up, which the loading bar then fills up to;
+	 * else the bar goes on through the setup, as the game is shown at its end.
+	 */
+	private boolean waitsForTap(final BeginGameInformation beginGameInformation) {
+		return this.menu.loadingScreen.isWaitForTap() && (beginGameInformation.hostInetAddress == null)
+				&& (beginGameInformation.replay == null) && (beginGameInformation.lan == null);
+	}
+
+	/**
 	 * Runs the next setup step of the game loaded, or shows it once they have all run. A step that fails is not
 	 * caught here, as the setup was not when it ran in one frame.
 	 */
@@ -535,6 +548,10 @@ final class MenuMapStart {
 		final WarsmashGdxMapScreen starting = this.startingScreen;
 		if (!starting.isSetUp()) {
 			starting.setUpNext();
+			if (!waitsForTap(this.menu.beginGameInformation)) {
+				this.menu.loadingScreen
+						.setLoadingProgress((1 - SETUP_BAR_SHARE) + (SETUP_BAR_SHARE * starting.getSetupRatio()));
+			}
 			return;
 		}
 		final WarsmashClient warsmashClient = this.startingClient;
@@ -847,7 +864,7 @@ final class MenuMapStart {
 	}
 
 	static void requireJassScript(final War3Map map, final String mapFilename) throws IOException {
-		if (!map.hasJassScript()) {
+		if (!map.hasJassScript() && !(LuaMapScript.isEnabled() && map.hasLuaScript())) {
 			throw new MapIssueException(map.hasLuaScript() ? MapIssue.LUA : MapIssue.NO_SCRIPT, mapFilename);
 		}
 	}

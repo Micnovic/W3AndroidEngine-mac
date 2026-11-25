@@ -117,6 +117,7 @@ public final class TouchInputRouter {
 		if (router != null) {
 			router.drain();
 		}
+		CapturedMouse.drain();
 	}
 
 	public void post(final PointerEvent event) {

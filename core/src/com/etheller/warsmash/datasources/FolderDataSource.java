@@ -245,6 +245,12 @@ public class FolderDataSource implements DataSource {
 	}
 
 	@Override
+	public File fileOnDisk(final String filepath) {
+		final String storedPath = findStoredPath(filepath);
+		return storedPath == null ? null : this.folderPath.resolve(storedPath).toFile();
+	}
+
+	@Override
 	public File getFile(String filepath) throws IOException {
 		final String storedPath = findStoredPath(filepath);
 		if (storedPath == null) {
@@ -303,6 +309,32 @@ public class FolderDataSource implements DataSource {
 	 * (or whose key happens to hash to it), which is looked up the long way.
 	 */
 	private static int asciiKeyHash(final String filepath) {
+		final KeyHash last = lastKeyHash;
+		if ((last != null) && (last.path == filepath)) {
+			return last.hash;
+		}
+		final int hash = computeAsciiKeyHash(filepath);
+		lastKeyHash = new KeyHash(filepath, hash);
+		return hash;
+	}
+
+	/**
+	 * The hash worked out last, on any thread: the game data asks each of its folders for the same path in turn. It
+	 * does not change, so another thread's one does no harm; it is used only for the very same path.
+	 */
+	private static KeyHash lastKeyHash;
+
+	private static final class KeyHash {
+		final String path;
+		final int hash;
+
+		KeyHash(final String path, final int hash) {
+			this.path = path;
+			this.hash = hash;
+		}
+	}
+
+	private static int computeAsciiKeyHash(final String filepath) {
 		int hash = 0;
 		final int length = filepath.length();
 		for (int i = 0; i < length; i++) {

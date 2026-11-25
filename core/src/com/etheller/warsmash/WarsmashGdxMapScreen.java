@@ -257,6 +257,37 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen, TouchTarget
 		return this.setupStep >= SETUP_STEPS;
 	}
 
+	/**
+	 * The part of the setup done, for the loading bar: each step by about the part of a setup it takes (the opening
+	 * steps most, then the interface's main and the script's load).
+	 */
+	public float getSetupRatio() {
+		float done = 0;
+		for (int step = 0; step < this.setupStep; step++) {
+			done += setupStepWeight(step);
+		}
+		if (this.setupStep == (SETUP_STEPS - 1)) {
+			done += setupStepWeight(this.setupStep) * this.viewer.getFirstFrameRatio();
+		}
+		return Math.min(1, done / 100);
+	}
+
+	/** The part of a setup, in percent, the step takes, as measured on a campaign map. */
+	private static float setupStepWeight(final int step) {
+		switch (step) {
+		case 1:
+			return 20;
+		case 3:
+			return 10;
+		case 5:
+			return 8;
+		case 6:
+			return 56;
+		default:
+			return 2;
+		}
+	}
+
 	/** Whether every setup step has run and {@link #show()} only switches to the game. */
 	public boolean isSetUp() {
 		return this.setupStep >= SETUP_STEPS;
