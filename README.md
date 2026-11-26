@@ -229,6 +229,8 @@ The libGDX native libraries for each ABI are unpacked into `android/libs` by the
 ./gradlew desktop:runGame -Pargs="-window -ini warsmash.local.ini"
 ```
 
+On macOS the desktop module ships a local `ShaderProgram` copy that rewrites legacy GLSL for OpenGL 3.3 Core. It was copied from libGDX **1.14.2** (`gdx-1.14.2-sources.jar`, matching `gdxVersion` in `build.gradle`); when upgrading libGDX, refresh it from the corresponding sources jar and reapply the macOS adaptation.
+
 ## Tests
 
 Engine unit tests ([JUnit](https://junit.org/)) run on the host:

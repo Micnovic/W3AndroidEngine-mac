@@ -25,12 +25,10 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 
 /**
- * Local override of libGDX's LWJGL natives loader. The engine links LWJGL 2 from the
- * Legacy Fabric rebuild ("2.9.4+legacyfabric.18"), which names its native libraries per
- * architecture ("liblwjgl-macos-aarch64.dylib", "OpenAL-amd64.dll", ...) so Apple Silicon
- * Macs are supported natively. The stock loader only knows the old x86_64-era names, so
- * this one resolves the per-arch names and falls back to the stock ones when a natives
- * jar does not contain them.
+ * Local override of libGDX's LWJGL natives loader. On macOS, the engine links LWJGL 2 from
+ * the Legacy Fabric rebuild ("2.9.4+legacyfabric.18"), which names its native libraries per
+ * architecture ("liblwjgl-macos-aarch64.dylib", ...) so Apple Silicon Macs are supported
+ * natively. On Windows and Linux, the stock libGDX 1.14.2 loader logic is used unchanged.
  */
 public final class LwjglNativesLoader {
 	static public boolean load = true;
@@ -95,27 +93,47 @@ public final class LwjglNativesLoader {
 		final SharedLibraryLoader loader = new SharedLibraryLoader();
 		File nativesDir = null;
 		try {
-			final String arch = lwjglArchName();
-			final boolean is64 = bitness == Architecture.Bitness._64;
-			String[] lwjglLibs = null;
-			String[] openalLibs = null;
-			switch (os) {
-			case Windows:
-				lwjglLibs = new String[] {"lwjgl-windows-" + arch + ".dll", is64 ? "lwjgl64.dll" : "lwjgl.dll"};
-				openalLibs = new String[] {"OpenAL-" + arch + ".dll", is64 ? "OpenAL64.dll" : "OpenAL32.dll"};
-				break;
-			case MacOsX:
-				lwjglLibs = new String[] {"liblwjgl-macos-" + arch + ".dylib", "liblwjgl.dylib"};
-				openalLibs = new String[] {"libopenal-" + arch + ".dylib", "openal.dylib"};
-				break;
-			case Linux:
-				lwjglLibs = new String[] {"liblwjgl-linux-" + arch + ".so", is64 ? "liblwjgl64.so" : "liblwjgl.so"};
-				openalLibs = new String[] {"libopenal-" + arch + ".so", is64 ? "libopenal64.so" : "libopenal.so"};
-				break;
+			if (os == Os.MacOsX) {
+				// Warsmash macOS adaptation: Legacy Fabric natives include per-arch names.
+				final String arch = lwjglArchName();
+				final String[] lwjglLibs = new String[] {"liblwjgl-macos-" + arch + ".dylib", "liblwjgl.dylib"};
+				final String[] openalLibs = new String[] {"libopenal-" + arch + ".dylib", "openal.dylib"};
+				nativesDir = extractFirst(loader, lwjglLibs).getParentFile();
+				if (!LwjglApplicationConfiguration.disableAudio) extractFirstTo(loader, openalLibs, nativesDir);
+			} else {
+				// Windows/Linux: stock libGDX 1.14.2 loader logic, unchanged.
+				String lwjglLib = null;
+				String openalLib = null;
+				switch (os) {
+				case Windows:
+					switch (bitness) {
+					case _32:
+						lwjglLib = "lwjgl.dll";
+						openalLib = "OpenAL32.dll";
+						break;
+					case _64:
+						lwjglLib = "lwjgl64.dll";
+						openalLib = "OpenAL64.dll";
+						break;
+					}
+					break;
+				case Linux:
+					switch (bitness) {
+					case _32:
+						lwjglLib = "liblwjgl.so";
+						openalLib = "libopenal.so";
+						break;
+					case _64:
+						lwjglLib = "liblwjgl64.so";
+						openalLib = "libopenal64.so";
+						break;
+					}
+					break;
+				}
+				if (lwjglLib == null) throw new GdxRuntimeException("Unknown LWJGL platform: " + os + ", " + bitness);
+				nativesDir = loader.extractFile(lwjglLib, null).getParentFile();
+				if (!LwjglApplicationConfiguration.disableAudio) loader.extractFileTo(openalLib, nativesDir);
 			}
-			if (lwjglLibs == null) throw new GdxRuntimeException("Unknown LWJGL platform: " + os + ", " + bitness);
-			nativesDir = extractFirst(loader, lwjglLibs).getParentFile();
-			if (!LwjglApplicationConfiguration.disableAudio) extractFirstTo(loader, openalLibs, nativesDir);
 		} catch (Throwable ex) {
 			throw new GdxRuntimeException("Unable to extract LWJGL natives.", ex);
 		}

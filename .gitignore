@@ -155,6 +155,3 @@ Thumbs.db
 /core/assets/CustomKeys.txt
 ## Texture list the game screen records for the next start
 /core/assets/ui-textures.lst
-
-## Agent and assistant skills
-/skills/

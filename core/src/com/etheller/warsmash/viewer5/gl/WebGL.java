@@ -119,13 +119,12 @@ public class WebGL {
 		else {
 			vertexSrc = vertexSrc.replace("mediump", "");
 			fragmentSrc = fragmentSrc.replace("mediump", "");
-			
-			// Adapt desktop shaders for macOS Core Profile (GLSL 330 core)
+
+			// Adapt desktop shaders for macOS Core Profile (GLSL 330 core). The local copy of
+			// libGDX's ShaderProgram handles shaders that bypass this wrapper.
 			if (System.getProperty("os.name").toLowerCase().contains("mac")) {
 				vertexSrc = adaptToDesktopCoreProfile(vertexSrc, true);
 				fragmentSrc = adaptToDesktopCoreProfile(fragmentSrc, false);
-				System.out.println("--- ADAPTED VERTEX SHADER ---\n" + vertexSrc);
-				System.out.println("--- ADAPTED FRAGMENT SHADER ---\n" + fragmentSrc);
 			}
 		}
 		final Map<Integer, ShaderProgram> shaderPrograms = this.shaderPrograms;
@@ -176,7 +175,7 @@ public class WebGL {
 		if (versionMatcher.find()) {
 			body = source.substring(versionMatcher.end());
 		}
-		
+
 		// Replace attribute with in (vertex) or remove/replace if needed
 		if (isVertex) {
 			body = body.replaceAll("\\battribute\\s+", "in ");
@@ -187,7 +186,7 @@ public class WebGL {
 		} else {
 			body = body.replaceAll("\\bvarying\\s+", "in ");
 		}
-		
+
 		// Add out vec4 FragColor for fragment shaders if gl_FragColor is used
 		if (!isVertex && body.contains("gl_FragColor")) {
 			header += "out vec4 g_fragColor;\n";

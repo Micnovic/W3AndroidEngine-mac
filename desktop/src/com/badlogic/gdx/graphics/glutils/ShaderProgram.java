@@ -14,6 +14,12 @@
  * limitations under the License.
  ******************************************************************************/
 
+/**
+ * Local copy of libGDX 1.14.2's com.badlogic.gdx.graphics.glutils.ShaderProgram, taken from
+ * gdx-1.14.2-sources.jar (build.gradle's gdxVersion is 1.14.2). The macOS-only Core Profile
+ * adaptation below is the sole local change; when upgrading libGDX, refresh this file from the
+ * matching sources jar and reapply that adaptation.
+ */
 package com.badlogic.gdx.graphics.glutils;
 
 import java.util.regex.Matcher;
