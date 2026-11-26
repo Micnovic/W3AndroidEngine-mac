@@ -229,7 +229,7 @@ The libGDX native libraries for each ABI are unpacked into `android/libs` by the
 ./gradlew desktop:runGame -Pargs="-window -ini warsmash.local.ini"
 ```
 
-On macOS the desktop module ships a local `ShaderProgram` copy that rewrites legacy GLSL for OpenGL 3.3 Core. It was copied from libGDX **1.14.2** (`gdx-1.14.2-sources.jar`, matching `gdxVersion` in `build.gradle`); when upgrading libGDX, refresh it from the corresponding sources jar and reapply the macOS adaptation.
+On macOS the desktop runtime installs `DesktopShaderAdapter`, which uses libGDX's `ShaderProgram.prependVertexCode`/`prependFragmentCode` hooks (available in libGDX 1.14.2, the version used here) to add a GLSL 330 core compatibility header to every shader, including libGDX's own SpriteBatch shaders. `WebGL` strips an existing `#version` line first so the hook supplies the only one. No libGDX class is copied, and on other operating systems nothing is installed.
 
 ## Tests
 
